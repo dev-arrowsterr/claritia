@@ -9,10 +9,13 @@ import { join } from "node:path";
 import { unzipSync, zipSync } from "fflate";
 import pw from "playwright-core";
 import type { Browser, BrowserContext, Locator, Page } from "playwright-core";
-import { parseLock, type Action, type Arg, type Call } from "../src/lib/lock.ts";
+import { buildLock, lockSections, parseLock, type Action, type Arg, type Call } from "../src/lib/lock.ts";
+import type { Writer } from "./writer.ts";
 
 export type StepStatus = "running" | "passed" | "failed" | "skipped";
-export type StepUpdate = { position: number; status: StepStatus; retried?: boolean; startedMs?: number; durationMs?: number; error?: string | null; screenshot?: string };
+export type StepUpdate = { position: number; status: StepStatus; retried?: boolean; startedMs?: number; durationMs?: number; error?: string | null; screenshot?: string; written?: boolean; code?: string };
+/** A step as the test has it now. `label` is how its step comment reads in the lock. */
+export type RunStep = { position: number; kind: "do" | "check" | "use"; label: string; intent: string };
 export type RunInput = {
   baseUrl: string;
   lock: string;
@@ -26,9 +29,28 @@ export type RunInput = {
   actionTimeoutMs?: number;
   expectTimeoutMs?: number;
   runTimeoutMs?: number;
+  /** With a writer, steps that have no code are written by AI during the run. */
+  writer?: Writer;
+  testName?: string;
+  steps?: RunStep[];
+  /** How often to send a live frame of the page while the run goes, in ms. */
+  frameMs?: number;
 };
-export type RunResult = { status: "passed" | "failed" | "error"; error: string | null; durationMs: number; video: string | null; traces: string[]; consoleFile: string | null };
-export type Hooks = { step: (u: StepUpdate) => Promise<void> };
+export type RunResult = {
+  status: "passed" | "failed" | "error";
+  error: string | null;
+  durationMs: number;
+  video: string | null;
+  traces: string[];
+  consoleFile: string | null;
+  /** The test's code with the steps written in this run added, when any were. */
+  lock: string | null;
+  ai: { calls: number; input: number; output: number };
+};
+export type Hooks = { step: (u: StepUpdate) => Promise<void>; frame?: (jpeg: Buffer) => Promise<void> };
+
+const MAX_WRITES_PER_STEP = 5;
+const same = (a: string, b: string) => a.replace(/\s+/g, " ").trim().toLowerCase() === b.replace(/\s+/g, " ").trim().toLowerCase();
 
 const VIEWPORT = { width: 1280, height: 720 };
 
@@ -96,7 +118,7 @@ export async function scrubTrace(path: string, secrets: Record<string, string>) 
 
 /** The useful part of a Playwright error: its first lines, without the long call log. */
 function shortError(e: unknown) {
-  const text = e instanceof Error ? e.message : String(e);
+  const text = (e instanceof Error ? e.message : String(e)).replace(/\x1b\[[0-9;]*m/g, "");
   const lines = text.split("\n").filter((l) => l.trim() && !/^\s*-\s/.test(l) && !/Call log:/i.test(l));
   return lines.slice(0, 3).join(" ").replace(/\s+/g, " ").slice(0, 600);
 }
@@ -109,13 +131,18 @@ export async function executeRun(input: RunInput, hooks: Hooks): Promise<RunResu
   const expectTimeout = input.expectTimeoutMs ?? 5_000;
   const runTimeout = input.runTimeoutMs ?? 5 * 60_000;
   const mask = (t: string) => maskSecrets(t, input.secrets);
-  const result = (status: RunResult["status"], error: string | null, extra: Partial<RunResult> = {}): RunResult => ({ status, error: error && mask(error), durationMs: Date.now() - started, video: null, traces: [], consoleFile: null, ...extra });
+  const ai = { calls: 0, input: 0, output: 0 };
+  const result = (status: RunResult["status"], error: string | null, extra: Partial<RunResult> = {}): RunResult => ({ status, error: error && mask(error), durationMs: Date.now() - started, video: null, traces: [], consoleFile: null, lock: null, ai, ...extra });
 
-  const parsed = parseLock(input.lock);
+  const writer = input.writer;
+  const parsed = parseLock(input.lock.trim() ? input.lock : "test('x', async ({ page }) => {});");
   if (!parsed.ok) return result("error", `The test's code has a problem on line ${parsed.errors[0]!.line}: ${parsed.errors[0]!.message}`);
   const missing = parsed.secrets.filter((s) => !(s in input.secrets));
   if (missing.length) return result("error", `Add ${missing.join(", ")} to this environment in Settings.`);
-  if (!parsed.actionCount) return result("error", "This test has no Playwright code yet.");
+  if (!parsed.actionCount && !writer) return result("error", "This test has no Playwright code yet.");
+  const sections = lockSections(input.lock);
+  const writtenLines = new Map<number, string[]>();
+  const stepInfo = (position: number) => input.steps?.find((s) => s.position === position);
 
   await mkdir(input.dir, { recursive: true });
   const videoDir = join(input.dir, "video");
@@ -309,7 +336,116 @@ export async function executeRun(input: RunInput, hooks: Hooks): Promise<RunResu
     throw new Error(`Unknown check ${a.matcher}.`);
   };
 
+  // What the writer sees: the address, the accessibility tree, the form fields and a screenshot. Secrets are hidden.
+  const pageSnapshot = async (p: Page) => {
+    const snapshot = await p
+      .locator("body")
+      .ariaSnapshot({ timeout: 3000 })
+      .catch(() => "");
+    const fields = await p
+      .evaluate(() => {
+        const out: string[] = [];
+        const els = Array.from(document.querySelectorAll("input, textarea, select, button, [role=button], a[href]")).slice(0, 150);
+        for (const el of els) {
+          const h = el as HTMLInputElement;
+          if (h.type === "hidden") continue;
+          const r = el.getBoundingClientRect();
+          const style = getComputedStyle(el);
+          const visible = r.width > 1 && r.height > 1 && style.visibility !== "hidden" && style.display !== "none" && Number(style.opacity) > 0.05;
+          const labels = h.labels ? Array.from(h.labels).map((l) => (l.textContent ?? "").trim().replace(/\s+/g, " ")) : [];
+          const text = (el.textContent ?? "").trim().replace(/\s+/g, " ").slice(0, 60);
+          if (el.tagName === "A" && !visible) continue;
+          const bits = [
+            el.tagName.toLowerCase() + (h.type && el.tagName === "INPUT" ? `[type=${h.type}]` : ""),
+            h.id ? `#${h.id}` : "",
+            h.name ? `name="${h.name}"` : "",
+            labels.length ? `label="${labels.join(" | ").slice(0, 80)}"` : "",
+            el.getAttribute("aria-label") ? `aria-label="${el.getAttribute("aria-label")}"` : "",
+            h.placeholder ? `placeholder="${h.placeholder}"` : "",
+            el.tagName !== "INPUT" && text ? `text="${text}"` : "",
+            h.type === "checkbox" || h.type === "radio" ? (h.checked ? "checked" : "unchecked") : "",
+            h.required ? "required" : "",
+            visible ? "" : "hidden",
+          ];
+          out.push(bits.filter(Boolean).join(" "));
+        }
+        return out.join("\n");
+      })
+      .catch(() => "");
+    const shot = await p.screenshot({ type: "jpeg", quality: 60 }).catch(() => null);
+    return { url: p.url(), title: await p.title().catch(() => ""), snapshot: mask(snapshot).slice(0, 15000), fields: mask(fields).slice(0, 8000), screenshot: shot ? shot.toString("base64") : null };
+  };
+
+  // One line of code, read with the same rules as the Code tab. Returns the action or why it can't run.
+  const readLine = (line: string, kind: RunStep["kind"]): { action: Action } | { problem: string } => {
+    const one = parseLock(buildLock("x", [{ label: "x", lines: [line] }]));
+    if (!one.ok) return { problem: `${line} → ${one.errors[0]!.message}` };
+    const actions = one.steps[0]!.actions;
+    if (actions.length !== 1) return { problem: `${line} → write one statement per line.` };
+    const missingSecret = one.secrets.find((n) => !(n in input.secrets));
+    if (missingSecret) return { problem: `${line} → there's no secret named ${missingSecret}. Use one of: ${Object.keys(input.secrets).join(", ") || "none"}.` };
+    const a = actions[0]!;
+    if (kind === "check" && !(a.type === "expect" || (a.type === "page" && (a.method === "waitForURL" || a.method === "waitForLoadState")))) return { problem: `${line} → a check step only checks. Use expect lines.` };
+    return { action: a };
+  };
+
+  // Write a step with AI: ask for lines, check them, run them one by one, and ask again with the error or the new page.
+  const writeStep = async (p: Page, info: RunStep): Promise<{ lines: string[]; error: string | null }> => {
+    const done: string[] = [];
+    let lastError: string | null = null;
+    for (let round = 0; round < MAX_WRITES_PER_STEP; round++) {
+      // Let the page settle after the last lines, so the writer sees where they led.
+      if (round > 0) {
+        await p.waitForLoadState("load", { timeout: 5000 }).catch(() => undefined);
+        await sleep(700);
+      }
+      const snap = await pageSnapshot(p);
+      let reply;
+      try {
+        reply = await writer!({
+          testName: input.testName ?? parsed.name,
+          steps: (input.steps ?? []).map((s) => ({ position: s.position, kind: s.kind, intent: s.intent })),
+          position: info.position,
+          ...snap,
+          secretNames: Object.keys(input.secrets),
+          done: [...done],
+          error: lastError && mask(lastError),
+        });
+      } catch (e) {
+        return { lines: done, error: e instanceof Error ? e.message : String(e) };
+      }
+      ai.calls++;
+      ai.input += reply.usage.input;
+      ai.output += reply.usage.output;
+      if (!reply.lines.length) {
+        if (reply.done && !reply.problem && done.length) return { lines: done, error: null };
+        if (reply.problem) return { lines: done, error: reply.problem };
+        lastError = "You returned no lines. Write the lines for this step.";
+        continue;
+      }
+      lastError = null;
+      for (const line of reply.lines) {
+        const read = readLine(line, info.kind);
+        if ("problem" in read) {
+          lastError = read.problem;
+          break;
+        }
+        try {
+          await perform(p, read.action);
+          done.push(line);
+        } catch (e) {
+          lastError = `${line} → ${blocked.size ? `Claritia blocked ${[...blocked].join(", ")} because it points to a private network address.` : shortError(e)}`;
+          break;
+        }
+      }
+      if (blocked.size) return { lines: done, error: `Claritia blocked ${[...blocked].join(", ")} because it points to a private network address.` };
+      if (!lastError && reply.done) return { lines: done, error: null };
+    }
+    return { lines: done, error: lastError ? `Claritia couldn't write this step. Last try: ${lastError}` : "Claritia couldn't finish this step." };
+  };
+
   let timerHandle: ReturnType<typeof setTimeout> | undefined;
+  let frameTimer: ReturnType<typeof setInterval> | undefined;
   const timer = new Promise<"timeout">((r) => (timerHandle = setTimeout(() => r("timeout"), runTimeout)));
 
   const body = async (): Promise<{ status: "passed" | "failed"; error: string | null }> => {
@@ -333,15 +469,50 @@ export async function executeRun(input: RunInput, hooks: Hooks): Promise<RunResu
     page.on("console", (m) => consoleLines.push({ ms: Date.now() - pageStart, type: m.type(), text: mask(m.text()).slice(0, 2000) }));
     page.on("pageerror", (e) => consoleLines.push({ ms: Date.now() - pageStart, type: "pageerror", text: mask(e.message).slice(0, 2000) }));
 
+    // Live frames, so people can watch the run as it goes.
+    const livePage = page;
+    let frameBusy = false;
+    if (hooks.frame) {
+      frameTimer = setInterval(() => {
+        if (frameBusy) return;
+        frameBusy = true;
+        livePage
+          .screenshot({ type: "jpeg", quality: 55, timeout: 2000 })
+          .then((jpeg) => hooks.frame!(jpeg))
+          .catch(() => undefined)
+          .finally(() => (frameBusy = false));
+      }, input.frameMs ?? 1500);
+    }
+
     let failed: string | null = null;
     for (const position of input.positions) {
       if (failed) {
         await hooks.step({ position, status: "skipped" });
         continue;
       }
-      const step = parsed.steps.find((s) => s.number === position);
+      const info = stepInfo(position);
+      let step = parsed.steps.find((s) => s.number === position);
+      // With a writer, code written for a step whose words have since changed is written again.
+      if (writer && step && info && !same(step.label, info.label)) step = undefined;
       if (!step || !step.actions.length) {
-        await hooks.step({ position, status: "skipped", error: "No code for this step yet." });
+        if (!writer || !info) {
+          await hooks.step({ position, status: "skipped", error: "No code for this step yet." });
+          continue;
+        }
+        const startedMs = Date.now() - pageStart;
+        await hooks.step({ position, status: "running", startedMs, written: true });
+        const w = await writeStep(page, info);
+        const shot = join(input.dir, `step-${position}.jpg`);
+        await page.screenshot({ path: shot, type: "jpeg", quality: 70 }).catch(() => undefined);
+        const durationMs = Date.now() - pageStart - startedMs;
+        const code = w.lines.join("\n");
+        if (w.error) {
+          failed = mask(w.error);
+          await hooks.step({ position, status: "failed", startedMs, durationMs, error: failed, screenshot: shot, written: true, code });
+        } else {
+          writtenLines.set(position, w.lines);
+          await hooks.step({ position, status: "passed", startedMs, durationMs, error: null, screenshot: shot, written: true, code });
+        }
         continue;
       }
       const startedMs = Date.now() - pageStart;
@@ -367,9 +538,9 @@ export async function executeRun(input: RunInput, hooks: Hooks): Promise<RunResu
       const durationMs = Date.now() - pageStart - startedMs;
       if (error) {
         failed = mask(error);
-        await hooks.step({ position, status: "failed", retried, startedMs, durationMs, error: failed, screenshot: shot });
+        await hooks.step({ position, status: "failed", retried, startedMs, durationMs, error: failed, screenshot: shot, code: sections.get(position)?.join("\n") });
       } else {
-        await hooks.step({ position, status: "passed", retried, startedMs, durationMs, error: null, screenshot: shot });
+        await hooks.step({ position, status: "passed", retried, startedMs, durationMs, error: null, screenshot: shot, code: sections.get(position)?.join("\n") });
       }
     }
     return failed ? { status: "failed", error: failed } : { status: "passed", error: null };
@@ -383,6 +554,7 @@ export async function executeRun(input: RunInput, hooks: Hooks): Promise<RunResu
     outcome = { status: "error", error: shortError(e) };
   } finally {
     clearTimeout(timerHandle);
+    clearInterval(frameTimer);
   }
 
   // Save what we have, even after an error.
@@ -408,5 +580,12 @@ export async function executeRun(input: RunInput, hooks: Hooks): Promise<RunResu
   }
   const consoleFile = join(input.dir, "console.json");
   await writeFile(consoleFile, JSON.stringify(consoleLines));
-  return result(outcome.status, outcome.error, { video, traces, consoleFile });
+
+  // The test's code with the newly written steps in it. Steps keep their old code unless they were written now.
+  let lock: string | null = null;
+  if (writtenLines.size && input.steps?.length) {
+    const next = buildLock(input.testName ?? parsed.name, input.steps.map((s) => ({ label: s.label, lines: writtenLines.get(s.position) ?? (same(sections.size ? (parsed.steps.find((x) => x.number === s.position)?.label ?? "") : "", s.label) ? (sections.get(s.position) ?? []) : []) })));
+    if (parseLock(next).ok) lock = next;
+  }
+  return result(outcome.status, outcome.error, { video, traces, consoleFile, lock });
 }

@@ -313,3 +313,30 @@ function readArg(node: ts.Expression, secrets: Set<string>): Arg {
 export function firstError(p: ParsedLock) {
   return p.ok ? "" : `Line ${p.errors[0]!.line}: ${p.errors[0]!.message}`;
 }
+
+/** The code lines under each step comment, as written, keyed by step number. */
+export function lockSections(code: string): Map<number, string[]> {
+  const out = new Map<number, string[]>();
+  let current: number | null = null;
+  const lines = code.split("\n");
+  let end = lines.length;
+  while (end > 0 && !/^\s*\}\s*\)\s*;?\s*$/.test(lines[end - 1]!)) end--;
+  end = end > 0 ? end - 1 : -1;
+  for (const [i, raw] of lines.entries()) {
+    if (end >= 0 && i >= end) break;
+    const hit = STEP_COMMENT.exec(raw.trim());
+    if (hit) {
+      current = Number(hit[1]);
+      out.set(current, []);
+      continue;
+    }
+    if (current !== null && raw.trim()) out.get(current)!.push(raw.trim());
+  }
+  return out;
+}
+
+/** Write a lock from its steps: a step comment for each, then its code lines. */
+export function buildLock(name: string, steps: { label: string; lines: string[] }[]) {
+  const body = steps.flatMap((s, i) => [`  // step ${i + 1}: ${s.label.replace(/\n/g, " ").replace(/\*\//g, "* /")}`, ...s.lines.map((l) => `  ${l}`)]);
+  return [`import { test, expect } from '@playwright/test';`, ``, `test(${JSON.stringify(name)}, async ({ page }) => {`, ...body, `});`, ``].join("\n");
+}

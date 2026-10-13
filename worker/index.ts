@@ -2,12 +2,14 @@
 // writes step results as they happen, and uploads the video, trace, screenshots and console to storage.
 //   node worker/index.ts
 // Needs SUPABASE_URL, SUPABASE_SECRET_KEY and SECRETS_KEY. Answers health checks on PORT.
+// With ANTHROPIC_API_KEY it writes code for steps that have none (CLAUDE_MODEL and CLAUDE_EFFORT are optional).
 
 import { randomUUID } from "node:crypto";
 import { createServer } from "node:http";
 import { hostname } from "node:os";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { handleRun, type Run } from "./handle.ts";
+import { claudeWriter, type Writer } from "./writer.ts";
 
 const env = (k: string) => process.env[k]?.trim() ?? "";
 const SLOTS = Math.max(1, Math.min(8, Number(env("WORKER_SLOTS") || 2)));
@@ -24,15 +26,19 @@ const busy = new Set<string>();
 // Health checks: Render needs a port to know the service is up.
 createServer((req, res) => {
   res.writeHead(200, { "content-type": "application/json" });
-  res.end(JSON.stringify({ ok: !missing.length, missing, worker: WORKER_ID, slots: SLOTS, running: busy.size }));
+  res.end(JSON.stringify({ ok: !missing.length, missing, writer: !!env("ANTHROPIC_API_KEY"), worker: WORKER_ID, slots: SLOTS, running: busy.size }));
 }).listen(Number(env("PORT") || 10000));
 
 if (missing.length) {
   log(`Waiting: add ${missing.join(", ")} to this service's environment.`);
 } else {
   const sb = createClient(env("SUPABASE_URL").replace(/\/+$/, ""), env("SUPABASE_SECRET_KEY"), { auth: { persistSession: false, autoRefreshToken: false } });
-  log(`Runner ${WORKER_ID} started with ${SLOTS} slots.`);
-  for (let i = 0; i < SLOTS; i++) void slot(sb, i);
+  const effort = env("CLAUDE_EFFORT");
+  const writer = env("ANTHROPIC_API_KEY")
+    ? claudeWriter({ apiKey: env("ANTHROPIC_API_KEY"), model: env("CLAUDE_MODEL") || undefined, effort: effort === "low" || effort === "high" ? effort : "medium" })
+    : undefined;
+  log(`Runner ${WORKER_ID} started with ${SLOTS} slots${writer ? "" : ". No ANTHROPIC_API_KEY, so steps with no code can't be written"}.`);
+  for (let i = 0; i < SLOTS; i++) void slot(sb, i, writer);
 
   // On shutdown, hand running runs back to the queue so another runner picks them up right away.
   const shutdown = async () => {
@@ -46,7 +52,7 @@ if (missing.length) {
   process.on("SIGINT", shutdown);
 }
 
-async function slot(sb: SupabaseClient, n: number) {
+async function slot(sb: SupabaseClient, n: number, writer: Writer | undefined) {
   while (!stopping) {
     try {
       const { data, error } = await sb.rpc("claim_run", { p_worker: WORKER_ID });
@@ -58,7 +64,7 @@ async function slot(sb: SupabaseClient, n: number) {
       }
       busy.add(run.id);
       try {
-        await handleRun(sb, run, { workerId: WORKER_ID, chromiumPath: env("CHROMIUM_PATH") || undefined, log });
+        await handleRun(sb, run, { workerId: WORKER_ID, chromiumPath: env("CHROMIUM_PATH") || undefined, log, writer });
       } finally {
         busy.delete(run.id);
       }

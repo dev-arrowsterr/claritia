@@ -29,7 +29,7 @@ insert into env_secret_values (secret_id, sealed) values
   ('a3000000-0000-0000-0000-000000000000', 'v1:acme-sealed'),
   ('c3000000-0000-0000-0000-000000000000', 'v1:cat-sealed');
 insert into blocks (id, project_id, workspace_id, name, steps) values
-  ('a4000000-0000-0000-0000-000000000000', 'a1000000-0000-0000-0000-000000000000', '11111111-0000-0000-0000-000000000000', 'acme-sign-in', '[{"id":"s1","kind":"do","text":"Sign in"}]'),
+  ('a4000000-0000-0000-0000-000000000000', 'a1000000-0000-0000-0000-000000000000', '11111111-0000-0000-0000-000000000000', 'acme-sign-in', '[{"id":"s1","kind":"do","text":"Sign in"},{"id":"s2","kind":"check","text":"The dashboard shows"}]'),
   ('c4000000-0000-0000-0000-000000000000', 'c1000000-0000-0000-0000-000000000000', '22222222-0000-0000-0000-000000000000', 'cat-sign-in', '[]');
 insert into tests (id, project_id, workspace_id, name, steps) values
   ('a5000000-0000-0000-0000-000000000000', 'a1000000-0000-0000-0000-000000000000', '11111111-0000-0000-0000-000000000000', 'acme-checkout', '[{"id":"s1","kind":"do","text":"Add a hoodie"}]'),
@@ -121,10 +121,9 @@ update tests set steps = steps where id = 'a5000000-0000-0000-0000-000000000000'
 select pg_temp.check((select count(*) from test_versions) = 2, 'Saving with no change made a new version');
 -- Runs
 select pg_temp.check(not exists (select 1 from runs) and not exists (select 1 from run_steps), 'Ben sees Cat''s runs');
-select pg_temp.fails($$select start_run('a5000000-0000-0000-0000-000000000000', 'a2000000-0000-0000-0000-000000000000')$$, 'Ben starts a run of a test with no code');
-reset role;
-update tests set lock = 'test(''x'', async ({ page }) => {});' where id = 'a5000000-0000-0000-0000-000000000000';
-set role authenticated;
+insert into tests (id, project_id, name, steps) values ('a6000000-0000-0000-0000-000000000000', 'a1000000-0000-0000-0000-000000000000', 'acme-empty', '[]');
+select pg_temp.fails($$select start_run('a6000000-0000-0000-0000-000000000000', 'a2000000-0000-0000-0000-000000000000')$$, 'Ben starts a run of a test with no steps');
+select pg_temp.fails($$select save_written_lock(id, 'test(''x'', async ({ page }) => {});') from runs$$, 'Ben saves code as if the runner wrote it');
 select pg_temp.fails($$select start_run('c5000000-0000-0000-0000-000000000000', 'c2000000-0000-0000-0000-000000000000')$$, 'Ben runs Cat''s test');
 select pg_temp.fails($$select start_run('a5000000-0000-0000-0000-000000000000', 'c2000000-0000-0000-0000-000000000000')$$, 'Ben runs his test against Cat''s environment');
 select pg_temp.fails($$select start_run('a5000000-0000-0000-0000-000000000000', 'a2000000-0000-0000-0000-000000000000', 'schedule')$$, 'Ben starts a run pretending to be the scheduler');
@@ -132,6 +131,10 @@ select pg_temp.check(start_run('a5000000-0000-0000-0000-000000000000', 'a2000000
 select pg_temp.check((select count(*) from run_steps) = 3, 'A new run doesn''t get one row per step');
 select pg_temp.check((select label from run_steps where position = 3) = 'Use acme-sign-in', 'A block step is labeled wrong');
 select pg_temp.check((select label from run_steps where position = 2) = 'Check: The cart shows 1 item', 'A check step is labeled wrong');
+select pg_temp.check((select intent from run_steps where position = 1) = 'Add a hoodie' and (select intent from run_steps where position = 2) = 'The cart shows 1 item', 'A step''s intent is wrong');
+select pg_temp.check((select intent from run_steps where position = 3) = E'Sign in\nCheck: The dashboard shows', 'A block step''s intent doesn''t list the block''s steps');
+select pg_temp.check((select lock from runs) = '', 'A run of a test with no code doesn''t start with empty code');
+select pg_temp.fails($$select save_written_lock(id, 'test(''x'', async ({ page }) => {});') from runs$$, 'Ben saves code as if the runner wrote it');
 select pg_temp.check((select created_by from runs) = 'b0000000-0000-0000-0000-000000000000' and (select status from runs) = 'queued', 'A new run has the wrong owner or status');
 select pg_temp.fails($$update runs set status = 'passed'$$, 'Ben marks his own run as passed');
 select pg_temp.fails($$update run_steps set status = 'passed'$$, 'Ben marks a step as passed');
@@ -183,6 +186,14 @@ select pg_temp.check((select test_name from claim_run('w1')) = 'acme-checkout', 
 select pg_temp.check((select count(*) from runs where status = 'running') = 1, 'Claiming didn''t mark the run as running');
 update runs set locked_at = now() - interval '11 minutes' where status = 'running';
 select pg_temp.check((select attempts from claim_run('w2')) = 2, 'A run from a quiet runner wasn''t taken again');
+
+-- The runner saves the code it wrote, only while the test is as the run found it.
+select pg_temp.check(save_written_lock((select id from runs where status = 'running'), 'test(''acme-checkout'', async ({ page }) => {});'), 'The runner couldn''t save code it wrote');
+select pg_temp.check((select lock from tests where id = 'a5000000-0000-0000-0000-000000000000') like 'test(''acme-checkout''%', 'Saved code didn''t reach the test');
+select pg_temp.check((select author_email from test_versions where test_id = 'a5000000-0000-0000-0000-000000000000' order by version desc limit 1) = 'Claritia', 'A version saved by the runner isn''t marked as Claritia''s');
+select pg_temp.check((select lock_saved from runs where status = 'running'), 'The run doesn''t say its code was saved');
+select pg_temp.check(not save_written_lock((select id from runs where status = 'queued' order by created_at limit 1), 'test(''stale'', async ({ page }) => {});'), 'A run of an older version overwrote newer code');
+select pg_temp.check((select lock from tests where id = 'a5000000-0000-0000-0000-000000000000') not like '%stale%', 'Stale code reached the test');
 
 -- Values are kept, and deleting a secret's name deletes its value.
 select pg_temp.check((select count(*) from env_secret_values) = 3, 'Sealed values went missing');

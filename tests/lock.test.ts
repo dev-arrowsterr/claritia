@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { firstError, parseLock } from "../src/lib/lock.ts";
+import { firstError, parseLock, lockSections, buildLock } from "../src/lib/lock.ts";
 import { lockOutline } from "../src/lib/testfile.ts";
 
 const wrap = (body: string) => `import { test, expect } from '@playwright/test';\n\ntest('Checkout', async ({ page }) => {\n${body}\n});\n`;
@@ -93,4 +93,34 @@ test("syntax errors come back with a line number", () => {
   assert.ok(!p.ok);
   assert.equal(p.errors[0]!.line, 5);
   assert.match(firstError(p), /^Line 5: /);
+});
+
+test("lockSections reads each step's lines, and buildLock writes them back", () => {
+  const code = `import { test, expect } from '@playwright/test';
+
+test('Contact', async ({ page }) => {
+  // step 1: Open the page
+  await page.goto('/contact');
+  // step 2: Fill the form
+  await page.getByLabel('Name').fill('Sam');
+
+  await page.getByRole('button', { name: 'Send' }).click();
+  // step 3: check: It says thanks
+});
+`;
+  const sections = lockSections(code);
+  assert.deepEqual(sections.get(1), ["await page.goto('/contact');"]);
+  assert.deepEqual(sections.get(2), ["await page.getByLabel('Name').fill('Sam');", "await page.getByRole('button', { name: 'Send' }).click();"]);
+  assert.deepEqual(sections.get(3), []);
+  const rebuilt = buildLock("Contact", [
+    { label: "Open the page", lines: sections.get(1)! },
+    { label: "Fill the form", lines: sections.get(2)! },
+    { label: "check: It says thanks", lines: ["await expect(page.getByText('Thanks')).toBeVisible();"] },
+  ]);
+  const parsed = parseLock(rebuilt);
+  assert.ok(parsed.ok);
+  assert.equal(parsed.ok && parsed.actionCount, 4);
+  assert.equal(parsed.ok && parsed.steps[2]!.label, "check: It says thanks");
+  // A label can't end the comment early or break the line.
+  assert.ok(parseLock(buildLock("x", [{ label: "a\nawait page.evaluate(() => 1)", lines: [] }])).ok);
 });

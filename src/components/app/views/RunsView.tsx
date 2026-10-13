@@ -23,12 +23,15 @@ type RunRow = {
   trace_paths: string[];
   console_path: string | null;
   attempts: number;
+  live_path: string | null;
+  ai_calls: number;
+  lock_saved: boolean;
 };
-type StepRow = { id: string; position: number; kind: string; label: string; status: StepStatus; retried: boolean; started_ms: number | null; duration_ms: number | null; error: string | null; screenshot_path: string | null };
+type StepRow = { id: string; position: number; kind: string; label: string; status: StepStatus; retried: boolean; started_ms: number | null; duration_ms: number | null; error: string | null; screenshot_path: string | null; written: boolean; code: string | null };
 type ConsoleLine = { ms: number; type: string; text: string };
 
 const LIVE = new Set<RunStatus>(["queued", "running"]);
-const RUN_COLUMNS = "id, test_id, test_name, test_version, environment_id, environment_name, base_url, trigger, status, error, created_at, started_at, finished_at, duration_ms, video_path, trace_paths, console_path, attempts";
+const RUN_COLUMNS = "id, test_id, test_name, test_version, environment_id, environment_name, base_url, trigger, status, error, created_at, started_at, finished_at, duration_ms, video_path, trace_paths, console_path, attempts, live_path, ai_calls, lock_saved";
 
 /** Load again every few seconds while `live` is true. */
 function usePoll(live: boolean, ms: number, tick: () => void) {
@@ -125,10 +128,11 @@ function RunDetail({ sb, session, id, navigate }: ViewProps) {
   const [tab, setTab] = useState<"screenshots" | "console" | "trace">("screenshots");
   const [error, setError] = useState("");
   const [again, setAgain] = useState(false);
+  const [lastFrame, setLastFrame] = useState("");
   const video = useRef<HTMLVideoElement>(null);
 
   const load = () => {
-    Promise.all([sb.from("runs").select(RUN_COLUMNS).eq("id", id).maybeSingle(), sb.from("run_steps").select("id, position, kind, label, status, retried, started_ms, duration_ms, error, screenshot_path").eq("run_id", id).order("position")]).then(([r, s]) => {
+    Promise.all([sb.from("runs").select(RUN_COLUMNS).eq("id", id).maybeSingle(), sb.from("run_steps").select("id, position, kind, label, status, retried, started_ms, duration_ms, error, screenshot_path, written, code").eq("run_id", id).order("position")]).then(([r, s]) => {
       if (r.error || s.error) return setError((r.error ?? s.error)!.message);
       if (!r.data) return setError("This run was deleted or isn't in this workspace.");
       setRun(r.data as RunRow);
@@ -139,7 +143,7 @@ function RunDetail({ sb, session, id, navigate }: ViewProps) {
   usePoll(!!run && LIVE.has(run.status), 1500, load);
 
   // Files are private: get short-lived links for the ones this run has.
-  const paths = useMemo(() => (run ? [run.video_path, run.console_path, ...run.trace_paths, ...steps.map((s) => s.screenshot_path)].filter((p): p is string => !!p) : []), [run, steps]);
+  const paths = useMemo(() => (run ? [run.video_path, run.console_path, run.live_path, ...run.trace_paths, ...steps.map((s) => s.screenshot_path)].filter((p): p is string => !!p) : []), [run, steps]);
   const missing = paths.filter((p) => !urls[p]).join("|");
   useEffect(() => {
     if (!missing) return;
@@ -194,6 +198,8 @@ function RunDetail({ sb, session, id, navigate }: ViewProps) {
   const done = steps.filter((s) => s.status === "passed" || s.status === "failed").length;
   const live = LIVE.has(run.status);
   const videoUrl = run.video_path ? urls[run.video_path] : undefined;
+  // While the run goes, show the newest live frame, and keep the last one on screen until the next is signed.
+  const liveUrl = live && run.live_path ? urls[run.live_path] : undefined;
 
   return (
     <Page
@@ -232,6 +238,8 @@ function RunDetail({ sb, session, id, navigate }: ViewProps) {
           <span className="text-[12px] text-muted">
             {run.environment_name} · {hostOf(run.base_url)} · v{run.test_version} · {duration(run.duration_ms)} · {timeAgo(run.created_at)}
             {run.attempts > 1 ? ` · runner try ${run.attempts}` : ""}
+            {run.ai_calls ? ` · ${run.ai_calls} AI ${run.ai_calls === 1 ? "call" : "calls"}` : ""}
+            {run.lock_saved ? " · code saved to test" : ""}
           </span>
         </Panel>
         {run.error ? <ErrorNote message={run.error} /> : null}
@@ -246,10 +254,12 @@ function RunDetail({ sb, session, id, navigate }: ViewProps) {
                   <button type="button" onClick={() => seek(s.started_ms)} disabled={s.started_ms == null || !videoUrl} className={`flex w-full items-center gap-3 px-4 py-3 text-left ${s.started_ms != null && videoUrl ? "hover:bg-hover" : "cursor-default"} ${s.status === "failed" ? "bg-danger-soft/40" : ""}`}>
                     <span className="w-5 shrink-0 font-mono text-[11px] text-faint">{s.position}</span>
                     <span className="min-w-0 flex-1 truncate text-[13px] font-medium">{s.label || "(empty step)"}</span>
+                    {s.written ? <Badge tone="violet">{s.status === "running" ? "Writing" : "Written"}</Badge> : null}
                     {s.retried ? <Badge tone="amber">Retried</Badge> : null}
                     <StatusTag status={s.status} />
                     <span className="hidden w-12 shrink-0 text-right font-mono text-[11px] text-faint sm:inline">{s.duration_ms != null ? duration(s.duration_ms) : ""}</span>
                   </button>
+                  {s.code ? <pre className="overflow-x-auto border-t border-line px-4 py-2 pl-12 font-mono text-[11.5px] leading-relaxed text-muted">{s.code}</pre> : null}
                   {s.error ? <p className="border-t border-line px-4 py-2 pl-12 font-mono text-[11.5px] leading-relaxed break-words text-danger">{s.error}</p> : null}
                 </li>
               ))}
@@ -261,8 +271,16 @@ function RunDetail({ sb, session, id, navigate }: ViewProps) {
             <div className="frame overflow-hidden border border-line bg-ink">
               {videoUrl ? (
                 <video ref={video} src={videoUrl} controls playsInline className="block aspect-video w-full bg-ink" />
+              ) : live && (liveUrl || lastFrame) ? (
+                <div className="relative">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={liveUrl || lastFrame} alt="The page right now" onLoad={(e) => setLastFrame(e.currentTarget.src)} className="block aspect-video w-full bg-ink object-contain" />
+                  <span className="absolute top-3 left-3">
+                    <Badge tone="red">Live</Badge>
+                  </span>
+                </div>
               ) : (
-                <div className="flex aspect-video items-center justify-center px-6 text-center text-[13px] text-white/60">{live ? "The video shows up when the run ends." : "No video for this run."}</div>
+                <div className="flex aspect-video items-center justify-center px-6 text-center text-[13px] text-white/60">{run.status === "queued" ? "Waiting for a runner" : live ? "Starting the browser" : "No video for this run."}</div>
               )}
             </div>
           </div>

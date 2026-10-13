@@ -2,8 +2,8 @@ import { firstError, parseLock } from "@/lib/lock";
 import { requireUser } from "@/lib/serverAuth";
 
 /**
- * Start a run of a test's saved code. Checks the code and the secrets it needs first, so problems
- * show up here with a plain message, not as a failed run.
+ * Start a run of a test. Steps with no code are written by the runner during the run.
+ * Checks the saved code and the secrets it needs first, so problems show up here with a plain message, not as a failed run.
  */
 export async function POST(request: Request) {
   const auth = await requireUser(request);
@@ -12,7 +12,7 @@ export async function POST(request: Request) {
   const body = (await request.json().catch(() => ({}))) as { testId?: unknown; environmentId?: unknown };
   if (typeof body.testId !== "string") return Response.json({ error: "Missing test." }, { status: 400 });
 
-  const { data: test, error } = await sb.from("tests").select("id, project_id, lock").eq("id", body.testId).maybeSingle();
+  const { data: test, error } = await sb.from("tests").select("id, project_id, steps, lock").eq("id", body.testId).maybeSingle();
   if (error) return Response.json({ error: error.message }, { status: 500 });
   if (!test) return Response.json({ error: "Test not found." }, { status: 404 });
 
@@ -22,8 +22,8 @@ export async function POST(request: Request) {
   const env = envs?.[0];
   if (!env) return Response.json({ error: "Add an environment to this project in Settings first." }, { status: 400 });
 
-  const parsed = parseLock(test.lock ?? "");
-  if (!test.lock || (parsed.ok && !parsed.actionCount)) return Response.json({ error: "This test has no Playwright code yet. Write it in the Code tab." }, { status: 400 });
+  if (!Array.isArray(test.steps) || !test.steps.length) return Response.json({ error: "Add a step first." }, { status: 400 });
+  const parsed = parseLock(test.lock?.trim() ? test.lock : "test('x', async ({ page }) => {});");
   if (!parsed.ok) return Response.json({ error: `Fix the code first. ${firstError(parsed)}` }, { status: 400 });
 
   if (parsed.secrets.length) {

@@ -243,7 +243,7 @@ export function TestView({ sb, session, project, id, navigate }: ViewProps) {
           {envs.length > 1 ? (
             <Select value={envId} options={envs.map((e) => ({ value: e.id, label: e.name }))} onChange={setEnvId} ariaLabel="Environment" className="hidden h-8 rounded-md border border-line bg-panel px-2.5 text-[13px] hover:border-line-strong sm:inline-flex" />
           ) : null}
-          <Button variant="ghost" onClick={run} disabled={dirty || starting || !saved.lock} title={dirty ? "Save first" : !saved.lock ? "Add Playwright code in the Code tab first" : undefined}>
+          <Button variant="ghost" onClick={run} disabled={dirty || starting || !saved.steps.length} title={dirty ? "Save first" : !saved.steps.length ? "Add a step first" : undefined}>
             <Play size={13} />
             {starting ? "Starting…" : "Run"}
           </Button>
