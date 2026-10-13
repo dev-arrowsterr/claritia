@@ -1,0 +1,314 @@
+@import "tailwindcss";
+
+@theme {
+  /* Geist for reading, Geist Mono for labels and numbers */
+  --font-sans: "Geist", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+
+  /* Ink black with warm grays */
+  --color-ink: #0c0c0b;
+  --color-body: #4a4a46;
+  --color-muted: #6f6f6b;
+  --color-faint: #a3a39e;
+
+  /* White paper and hairlines */
+  --color-panel: #ffffff;
+  --color-canvas: #fafafa;
+  --color-side: #fafafa;
+  --color-hover: #f3f3f1;
+  --color-line: #eaeaea;
+  --color-line-strong: #dadad6;
+
+  /* Accent blue for highlights, fire orange for the one thing to click */
+  --color-brand: #266df0;
+  --color-brand-hover: #1c58c9;
+  --color-brand-soft: #ebf1fe;
+  --color-brand-pale: #f4f7ff;
+  --color-brand-line: #c8d8fb;
+  --color-fire: #ff5a1f;
+
+  /* Status: text on its soft fill */
+  --color-success: #007d53;
+  --color-success-soft: #e0fced;
+  --color-warning: #a34a00;
+  --color-warning-soft: #fff1e0;
+  --color-danger: #c4161c;
+  --color-danger-soft: #ffe9e9;
+  --color-violet: #5b3cc4;
+  --color-violet-soft: #efeafd;
+
+  /* Square corners */
+  --radius-sm: 3px;
+  --radius: 4px;
+  --radius-md: 6px;
+  --radius-lg: 6px;
+  --radius-xl: 8px;
+  --radius-2xl: 10px;
+
+  /* Flat: hairlines do the work, a real shadow only for things that float */
+  --shadow-xs: 0 1px 1px rgb(12 12 11 / 0.04);
+  --shadow-card: 0 0 0 1px #eaeaea;
+  --shadow-pop: 0 0 0 1px rgb(12 12 11 / 0.08), 0 24px 48px -16px rgb(12 12 11 / 0.18), 0 8px 16px -8px rgb(12 12 11 / 0.08);
+}
+
+html,
+body {
+  background: var(--color-canvas);
+  color: var(--color-ink);
+  font-size: 14px;
+  letter-spacing: -0.006em;
+  font-variant-numeric: tabular-nums;
+}
+
+@layer base {
+  h1,
+  h2,
+  h3 {
+    font-weight: 500;
+    letter-spacing: -0.02em;
+  }
+}
+
+::selection {
+  background: var(--color-brand-soft);
+}
+
+@layer base {
+  :focus-visible {
+    outline: 2px solid var(--color-brand);
+    outline-offset: 2px;
+  }
+}
+
+/* Small labels: section headers and table headers. Mono, capitals, wide spacing. */
+@layer components {
+.label-mono {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: var(--color-muted);
+}
+}
+
+/* A "// note" label for figure captions */
+@layer components {
+.fig {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  color: var(--color-faint);
+}
+}
+
+/* Numbers in tables and meters */
+.num {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+/* A dot grid for empty states and hero areas */
+.dot-grid {
+  background-image: radial-gradient(circle, rgb(12 12 11 / 0.16) 1px, transparent 1px);
+  background-size: 18px 18px;
+  mask-image: radial-gradient(ellipse 60% 55% at 50% 50%, black 0%, transparent 75%);
+}
+
+/* A faint dot grid behind working pages */
+.paper {
+  background-color: var(--color-canvas);
+  background-image: radial-gradient(circle, rgb(12 12 11 / 0.07) 1px, transparent 1px);
+  background-size: 16px 16px;
+}
+
+@layer components {
+/* Crosshair marks on the corners of a framed block */
+.frame {
+  position: relative;
+}
+.frame::before,
+.frame::after {
+  content: "";
+  position: absolute;
+  z-index: 1;
+  width: 10px;
+  height: 10px;
+  pointer-events: none;
+  background:
+    linear-gradient(rgb(74 74 70 / 0.45), rgb(74 74 70 / 0.45)) center / 1px 100% no-repeat,
+    linear-gradient(rgb(74 74 70 / 0.45), rgb(74 74 70 / 0.45)) center / 100% 1px no-repeat;
+}
+.frame::before {
+  top: -5px;
+  left: -5px;
+}
+.frame::after {
+  bottom: -5px;
+  right: -5px;
+}
+}
+
+/* A hairline with small ticks at each end */
+.ticks {
+  position: relative;
+  height: 1px;
+  background: var(--color-line);
+}
+.ticks::before,
+.ticks::after {
+  content: "";
+  position: absolute;
+  top: -3px;
+  width: 1px;
+  height: 7px;
+  background: var(--color-line-strong);
+}
+.ticks::before {
+  left: 0;
+}
+.ticks::after {
+  right: 0;
+}
+
+/* Thin scrollbars */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #dadad6 transparent;
+}
+
+/* Legal pages */
+.legal h2 {
+  margin: 2.25rem 0 0.75rem;
+  font-size: 1.15rem;
+  font-weight: 500;
+}
+.legal p,
+.legal li {
+  font-size: 15px;
+  line-height: 1.7;
+  color: #4a4a46;
+}
+.legal p {
+  margin: 0 0 0.9rem;
+}
+.legal ul {
+  margin: 0 0 1rem;
+  padding-left: 1.25rem;
+  list-style: disc;
+}
+.legal li {
+  margin-bottom: 0.4rem;
+}
+.legal a {
+  color: var(--color-brand);
+  text-decoration: underline;
+}
+.legal code {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  background: var(--color-canvas);
+  padding: 1px 5px;
+  border-radius: 3px;
+}
+.legal table {
+  width: 100%;
+  margin: 0 0 1.25rem;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+.legal th,
+.legal td {
+  border: 1px solid var(--color-line);
+  padding: 8px 10px;
+  text-align: left;
+  vertical-align: top;
+}
+.legal th {
+  background: var(--color-canvas);
+  font-weight: 500;
+}
+
+/* Marketing site */
+.mk-dots {
+  background-image: radial-gradient(rgb(255 255 255 / 0.09) 1px, transparent 1px);
+  background-size: 20px 20px;
+}
+.mk-fade {
+  animation: mk-fade 0.7s ease-out both;
+}
+@keyframes mk-fade {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+}
+.mk-pulse {
+  animation: mk-pulse 2s ease-in-out infinite;
+}
+@keyframes mk-pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .mk-fade,
+  .mk-pulse {
+    animation: none;
+  }
+}
+
+/* A card's header bar: a black dot, then a mono label in capitals */
+@layer components {
+.card-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 40px;
+  padding: 0 16px;
+  border-bottom: 1px solid var(--color-line);
+  background: var(--color-canvas);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: var(--color-muted);
+}
+.card-head::before {
+  content: "";
+  flex-shrink: 0;
+  width: 6px;
+  height: 6px;
+  border-radius: 9999px;
+  background: var(--color-ink);
+}
+}
+
+@layer components {
+  /* A section header: a black dot, then a label in capitals */
+  .section-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 11px;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.14em;
+    color: var(--color-muted);
+  }
+  .section-head::before {
+    content: "";
+    flex-shrink: 0;
+    width: 6px;
+    height: 6px;
+    border-radius: 9999px;
+    background: var(--color-ink);
+  }
+}
+
+input[type="checkbox"],
+input[type="radio"] {
+  accent-color: var(--color-ink);
+}
