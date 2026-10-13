@@ -1,0 +1,207 @@
+"use client";
+
+import type { Session } from "@supabase/supabase-js";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { getSupabase, type SupaConfig } from "@/lib/supa";
+import { ListIcon, LogOut, Play, Settings } from "../Icons";
+import { Logo } from "../Logo";
+import { AuthScreen } from "./AuthScreen";
+import { askText, DialogHost } from "./Dialogs";
+import { Select } from "./Select";
+import { Avatar, ErrorNote, errorText, must, type Project, type Role, type Route, type ViewProps, type Workspace } from "./ui";
+import { RunsView } from "./views/RunsView";
+import { SettingsView } from "./views/SettingsView";
+import { TestsView } from "./views/TestsView";
+
+const NAV: { route: Route; label: string; icon: React.ReactNode }[] = [
+  { route: "tests", label: "Tests", icon: <ListIcon size={15} /> },
+  { route: "runs", label: "Runs", icon: <Play size={15} /> },
+  { route: "settings", label: "Settings", icon: <Settings size={15} /> },
+];
+
+const PROJECT_KEY = "claritia:project";
+const NEW_PROJECT = "__new";
+
+const readRoute = (): Route => {
+  const first = window.location.pathname.split("/")[1] ?? "";
+  return NAV.some((n) => n.route === first) ? (first as Route) : "tests";
+};
+
+function remember(id: string) {
+  try {
+    localStorage.setItem(PROJECT_KEY, id);
+  } catch {}
+}
+
+function recall() {
+  try {
+    return localStorage.getItem(PROJECT_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function Splash() {
+  return (
+    <main className="flex min-h-screen items-center justify-center">
+      <span className="animate-pulse">
+        <Logo compact />
+      </span>
+    </main>
+  );
+}
+
+export function ClientApp({ config }: { config: SupaConfig }) {
+  const sb = useMemo(() => getSupabase(config), [config]);
+  const [session, setSession] = useState<Session | null | undefined>(undefined);
+  const [ws, setWs] = useState<Workspace | null>(null);
+  const [role, setRole] = useState<Role>("member");
+  const [projects, setProjects] = useState<Project[] | null>(null);
+  const [projectId, setProjectId] = useState<string | null>(null);
+  const [route, setRoute] = useState<Route>("tests");
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    sb.auth.getSession().then(({ data }) => setSession(data.session));
+    const { data } = sb.auth.onAuthStateChange((_event, s) => setSession(s));
+    return () => data.subscription.unsubscribe();
+  }, [sb]);
+
+  useEffect(() => {
+    const sync = () => setRoute(readRoute());
+    sync();
+    window.addEventListener("popstate", sync);
+    return () => window.removeEventListener("popstate", sync);
+  }, []);
+
+  const userId = session?.user.id;
+
+  // Your workspace, made on first sign-in.
+  useEffect(() => {
+    if (!userId) return;
+    (async () => {
+      const id = must(await sb.rpc("ensure_workspace")) as string;
+      const w = must(await sb.from("workspaces").select("id, name").eq("id", id).single()) as Workspace;
+      const m = must(await sb.from("workspace_members").select("role").eq("workspace_id", id).eq("user_id", userId).single()) as { role: Role };
+      setWs(w);
+      setRole(m.role);
+    })().catch((e) => setError(errorText(e)));
+  }, [sb, userId]);
+
+  // Your projects, and which one is open: the one asked for, the last one you used, or the first.
+  const loadProjects = useCallback(
+    (select?: string) => {
+      if (!ws) return;
+      sb.from("projects")
+        .select("id, name, workspace_id, created_at")
+        .eq("workspace_id", ws.id)
+        .order("created_at")
+        .then((res) => {
+          if (res.error) return setError(res.error.message);
+          const list = res.data as Project[];
+          const want = select ?? recall();
+          const pick = list.find((p) => p.id === want) ?? list[0] ?? null;
+          setProjects(list);
+          setProjectId(pick?.id ?? null);
+          if (pick) remember(pick.id);
+        });
+    },
+    [sb, ws],
+  );
+
+  useEffect(() => loadProjects(), [loadProjects]);
+
+  const navigate = useCallback((r: Route) => {
+    window.history.pushState(null, "", `/${r}`);
+    setRoute(r);
+  }, []);
+
+  async function newProject() {
+    if (!ws) return;
+    const name = await askText("New project", { placeholder: "My app", ok: "Create" });
+    if (!name) return;
+    try {
+      const p = must(await sb.from("projects").insert({ workspace_id: ws.id, name }).select("id").single()) as { id: string };
+      loadProjects(p.id);
+      navigate("tests");
+    } catch (e) {
+      setError(errorText(e));
+    }
+  }
+
+  if (session === undefined) return <Splash />;
+  if (!session) return <AuthScreen sb={sb} />;
+  if (error && !ws)
+    return (
+      <main className="flex min-h-screen items-center justify-center px-4">
+        <div className="w-full max-w-md space-y-4 border border-line bg-panel p-7">
+          <Logo />
+          <ErrorNote message={error} />
+        </div>
+      </main>
+    );
+  if (!ws || projects === null) return <Splash />;
+
+  const project = projects.find((p) => p.id === projectId) ?? null;
+  const props: ViewProps = { sb, session, ws, role, project, projectsChanged: loadProjects, navigate };
+  const email = session.user.email ?? "";
+  const options = [...projects.map((p) => ({ value: p.id, label: p.name })), { value: NEW_PROJECT, label: "New project…" }];
+  const pickProject = (v: string) => {
+    if (v === NEW_PROJECT) return void newProject();
+    setProjectId(v);
+    remember(v);
+  };
+
+  const navLinks = NAV.map((n) => (
+    <a
+      key={n.route}
+      href={`/${n.route}`}
+      onClick={(e) => {
+        e.preventDefault();
+        navigate(n.route);
+      }}
+      aria-current={route === n.route ? "page" : undefined}
+      className={`flex h-8 items-center gap-2.5 rounded-md px-2.5 text-[13px] font-medium ${route === n.route ? "bg-panel text-ink ring-1 ring-line" : "text-body hover:bg-hover hover:text-ink"}`}
+    >
+      <span className={route === n.route ? "text-ink" : "text-muted"}>{n.icon}</span>
+      {n.label}
+    </a>
+  ));
+
+  return (
+    <div className="flex h-screen min-h-0 flex-col bg-canvas md:flex-row">
+      <DialogHost />
+      {/* Sidebar on wide screens, a top bar on phones */}
+      <aside className="flex shrink-0 flex-col gap-3 border-b border-line bg-side p-3 md:h-full md:w-60 md:border-r md:border-b-0">
+        <div className="flex items-center justify-between gap-2 px-1">
+          <Logo />
+          <span className="truncate font-mono text-[10px] tracking-[0.08em] text-faint uppercase">{ws.name}</span>
+        </div>
+        <Select
+          value={project?.id ?? ""}
+          options={options}
+          onChange={pickProject}
+          ariaLabel="Project"
+          placeholder="No project yet"
+          className="h-9 w-full rounded-md border border-line bg-panel px-2.5 text-[13px] font-medium hover:border-line-strong"
+        />
+        <nav className="flex gap-1 md:flex-col">{navLinks}</nav>
+        <div className="mt-auto hidden items-center gap-2 border-t border-line px-1 pt-3 md:flex">
+          <Avatar label={email} />
+          <span className="min-w-0 flex-1 truncate text-[12.5px] text-body">{email}</span>
+          <button type="button" aria-label="Sign out" title="Sign out" onClick={() => sb.auth.signOut()} className="rounded-md p-1.5 text-muted hover:bg-hover hover:text-ink">
+            <LogOut size={14} />
+          </button>
+        </div>
+      </aside>
+      <main className="min-h-0 min-w-0 flex-1">
+        {error ? (
+          <div className="border-b border-line bg-panel p-3">
+            <ErrorNote message={error} />
+          </div>
+        ) : null}
+        {route === "tests" ? <TestsView {...props} /> : route === "runs" ? <RunsView {...props} /> : <SettingsView {...props} />}
+      </main>
+    </div>
+  );
+}

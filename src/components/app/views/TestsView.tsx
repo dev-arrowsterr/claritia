@@ -1,0 +1,130 @@
+"use client";
+
+import { useState } from "react";
+import { Globe, Key, ListIcon, Play } from "../../Icons";
+import { announceChange, Button, Empty, ErrorNote, errorText, Field, hostOf, Input, Loading, must, Page, postJson, cleanUrl, useLoad, type Environment, type ViewProps } from "../ui";
+
+/** The first screen: a site address and a test login. Makes the project and its staging environment. */
+function StartScreen({ sb, session, ws, project, projectsChanged }: ViewProps) {
+  const [name, setName] = useState(project?.name ?? "");
+  const [url, setUrl] = useState("");
+  const [loginEmail, setLoginEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  async function start(e: React.FormEvent) {
+    e.preventDefault();
+    const base = cleanUrl(url);
+    if (!base) return setError("Enter your site's address, like staging.acme.com.");
+    setBusy(true);
+    setError("");
+    try {
+      const projectId =
+        project?.id ?? (must(await sb.from("projects").insert({ workspace_id: ws.id, name: name.trim() || hostOf(base) }).select("id").single()) as { id: string }).id;
+      const env = must(await sb.from("environments").insert({ project_id: projectId, name: "staging", base_url: base }).select("id").single()) as { id: string };
+      const secrets: [string, string][] = [
+        ["LOGIN_EMAIL", loginEmail.trim()],
+        ["LOGIN_PASSWORD", password],
+      ];
+      for (const [key, value] of secrets) {
+        if (value) await postJson(session, "/api/secrets", { environmentId: env.id, name: key, value });
+      }
+      projectsChanged(projectId);
+      announceChange();
+    } catch (err) {
+      setError(errorText(err));
+      setBusy(false);
+    }
+  }
+
+  const features = [
+    { icon: <ListIcon size={16} />, title: "Describe", text: "Write a user flow the way you'd explain it to a new teammate." },
+    { icon: <Play size={16} />, title: "Run", text: "Claritia drives a real browser and saves the video, screenshots and logs." },
+    { icon: <Key size={16} />, title: "Heal", text: "When your UI changes, Claritia proposes the fix and waits for your yes." },
+  ];
+
+  return (
+    <Page icon={<ListIcon size={14} />} title="Tests">
+      <section className="mx-auto flex max-w-5xl flex-col gap-7 py-4">
+        <div className="flex flex-col gap-4">
+          <p className="fig">{"// fig. 00 — start here"}</p>
+          <h2 className="max-w-3xl text-[32px] leading-[1.1] font-medium tracking-[-0.03em]">Test your app in plain English.</h2>
+          <p className="max-w-2xl text-[15px] leading-relaxed text-body">Add the site you want to test. If it needs a login, add a test account too. The password is sealed before it&apos;s saved.</p>
+        </div>
+        <form onSubmit={start} className="frame grid max-w-2xl gap-4 border border-line bg-panel p-5 sm:grid-cols-2">
+          {project ? null : (
+            <div className="sm:col-span-2">
+              <Field label="Project name">
+                <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Storefront" maxLength={80} />
+              </Field>
+            </div>
+          )}
+          <div className="sm:col-span-2">
+            <Field label="Site address">
+              <Input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="staging.acme.com" required autoFocus inputMode="url" />
+            </Field>
+          </div>
+          <Field label="Test login email">
+            <Input value={loginEmail} onChange={(e) => setLoginEmail(e.target.value)} placeholder="qa@acme.com" autoComplete="off" />
+          </Field>
+          <Field label="Test login password">
+            <Input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="••••••••" autoComplete="new-password" />
+          </Field>
+          <div className="flex items-center gap-3 sm:col-span-2">
+            <Button type="submit" disabled={busy}>
+              {busy ? "Saving…" : project ? "Save" : "Create project"}
+            </Button>
+          </div>
+          {error ? (
+            <div className="sm:col-span-2">
+              <ErrorNote message={error} />
+            </div>
+          ) : null}
+        </form>
+        <div className="grid gap-5 sm:grid-cols-3">
+          {features.map((f, i) => (
+            <div key={f.title} className="flex flex-col border border-line bg-panel">
+              <p className="fig border-b border-line bg-canvas px-4 py-2.5">{`// fig. ${String(i + 1).padStart(2, "0")}`}</p>
+              <div className="flex flex-1 flex-col gap-2 p-5">
+                <span className="text-muted">{f.icon}</span>
+                <h3 className="text-[15px] font-medium">{f.title}</h3>
+                <p className="text-[13.5px] leading-relaxed text-body">{f.text}</p>
+              </div>
+            </div>
+          ))}
+        </div>
+      </section>
+    </Page>
+  );
+}
+
+export function TestsView(props: ViewProps) {
+  const { sb, project } = props;
+  const envs = useLoad(
+    async () => (project ? (must(await sb.from("environments").select("id, project_id, name, base_url, created_at").eq("project_id", project.id).order("created_at")) as Environment[]) : []),
+    project?.id ?? "none",
+  );
+
+  if (!project) return <StartScreen {...props} />;
+  if (envs.error)
+    return (
+      <Page icon={<ListIcon size={14} />} title="Tests">
+        <ErrorNote message={envs.error} />
+      </Page>
+    );
+  if (!envs.data) return <Loading />;
+  if (!envs.data.length) return <StartScreen {...props} />;
+
+  const main = envs.data[0]!;
+  return (
+    <Page icon={<ListIcon size={14} />} title="Tests" count={0}>
+      <Empty icon={<ListIcon size={16} />} title="Your tests will show up here.">
+        <span className="inline-flex items-center gap-1.5">
+          <Globe size={13} />
+          {main.name} · {hostOf(main.base_url)}
+        </span>
+      </Empty>
+    </Page>
+  );
+}

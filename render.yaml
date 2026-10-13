@@ -1,4 +1,4 @@
-# Render Blueprint: the marketing site. Render → New → Blueprint → pick this repo.
+# Render Blueprint: the site and the app. Render → New → Blueprint → pick this repo.
 services:
   - type: web
     name: claritia
@@ -9,3 +9,11 @@ services:
     envVars:
       - key: NODE_VERSION
         value: "22"
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_PUBLISHABLE_KEY
+        sync: false
+      - key: SUPABASE_SECRET_KEY
+        sync: false
+      - key: SECRETS_KEY
+        generateValue: true

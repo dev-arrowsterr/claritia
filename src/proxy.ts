@@ -15,7 +15,7 @@ export function proxy(request: NextRequest) {
 
   if (host === `www.${SITE}`) return go(SITE, pathname);
   if (host === SITE && !MARKETING.has(pathname)) return go(APP, pathname);
-  if (host === APP && pathname === "/") return go(APP, "/start");
+  if (host === APP && (pathname === "/" || pathname === "/start")) return go(APP, "/tests");
   return NextResponse.next();
 }
 
