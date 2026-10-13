@@ -1,8 +1,13 @@
 "use client";
 
 import { useState } from "react";
-import { Globe, Key, ListIcon, Play } from "../../Icons";
-import { announceChange, Button, Empty, ErrorNote, errorText, Field, hostOf, Input, Loading, must, Page, postJson, cleanUrl, useLoad, type Environment, type ViewProps } from "../ui";
+import { stepId } from "@/lib/testfile";
+import { Globe, Key, ListIcon, Play, Plus } from "../../Icons";
+import { askText } from "../Dialogs";
+import { announceChange, Badge, Button, Empty, ErrorNote, errorText, Field, hostOf, Input, Loading, must, Page, postJson, PriorityBars, cleanUrl, Th, timeAgo, useLoad, type Environment, type ViewProps } from "../ui";
+import { TestView, type TestRow } from "./TestView";
+
+type ListRow = Pick<TestRow, "id" | "name" | "use_case" | "priority" | "steps" | "updated_at">;
 
 /** The first screen: a site address and a test login. Makes the project and its staging environment. */
 function StartScreen({ sb, session, ws, project, projectsChanged }: ViewProps) {
@@ -99,14 +104,126 @@ function StartScreen({ sb, session, ws, project, projectsChanged }: ViewProps) {
   );
 }
 
+function TestList(props: ViewProps & { env: Environment }) {
+  const { sb, project, navigate, env } = props;
+  const [error, setError] = useState("");
+  const list = useLoad(
+    async () => must(await sb.from("tests").select("id, name, use_case, priority, steps, updated_at").eq("project_id", project!.id).order("use_case").order("name")) as ListRow[],
+    project!.id,
+  );
+
+  const create = async () => {
+    const name = await askText("New test", { placeholder: "Checkout with a coupon", ok: "Create" });
+    if (!name) return;
+    try {
+      const row = must(await sb.from("tests").insert({ project_id: project!.id, name, steps: [{ id: stepId(), kind: "do", text: "" }] }).select("id").single()) as { id: string };
+      navigate("tests", row.id);
+    } catch (e) {
+      setError(errorText(e));
+    }
+  };
+
+  const groups = new Map<string, ListRow[]>();
+  for (const t of list.data ?? []) groups.set(t.use_case, [...(groups.get(t.use_case) ?? []), t]);
+
+  return (
+    <Page
+      icon={<ListIcon size={14} />}
+      title="Tests"
+      count={list.data?.length}
+      flush={!!list.data?.length}
+      actions={
+        <Button onClick={create}>
+          <Plus size={13} />
+          New test
+        </Button>
+      }
+    >
+      {error || list.error ? (
+        <div className="p-4">
+          <ErrorNote message={error || list.error} />
+        </div>
+      ) : null}
+      {!list.data ? (
+        <Loading />
+      ) : !list.data.length ? (
+        <Empty icon={<ListIcon size={16} />} title="Your tests will show up here.">
+          <span className="inline-flex items-center gap-1.5">
+            <Globe size={13} />
+            {env.name} · {hostOf(env.base_url)}
+          </span>
+        </Empty>
+      ) : (
+        <table className="w-full border-collapse">
+          <thead>
+            <tr>
+              <Th>Name</Th>
+              <Th className="w-32">Status</Th>
+              <Th className="hidden w-28 md:table-cell">Priority</Th>
+              <Th className="hidden w-20 sm:table-cell">Steps</Th>
+              <Th className="hidden w-28 md:table-cell">Updated</Th>
+            </tr>
+          </thead>
+          <tbody>
+            {[...groups].map(([useCase, rows]) => (
+              <TestGroup key={useCase} useCase={useCase} rows={rows} open={(id) => navigate("tests", id)} />
+            ))}
+          </tbody>
+        </table>
+      )}
+    </Page>
+  );
+}
+
+function TestGroup({ useCase, rows, open }: { useCase: string; rows: ListRow[]; open: (id: string) => void }) {
+  return (
+    <>
+      <tr>
+        <td colSpan={5} className="h-9 border-b border-line bg-canvas px-4">
+          <span className="flex items-center gap-2 text-[12.5px] font-medium">
+            <span className="size-1.5 rounded-full bg-ink" />
+            {useCase}
+            <span className="font-mono text-[11px] text-faint">{rows.length}</span>
+          </span>
+        </td>
+      </tr>
+      {rows.map((t) => (
+        <tr key={t.id} onClick={() => open(t.id)} className="cursor-pointer hover:bg-hover">
+          <td className="h-12 border-b border-line px-4 text-[13.5px]">
+            <a
+              href={`/tests/${t.id}`}
+              onClick={(e) => {
+                e.preventDefault();
+                open(t.id);
+              }}
+              className="font-medium text-ink"
+            >
+              {t.name}
+            </a>
+          </td>
+          <td className="border-b border-line px-4">
+            <Badge>Not run</Badge>
+          </td>
+          <td className="hidden border-b border-line px-4 md:table-cell">
+            <PriorityBars value={t.priority} />
+          </td>
+          <td className="hidden border-b border-line px-4 font-mono text-[12px] text-muted sm:table-cell">{t.steps.length}</td>
+          <td className="hidden border-b border-line px-4 text-[12px] text-muted md:table-cell">{timeAgo(t.updated_at)}</td>
+        </tr>
+      ))}
+    </>
+  );
+}
+
 export function TestsView(props: ViewProps) {
-  const { sb, project } = props;
+  const { sb, project, id } = props;
   const envs = useLoad(
     async () => (project ? (must(await sb.from("environments").select("id, project_id, name, base_url, created_at").eq("project_id", project.id).order("created_at")) as Environment[]) : []),
     project?.id ?? "none",
   );
 
   if (!project) return <StartScreen {...props} />;
+  if (id) return <TestView key={id} {...props} />;
   if (envs.error)
     return (
       <Page icon={<ListIcon size={14} />} title="Tests">
@@ -115,16 +232,5 @@ export function TestsView(props: ViewProps) {
     );
   if (!envs.data) return <Loading />;
   if (!envs.data.length) return <StartScreen {...props} />;
-
-  const main = envs.data[0]!;
-  return (
-    <Page icon={<ListIcon size={14} />} title="Tests" count={0}>
-      <Empty icon={<ListIcon size={16} />} title="Your tests will show up here.">
-        <span className="inline-flex items-center gap-1.5">
-          <Globe size={13} />
-          {main.name} · {hostOf(main.base_url)}
-        </span>
-      </Empty>
-    </Page>
-  );
+  return <TestList {...props} env={envs.data[0]!} />;
 }

@@ -3,7 +3,7 @@
 import type { Session, SupabaseClient } from "@supabase/supabase-js";
 import { useCallback, useEffect, useRef, useState } from "react";
 
-export type Route = "tests" | "runs" | "settings";
+export type Route = "tests" | "blocks" | "runs" | "settings";
 export type Workspace = { id: string; name: string };
 export type Project = { id: string; name: string; workspace_id: string; created_at: string };
 export type Environment = { id: string; project_id: string; name: string; base_url: string; created_at: string };
@@ -17,8 +17,17 @@ export type ViewProps = {
   role: Role;
   project: Project | null;
   projectsChanged: (select?: string) => void;
-  navigate: (r: Route) => void;
+  navigate: (r: Route, id?: string) => void;
+  /** The record in the address, like a test's id in /tests/<id>. */
+  id: string;
 };
+
+// A page with unsaved changes can ask before anyone leaves it, from the sidebar or the back button.
+let leaveGuard: (() => Promise<boolean>) | null = null;
+export const setLeaveGuard = (fn: (() => Promise<boolean>) | null) => {
+  leaveGuard = fn;
+};
+export const mayLeave = () => (leaveGuard ? leaveGuard() : Promise.resolve(true));
 
 /** Tell every loaded page that data changed, so lists reload. */
 export const announceChange = () => window.dispatchEvent(new Event("claritia:changed"));
@@ -81,10 +90,34 @@ export function timeAgo(iso: string | null) {
 }
 
 /** A page in the app: a slim title bar, then the content. */
-export function Page({ icon, title, count, actions, flush = false, children }: { icon: React.ReactNode; title: string; count?: number | string; actions?: React.ReactNode; flush?: boolean; children: React.ReactNode }) {
+export function Page({
+  icon,
+  title,
+  count,
+  actions,
+  back,
+  flush = false,
+  children,
+}: {
+  icon: React.ReactNode;
+  title: string;
+  count?: number | string;
+  actions?: React.ReactNode;
+  back?: { label: string; onClick: () => void };
+  flush?: boolean;
+  children: React.ReactNode;
+}) {
   return (
     <div className="flex h-full min-h-0 flex-col">
       <header className="flex h-12 shrink-0 items-center gap-2 border-b border-line bg-panel px-4 md:px-5">
+        {back ? (
+          <>
+            <button type="button" onClick={back.onClick} className="rounded-md px-1.5 py-1 text-[13px] font-medium text-muted hover:bg-hover hover:text-ink">
+              {back.label}
+            </button>
+            <span className="text-faint">/</span>
+          </>
+        ) : null}
         <span className="flex size-6 shrink-0 items-center justify-center rounded-sm border border-line bg-panel text-ink">{icon}</span>
         <h1 className="truncate text-[14px] font-medium tracking-[-0.01em]">{title}</h1>
         {count != null ? <span className="font-mono text-[11px] text-faint tabular-nums">[{count}]</span> : null}
@@ -225,4 +258,61 @@ export function cleanUrl(raw: string): string | null {
   } catch {
     return null;
   }
+}
+
+/** A row of choices where one is picked. */
+export function Segmented<T extends string>({ value, options, onChange, label }: { value: T; options: { value: T; label: string }[]; onChange: (v: T) => void; label?: string }) {
+  return (
+    <div role="radiogroup" aria-label={label} className="inline-flex h-8 items-center gap-0.5 rounded-md border border-line bg-panel p-0.5">
+      {options.map((o) => (
+        <button
+          key={o.value}
+          type="button"
+          role="radio"
+          aria-checked={value === o.value}
+          onClick={() => onChange(o.value)}
+          className={`inline-flex h-6 items-center rounded-[4px] px-2.5 text-[12.5px] font-medium ${value === o.value ? "bg-ink text-white" : "text-muted hover:text-ink"}`}
+        >
+          {o.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/** Tabs under a page header. */
+export function Tabs<T extends string>({ value, tabs, onChange }: { value: T; tabs: { value: T; label: string; count?: number }[]; onChange: (v: T) => void }) {
+  return (
+    <div role="tablist" className="flex h-10 shrink-0 items-end gap-1 overflow-x-auto border-b border-line bg-panel px-3 md:px-4">
+      {tabs.map((t) => (
+        <button
+          key={t.value}
+          type="button"
+          role="tab"
+          aria-selected={value === t.value}
+          onClick={() => onChange(t.value)}
+          className={`relative flex h-9 shrink-0 items-center gap-1.5 px-2.5 text-[13px] font-medium ${value === t.value ? "text-ink" : "text-muted hover:text-ink"}`}
+        >
+          {t.label}
+          {t.count != null ? <span className="font-mono text-[10.5px] text-faint">{t.count}</span> : null}
+          {value === t.value ? <span className="absolute inset-x-1 -bottom-px h-px bg-ink" /> : null}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/** Priority as three small bars, filled up to the level. */
+export function PriorityBars({ value }: { value: "low" | "medium" | "high" }) {
+  const level = value === "high" ? 3 : value === "medium" ? 2 : 1;
+  return (
+    <span className="inline-flex items-center gap-1.5 text-[12px] text-muted">
+      <span aria-hidden="true" className="inline-flex h-2.5 items-end gap-px">
+        {[4, 7, 10].map((h, i) => (
+          <span key={h} className={`w-[3px] rounded-[1px] ${i < level ? "bg-ink" : "bg-line-strong"}`} style={{ height: h }} />
+        ))}
+      </span>
+      {value[0]!.toUpperCase() + value.slice(1)}
+    </span>
+  );
 }

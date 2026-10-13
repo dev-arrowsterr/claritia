@@ -28,6 +28,12 @@ insert into env_secrets (id, environment_id, workspace_id, name) values
 insert into env_secret_values (secret_id, sealed) values
   ('a3000000-0000-0000-0000-000000000000', 'v1:acme-sealed'),
   ('c3000000-0000-0000-0000-000000000000', 'v1:cat-sealed');
+insert into blocks (id, project_id, workspace_id, name, steps) values
+  ('a4000000-0000-0000-0000-000000000000', 'a1000000-0000-0000-0000-000000000000', '11111111-0000-0000-0000-000000000000', 'acme-sign-in', '[{"id":"s1","kind":"do","text":"Sign in"}]'),
+  ('c4000000-0000-0000-0000-000000000000', 'c1000000-0000-0000-0000-000000000000', '22222222-0000-0000-0000-000000000000', 'cat-sign-in', '[]');
+insert into tests (id, project_id, workspace_id, name, steps) values
+  ('a5000000-0000-0000-0000-000000000000', 'a1000000-0000-0000-0000-000000000000', '11111111-0000-0000-0000-000000000000', 'acme-checkout', '[{"id":"s1","kind":"do","text":"Add a hoodie"}]'),
+  ('c5000000-0000-0000-0000-000000000000', 'c1000000-0000-0000-0000-000000000000', '22222222-0000-0000-0000-000000000000', 'cat-test', '[]');
 
 create function pg_temp.check(ok boolean, what text) returns void language plpgsql as $$
 begin
@@ -86,6 +92,28 @@ select pg_temp.fails($$select set_secret('a2000000-0000-0000-0000-000000000000',
 select pg_temp.check(set_secret('a2000000-0000-0000-0000-000000000000', 'LOGIN_EMAIL', 'v1:ok') is not null, 'Ben can''t save a secret in his own environment');
 select pg_temp.check(pg_temp.touched($$insert into projects (workspace_id, name) values ('11111111-0000-0000-0000-000000000000', 'ben-app')$$) = 1, 'Ben can''t add a project to Acme');
 select pg_temp.check(ensure_workspace() = '11111111-0000-0000-0000-000000000000', 'Ben gets a new workspace instead of Acme');
+-- Tests, blocks and versions
+select pg_temp.check((select count(*) from tests) = 1 and (select count(*) from blocks) = 1, 'Ben sees another workspace''s tests or blocks');
+select pg_temp.check((select count(*) from test_versions) = 1, 'Ben sees another workspace''s test versions');
+select pg_temp.check(pg_temp.touched($$update tests set name = 'hacked' where id = 'c5000000-0000-0000-0000-000000000000'$$) = 0, 'Ben renames Cat''s test');
+select pg_temp.check(pg_temp.touched($$delete from blocks where id = 'c4000000-0000-0000-0000-000000000000'$$) = 0, 'Ben deletes Cat''s block');
+select pg_temp.fails($$insert into tests (project_id, workspace_id, name) values ('c1000000-0000-0000-0000-000000000000', '11111111-0000-0000-0000-000000000000', 'planted')$$, 'Ben adds a test to Cat''s project');
+select pg_temp.fails($$insert into blocks (project_id, workspace_id, name) values ('c1000000-0000-0000-0000-000000000000', '11111111-0000-0000-0000-000000000000', 'planted')$$, 'Ben adds a block to Cat''s project');
+select pg_temp.fails($$update tests set project_id = 'c1000000-0000-0000-0000-000000000000' where id = 'a5000000-0000-0000-0000-000000000000'$$, 'Ben moves his test into Cat''s project');
+select pg_temp.fails($$insert into test_versions (test_id, workspace_id, version, name, use_case, priority, steps) values ('a5000000-0000-0000-0000-000000000000', '11111111-0000-0000-0000-000000000000', 99, 'fake', 'x', 'low', '[]')$$, 'Ben writes a fake version');
+select pg_temp.fails($$update test_versions set name = 'rewritten'$$, 'Ben rewrites history');
+select pg_temp.fails($$delete from test_versions$$, 'Ben deletes history');
+select pg_temp.fails($$insert into tests (project_id, name, steps) values ('a1000000-0000-0000-0000-000000000000', 'bad', '[{"id":"s1","kind":"run_sql","text":"x"}]')$$, 'Ben saves a step of an unknown kind');
+select pg_temp.fails($$insert into tests (project_id, name, steps) values ('a1000000-0000-0000-0000-000000000000', 'bad', '"not a list"')$$, 'Ben saves steps that are not a list');
+select pg_temp.fails($$insert into blocks (project_id, name, steps) values ('a1000000-0000-0000-0000-000000000000', 'nested', '[{"id":"s1","kind":"use","block":"a4000000-0000-0000-0000-000000000000"}]')$$, 'Ben puts a block inside a block');
+-- Saving a change makes a new version with Ben as the author. Renaming nothing makes none.
+update tests set steps = '[{"id":"s1","kind":"do","text":"Add a hoodie"},{"id":"s2","kind":"check","text":"The cart shows 1 item"},{"id":"s3","kind":"use","block":"a4000000-0000-0000-0000-000000000000"}]' where id = 'a5000000-0000-0000-0000-000000000000';
+select pg_temp.check((select version from tests where id = 'a5000000-0000-0000-0000-000000000000') = 2, 'Changing steps did not bump the version');
+select pg_temp.check((select author_id from test_versions where version = 2) = 'b0000000-0000-0000-0000-000000000000', 'A version has the wrong author');
+update tests set steps = steps where id = 'a5000000-0000-0000-0000-000000000000';
+select pg_temp.check((select count(*) from test_versions) = 2, 'Saving with no change made a new version');
+-- A save that expected an old version touches nothing, so the editor can tell someone else saved first.
+select pg_temp.check(pg_temp.touched($$update tests set name = 'late' where id = 'a5000000-0000-0000-0000-000000000000' and version = 1$$) = 0, 'A stale save overwrote a newer version');
 select pg_temp.check(pg_temp.touched($$insert into environments (project_id, name, base_url) values ('a1000000-0000-0000-0000-000000000000', 'production', 'https://acme.com')$$) = 1, 'Ben can''t add an environment to his own project');
 select pg_temp.check((select workspace_id from environments where name = 'production') = '11111111-0000-0000-0000-000000000000', 'A new environment is filed under the wrong workspace');
 reset role;
@@ -95,6 +123,7 @@ select pg_temp.as_user('c0000000-0000-0000-0000-000000000000');
 set role authenticated;
 select pg_temp.check(not exists (select 1 from projects where workspace_id = '11111111-0000-0000-0000-000000000000'), 'Cat sees Acme''s projects');
 select pg_temp.check(not exists (select 1 from env_secrets where name = 'LOGIN_EMAIL'), 'Cat sees Acme''s secret names');
+select pg_temp.check(not exists (select 1 from tests where name like 'acme%') and not exists (select 1 from test_versions where name like 'acme%'), 'Cat sees Acme''s tests or their history');
 select pg_temp.check((select count(*) from workspace_members) = 1, 'Cat sees Acme''s members');
 reset role;
 

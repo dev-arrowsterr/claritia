@@ -79,8 +79,8 @@ name: Checkout with a coupon
 use_case: Checkout
 priority: high
 env: staging
-uses: [blocks/sign-in]           # reusable steps
 steps:
+  - use: sign-in                 # a block: reusable steps
   - Add the blue hoodie to the cart
   - Apply the coupon SAVE10
   - check: The total drops 10%

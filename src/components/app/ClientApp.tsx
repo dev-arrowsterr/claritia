@@ -3,18 +3,20 @@
 import type { Session } from "@supabase/supabase-js";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { getSupabase, type SupaConfig } from "@/lib/supa";
-import { ListIcon, LogOut, Play, Settings } from "../Icons";
+import { Box, ListIcon, LogOut, Play, Settings } from "../Icons";
 import { Logo } from "../Logo";
 import { AuthScreen } from "./AuthScreen";
 import { askText, DialogHost } from "./Dialogs";
 import { Select } from "./Select";
-import { Avatar, ErrorNote, errorText, must, type Project, type Role, type Route, type ViewProps, type Workspace } from "./ui";
+import { Avatar, ErrorNote, errorText, mayLeave, must, type Project, type Role, type Route, type ViewProps, type Workspace } from "./ui";
+import { BlocksView } from "./views/BlocksView";
 import { RunsView } from "./views/RunsView";
 import { SettingsView } from "./views/SettingsView";
 import { TestsView } from "./views/TestsView";
 
 const NAV: { route: Route; label: string; icon: React.ReactNode }[] = [
   { route: "tests", label: "Tests", icon: <ListIcon size={15} /> },
+  { route: "blocks", label: "Blocks", icon: <Box size={15} /> },
   { route: "runs", label: "Runs", icon: <Play size={15} /> },
   { route: "settings", label: "Settings", icon: <Settings size={15} /> },
 ];
@@ -22,9 +24,13 @@ const NAV: { route: Route; label: string; icon: React.ReactNode }[] = [
 const PROJECT_KEY = "claritia:project";
 const NEW_PROJECT = "__new";
 
-const readRoute = (): Route => {
-  const first = window.location.pathname.split("/")[1] ?? "";
-  return NAV.some((n) => n.route === first) ? (first as Route) : "tests";
+type Loc = { route: Route; id: string };
+const WITH_ID = new Set<Route>(["tests", "blocks"]);
+
+const readLoc = (): Loc => {
+  const [, first = "", id = ""] = window.location.pathname.split("/");
+  const route = NAV.some((n) => n.route === first) ? (first as Route) : "tests";
+  return { route, id: WITH_ID.has(route) && /^[0-9a-f-]{36}$/.test(id) ? id : "" };
 };
 
 function remember(id: string) {
@@ -58,7 +64,8 @@ export function ClientApp({ config }: { config: SupaConfig }) {
   const [role, setRole] = useState<Role>("member");
   const [projects, setProjects] = useState<Project[] | null>(null);
   const [projectId, setProjectId] = useState<string | null>(null);
-  const [route, setRoute] = useState<Route>("tests");
+  const [loc, setLoc] = useState<Loc>({ route: "tests", id: "" });
+  const route = loc.route;
   const [error, setError] = useState("");
 
   useEffect(() => {
@@ -68,7 +75,7 @@ export function ClientApp({ config }: { config: SupaConfig }) {
   }, [sb]);
 
   useEffect(() => {
-    const sync = () => setRoute(readRoute());
+    const sync = () => setLoc(readLoc());
     sync();
     window.addEventListener("popstate", sync);
     return () => window.removeEventListener("popstate", sync);
@@ -111,9 +118,13 @@ export function ClientApp({ config }: { config: SupaConfig }) {
 
   useEffect(() => loadProjects(), [loadProjects]);
 
-  const navigate = useCallback((r: Route) => {
-    window.history.pushState(null, "", `/${r}`);
-    setRoute(r);
+  // Pages with unsaved changes get to ask first.
+  const navigate = useCallback((r: Route, id = "") => {
+    mayLeave().then((ok) => {
+      if (!ok) return;
+      window.history.pushState(null, "", `/${r}${id ? `/${id}` : ""}`);
+      setLoc({ route: r, id });
+    });
   }, []);
 
   async function newProject() {
@@ -143,13 +154,15 @@ export function ClientApp({ config }: { config: SupaConfig }) {
   if (!ws || projects === null) return <Splash />;
 
   const project = projects.find((p) => p.id === projectId) ?? null;
-  const props: ViewProps = { sb, session, ws, role, project, projectsChanged: loadProjects, navigate };
+  const props: ViewProps = { sb, session, ws, role, project, projectsChanged: loadProjects, navigate, id: loc.id };
   const email = session.user.email ?? "";
   const options = [...projects.map((p) => ({ value: p.id, label: p.name })), { value: NEW_PROJECT, label: "New project…" }];
-  const pickProject = (v: string) => {
+  const pickProject = async (v: string) => {
+    if (!(await mayLeave())) return;
     if (v === NEW_PROJECT) return void newProject();
     setProjectId(v);
     remember(v);
+    if (loc.id) navigate(loc.route);
   };
 
   const navLinks = NAV.map((n) => (
@@ -160,7 +173,7 @@ export function ClientApp({ config }: { config: SupaConfig }) {
         e.preventDefault();
         navigate(n.route);
       }}
-      aria-current={route === n.route ? "page" : undefined}
+      aria-current={route === n.route && !loc.id ? "page" : undefined}
       className={`flex h-8 items-center gap-2.5 rounded-md px-2.5 text-[13px] font-medium ${route === n.route ? "bg-panel text-ink ring-1 ring-line" : "text-body hover:bg-hover hover:text-ink"}`}
     >
       <span className={route === n.route ? "text-ink" : "text-muted"}>{n.icon}</span>
@@ -200,7 +213,7 @@ export function ClientApp({ config }: { config: SupaConfig }) {
             <ErrorNote message={error} />
           </div>
         ) : null}
-        {route === "tests" ? <TestsView {...props} /> : route === "runs" ? <RunsView {...props} /> : <SettingsView {...props} />}
+        {route === "tests" ? <TestsView {...props} /> : route === "blocks" ? <BlocksView {...props} /> : route === "runs" ? <RunsView {...props} /> : <SettingsView {...props} />}
       </main>
     </div>
   );

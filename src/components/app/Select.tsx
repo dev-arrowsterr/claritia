@@ -20,6 +20,7 @@ export function Select<T extends string | number>({
   autoOpen = false,
   onClose,
   disabled = false,
+  plainPlaceholder = false,
 }: {
   value: T;
   options: Option<T>[];
@@ -30,6 +31,8 @@ export function Select<T extends string | number>({
   autoOpen?: boolean;
   onClose?: () => void;
   disabled?: boolean;
+  /** Show the placeholder in normal text, for a menu that works like a button. */
+  plainPlaceholder?: boolean;
 }) {
   const [open, setOpen] = useState(autoOpen);
   const [active, setActive] = useState(0);
@@ -113,7 +116,7 @@ export function Select<T extends string | number>({
         }}
         className={`inline-flex items-center justify-between gap-2 text-left ${className}`}
       >
-        <span className={`truncate ${current ? "" : "text-faint"}`}>{current?.label ?? placeholder}</span>
+        <span className={`truncate ${current || plainPlaceholder ? "" : "text-faint"}`}>{current?.label ?? placeholder}</span>
         <ChevronsUpDown size={13} className="shrink-0 text-faint" />
       </button>
       {open && pos

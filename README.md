@@ -4,12 +4,16 @@ Tests that write and fix themselves. Describe a user flow in plain English, and 
 
 This repo holds the marketing site (`/` on tryclaritia.com) and the app (app.tryclaritia.com). The vision lives in `docs/vision.md`, Phase 1 in `docs/plan.md`, the homepage plan in `docs/homepage.md`, and the brand notes in `docs/brand.md`.
 
-## What works today (Week 1)
+## What works today (Weeks 1–2)
 
 - Sign in with Google, GitHub or an email link. Your first sign-in makes a workspace.
 - The first screen asks for a site address and an optional test login, then makes the project and its `staging` environment.
 - Settings: rename or delete a project, add environments, edit their address, add and delete secrets, rename the workspace, sign out.
 - Secret values are sealed with AES-256-GCM on the server (`src/lib/seal.ts`) before they reach the database. Members see secret names only. The values table has no access for signed-in users at all.
+- Tests: a list grouped by use case, and an editor with plain-English steps (Do, Check, or Use a block). Enter adds a step, Backspace on an empty step removes it, Alt+Up/Down or the drag handle moves it, Cmd+S saves.
+- Each test has four tabs: Steps, YAML (editable, same format as `.claritia/tests/*.yaml`, see `src/lib/testfile.ts`), Code (the Playwright lock, written from Week 4) and History (every saved version, with restore).
+- Blocks: reusable steps such as signing in, used in tests with `- use: sign-in`. A block in use can't be deleted.
+- Saves only go through over the version you opened, so two people can't overwrite each other without knowing. Leaving with unsaved changes asks first.
 
 ## Setup
 
