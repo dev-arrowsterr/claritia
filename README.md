@@ -21,4 +21,6 @@ npm run build
 
 ## Deploy
 
-Render → New → Blueprint → this repo. Then add the domain under the web service's Custom Domains. Buttons point at `APP_URL` in `src/lib/site.ts`.
+One Render service (`claritia`) serves both domains. `src/proxy.ts` sends `/` on `tryclaritia.com` to the site, and everything on `app.tryclaritia.com` to the app (`/start` for now). `www.` goes to the bare domain.
+
+Add `tryclaritia.com`, `www.tryclaritia.com` and `app.tryclaritia.com` under the web service's Custom Domains, then add the DNS records Render shows at your domain registrar.
