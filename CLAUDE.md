@@ -2,7 +2,7 @@
 
 AI end-to-end testing. Describe a user flow in plain English, Claritia turns it into a Playwright test, runs it, and fixes it when the UI changes. Sister product to Omniscient (`dev-omniscient/omniscient`), built on the same stack and the same brand system.
 
-Start with `docs/plan.md` (product and roadmap), `docs/homepage.md` (the marketing site) and `docs/brand.md` (look and copy).
+Start with `docs/vision.md` (full platform vision), `docs/plan.md` (Phase 1 detail), `docs/homepage.md` (the marketing site) and `docs/brand.md` (look and copy).
 
 ## Rule: every build includes its running cost
 - Every build plan, feature or milestone states what it adds to the monthly bill: servers plus every paid service, Claude tokens included. Give monthly totals at two stages: Beta (50 teams) and Growth (500 teams).
