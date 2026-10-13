@@ -25,7 +25,7 @@ const PROJECT_KEY = "claritia:project";
 const NEW_PROJECT = "__new";
 
 type Loc = { route: Route; id: string };
-const WITH_ID = new Set<Route>(["tests", "blocks"]);
+const WITH_ID = new Set<Route>(["tests", "blocks", "runs"]);
 
 const readLoc = (): Loc => {
   const [, first = "", id = ""] = window.location.pathname.split("/");

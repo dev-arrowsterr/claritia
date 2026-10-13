@@ -35,6 +35,13 @@ insert into tests (id, project_id, workspace_id, name, steps) values
   ('a5000000-0000-0000-0000-000000000000', 'a1000000-0000-0000-0000-000000000000', '11111111-0000-0000-0000-000000000000', 'acme-checkout', '[{"id":"s1","kind":"do","text":"Add a hoodie"}]'),
   ('c5000000-0000-0000-0000-000000000000', 'c1000000-0000-0000-0000-000000000000', '22222222-0000-0000-0000-000000000000', 'cat-test', '[]');
 
+insert into runs (id, workspace_id, project_id, test_id, test_name, test_version, environment_id, environment_name, base_url, lock, status) values
+  ('c6000000-0000-0000-0000-000000000000', '22222222-0000-0000-0000-000000000000', 'c1000000-0000-0000-0000-000000000000', 'c5000000-0000-0000-0000-000000000000', 'cat-test', 1, 'c2000000-0000-0000-0000-000000000000', 'staging', 'https://staging.other.com', 'x', 'passed');
+insert into run_steps (run_id, workspace_id, position, kind, label) values ('c6000000-0000-0000-0000-000000000000', '22222222-0000-0000-0000-000000000000', 1, 'do', 'cat-step');
+insert into storage.objects (bucket_id, name) values
+  ('runs', '11111111-0000-0000-0000-000000000000/r1/video.webm'),
+  ('runs', '22222222-0000-0000-0000-000000000000/r2/video.webm');
+
 create function pg_temp.check(ok boolean, what text) returns void language plpgsql as $$
 begin
   if ok is not true then raise exception 'LEAK TEST FAILED: %', what; end if;
@@ -112,6 +119,28 @@ select pg_temp.check((select version from tests where id = 'a5000000-0000-0000-0
 select pg_temp.check((select author_id from test_versions where version = 2) = 'b0000000-0000-0000-0000-000000000000', 'A version has the wrong author');
 update tests set steps = steps where id = 'a5000000-0000-0000-0000-000000000000';
 select pg_temp.check((select count(*) from test_versions) = 2, 'Saving with no change made a new version');
+-- Runs
+select pg_temp.check(not exists (select 1 from runs) and not exists (select 1 from run_steps), 'Ben sees Cat''s runs');
+select pg_temp.fails($$select start_run('a5000000-0000-0000-0000-000000000000', 'a2000000-0000-0000-0000-000000000000')$$, 'Ben starts a run of a test with no code');
+reset role;
+update tests set lock = 'test(''x'', async ({ page }) => {});' where id = 'a5000000-0000-0000-0000-000000000000';
+set role authenticated;
+select pg_temp.fails($$select start_run('c5000000-0000-0000-0000-000000000000', 'c2000000-0000-0000-0000-000000000000')$$, 'Ben runs Cat''s test');
+select pg_temp.fails($$select start_run('a5000000-0000-0000-0000-000000000000', 'c2000000-0000-0000-0000-000000000000')$$, 'Ben runs his test against Cat''s environment');
+select pg_temp.fails($$select start_run('a5000000-0000-0000-0000-000000000000', 'a2000000-0000-0000-0000-000000000000', 'schedule')$$, 'Ben starts a run pretending to be the scheduler');
+select pg_temp.check(start_run('a5000000-0000-0000-0000-000000000000', 'a2000000-0000-0000-0000-000000000000') is not null, 'Ben can''t start a run of his own test');
+select pg_temp.check((select count(*) from run_steps) = 3, 'A new run doesn''t get one row per step');
+select pg_temp.check((select label from run_steps where position = 3) = 'Use acme-sign-in', 'A block step is labeled wrong');
+select pg_temp.check((select label from run_steps where position = 2) = 'Check: The cart shows 1 item', 'A check step is labeled wrong');
+select pg_temp.check((select created_by from runs) = 'b0000000-0000-0000-0000-000000000000' and (select status from runs) = 'queued', 'A new run has the wrong owner or status');
+select pg_temp.fails($$update runs set status = 'passed'$$, 'Ben marks his own run as passed');
+select pg_temp.fails($$update run_steps set status = 'passed'$$, 'Ben marks a step as passed');
+select pg_temp.fails($$insert into runs (workspace_id, project_id, test_name, test_version, environment_name, base_url, lock, status) values ('11111111-0000-0000-0000-000000000000', 'a1000000-0000-0000-0000-000000000000', 'fake', 1, 'x', 'https://x.com', 'x', 'passed')$$, 'Ben writes a fake passing run');
+select pg_temp.fails($$delete from runs$$, 'Ben deletes run history');
+select pg_temp.fails($$select * from claim_run('ben')$$, 'Ben claims a run like the runner');
+select start_run('a5000000-0000-0000-0000-000000000000', 'a2000000-0000-0000-0000-000000000000') from generate_series(1, 4);
+select pg_temp.fails($$select start_run('a5000000-0000-0000-0000-000000000000', 'a2000000-0000-0000-0000-000000000000')$$, 'Ben queues a sixth run at once');
+select pg_temp.check((select count(*) from storage.objects) = 1 and (select name from storage.objects) like '11111111-%', 'Ben reads another workspace''s run files');
 -- A save that expected an old version touches nothing, so the editor can tell someone else saved first.
 select pg_temp.check(pg_temp.touched($$update tests set name = 'late' where id = 'a5000000-0000-0000-0000-000000000000' and version = 1$$) = 0, 'A stale save overwrote a newer version');
 select pg_temp.check(pg_temp.touched($$insert into environments (project_id, name, base_url) values ('a1000000-0000-0000-0000-000000000000', 'production', 'https://acme.com')$$) = 1, 'Ben can''t add an environment to his own project');
@@ -124,6 +153,8 @@ set role authenticated;
 select pg_temp.check(not exists (select 1 from projects where workspace_id = '11111111-0000-0000-0000-000000000000'), 'Cat sees Acme''s projects');
 select pg_temp.check(not exists (select 1 from env_secrets where name = 'LOGIN_EMAIL'), 'Cat sees Acme''s secret names');
 select pg_temp.check(not exists (select 1 from tests where name like 'acme%') and not exists (select 1 from test_versions where name like 'acme%'), 'Cat sees Acme''s tests or their history');
+select pg_temp.check((select count(*) from runs) = 1 and (select count(*) from run_steps) = 1, 'Cat sees Acme''s runs');
+select pg_temp.check((select count(*) from storage.objects) = 1 and (select name from storage.objects) like '22222222-%', 'Cat reads Acme''s run files');
 select pg_temp.check((select count(*) from workspace_members) = 1, 'Cat sees Acme''s members');
 reset role;
 
@@ -144,6 +175,14 @@ select pg_temp.fails($$select ensure_workspace()$$, 'A signed-out visitor makes 
 select pg_temp.fails($$select is_member('11111111-0000-0000-0000-000000000000')$$, 'A signed-out visitor calls is_member');
 select pg_temp.fails($$select set_secret('a2000000-0000-0000-0000-000000000000', 'X', 'v1:x')$$, 'A signed-out visitor saves a secret');
 reset role;
+
+-- The runner claims the oldest waiting run first, and a quiet runner's run is taken again.
+set role service_role;
+reset role;
+select pg_temp.check((select test_name from claim_run('w1')) = 'acme-checkout', 'The runner didn''t get the oldest waiting run');
+select pg_temp.check((select count(*) from runs where status = 'running') = 1, 'Claiming didn''t mark the run as running');
+update runs set locked_at = now() - interval '11 minutes' where status = 'running';
+select pg_temp.check((select attempts from claim_run('w2')) = 2, 'A run from a quiet runner wasn''t taken again');
 
 -- Values are kept, and deleting a secret's name deletes its value.
 select pg_temp.check((select count(*) from env_secret_values) = 3, 'Sealed values went missing');

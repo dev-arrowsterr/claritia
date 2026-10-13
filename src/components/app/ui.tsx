@@ -316,3 +316,22 @@ export function PriorityBars({ value }: { value: "low" | "medium" | "high" }) {
     </span>
   );
 }
+
+export type RunStatus = "queued" | "running" | "passed" | "failed" | "error" | "canceled";
+export type StepStatus = "pending" | "running" | "passed" | "failed" | "skipped";
+const RUN_TONE: Record<RunStatus | StepStatus, Tone> = { queued: "gray", pending: "gray", running: "brand", passed: "green", failed: "red", error: "amber", canceled: "gray", skipped: "gray" };
+const RUN_LABEL: Record<RunStatus | StepStatus, string> = { queued: "Waiting", pending: "Waiting", running: "Running", passed: "Passed", failed: "Failed", error: "Error", canceled: "Canceled", skipped: "Skipped" };
+
+/** A run's or a step's state as a square tag. */
+export function StatusTag({ status }: { status: RunStatus | StepStatus }) {
+  return <Badge tone={RUN_TONE[status] ?? "gray"}>{RUN_LABEL[status] ?? status}</Badge>;
+}
+
+/** 1.2s, 45s, 2m 05s */
+export function duration(ms: number | null | undefined) {
+  if (ms == null) return "—";
+  if (ms < 1000) return `${ms}ms`;
+  if (ms < 60_000) return `${(ms / 1000).toFixed(ms < 10_000 ? 1 : 0)}s`;
+  const m = Math.floor(ms / 60_000);
+  return `${m}m ${String(Math.round((ms % 60_000) / 1000)).padStart(2, "0")}s`;
+}

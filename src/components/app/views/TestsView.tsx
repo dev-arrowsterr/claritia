@@ -4,7 +4,8 @@ import { useState } from "react";
 import { stepId } from "@/lib/testfile";
 import { Globe, Key, ListIcon, Play, Plus } from "../../Icons";
 import { askText } from "../Dialogs";
-import { announceChange, Badge, Button, Empty, ErrorNote, errorText, Field, hostOf, Input, Loading, must, Page, postJson, PriorityBars, cleanUrl, Th, timeAgo, useLoad, type Environment, type ViewProps } from "../ui";
+import { announceChange, Badge, Button, StatusTag, Empty, ErrorNote, errorText, Field, hostOf, Input, Loading, must, Page, postJson, PriorityBars, cleanUrl, Th, timeAgo, useLoad, type Environment, type ViewProps } from "../ui";
+import { latestRuns } from "./RunsView";
 import { TestView, type TestRow } from "./TestView";
 
 type ListRow = Pick<TestRow, "id" | "name" | "use_case" | "priority" | "steps" | "updated_at">;
@@ -111,6 +112,7 @@ function TestList(props: ViewProps & { env: Environment }) {
     async () => must(await sb.from("tests").select("id, name, use_case, priority, steps, updated_at").eq("project_id", project!.id).order("use_case").order("name")) as ListRow[],
     project!.id,
   );
+  const last = useLoad(() => latestRuns(sb, project!.id), project!.id);
 
   const create = async () => {
     const name = await askText("New test", { placeholder: "Checkout with a coupon", ok: "Create" });
@@ -166,7 +168,7 @@ function TestList(props: ViewProps & { env: Environment }) {
           </thead>
           <tbody>
             {[...groups].map(([useCase, rows]) => (
-              <TestGroup key={useCase} useCase={useCase} rows={rows} open={(id) => navigate("tests", id)} />
+              <TestGroup key={useCase} useCase={useCase} rows={rows} last={last.data} open={(id) => navigate("tests", id)} />
             ))}
           </tbody>
         </table>
@@ -175,7 +177,7 @@ function TestList(props: ViewProps & { env: Environment }) {
   );
 }
 
-function TestGroup({ useCase, rows, open }: { useCase: string; rows: ListRow[]; open: (id: string) => void }) {
+function TestGroup({ useCase, rows, last, open }: { useCase: string; rows: ListRow[]; last: Awaited<ReturnType<typeof latestRuns>> | null; open: (id: string) => void }) {
   return (
     <>
       <tr>
@@ -201,9 +203,7 @@ function TestGroup({ useCase, rows, open }: { useCase: string; rows: ListRow[]; 
               {t.name}
             </a>
           </td>
-          <td className="border-b border-line px-4">
-            <Badge>Not run</Badge>
-          </td>
+          <td className="border-b border-line px-4">{last?.get(t.id) ? <StatusTag status={last.get(t.id)!.status} /> : <Badge>Not run</Badge>}</td>
           <td className="hidden border-b border-line px-4 md:table-cell">
             <PriorityBars value={t.priority} />
           </td>

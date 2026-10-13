@@ -14,7 +14,7 @@
 | Test runner (Playwright in Docker) | Render background workers |
 | Job queue | Postgres table with `FOR UPDATE SKIP LOCKED` (no extra service at first) |
 | Database, sign-in | Supabase |
-| Videos, traces, screenshots | Cloudflare R2 (no download fees) |
+| Videos, traces, screenshots | Supabase Storage to start; Cloudflare R2 when volume grows (no download fees) |
 | AI | Anthropic API: a small fast model for steps, a bigger one for writing and sorting failures |
 | Billing | Stripe |
 

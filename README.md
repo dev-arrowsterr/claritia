@@ -4,7 +4,7 @@ Tests that write and fix themselves. Describe a user flow in plain English, and 
 
 This repo holds the marketing site (`/` on tryclaritia.com) and the app (app.tryclaritia.com). The vision lives in `docs/vision.md`, Phase 1 in `docs/plan.md`, the homepage plan in `docs/homepage.md`, and the brand notes in `docs/brand.md`.
 
-## What works today (Weeks 1–2)
+## What works today (Weeks 1–3)
 
 - Sign in with Google, GitHub or an email link. Your first sign-in makes a workspace.
 - The first screen asks for a site address and an optional test login, then makes the project and its `staging` environment.
@@ -14,6 +14,20 @@ This repo holds the marketing site (`/` on tryclaritia.com) and the app (app.try
 - Each test has four tabs: Steps, YAML (editable, same format as `.claritia/tests/*.yaml`, see `src/lib/testfile.ts`), Code (the Playwright lock, written from Week 4) and History (every saved version, with restore).
 - Blocks: reusable steps such as signing in, used in tests with `- use: sign-in`. A block in use can't be deleted.
 - Saves only go through over the version you opened, so two people can't overwrite each other without knowing. Leaving with unsaved changes asks first.
+- Code tab: the test's Playwright code (the lock), editable. It's checked on save against what Claritia can run (`src/lib/lock.ts`): page actions, element actions, keyboard, and expect checks, with secrets as `process.env.NAME`. Claritia never runs it as JavaScript.
+- Runs: **Run** starts a run on the project's environment. The runner (`worker/`) opens a fresh Chromium, carries out each step, retries a failed step once, and saves a video, a trace, a screenshot after each step and the page's console. The run page updates live, jumps the video to a step when you click it, and opens the trace in Playwright's Trace Viewer.
+- Runs can't reach private network addresses, and secret values are hidden in errors, console logs and traces.
+
+## The runner
+
+A separate Render service built from `worker/Dockerfile`. It needs `SUPABASE_URL`, `SUPABASE_SECRET_KEY` and the same `SECRETS_KEY` as the web service. `WORKER_SLOTS` (default 2) sets how many runs it does at once. Run files go to the private `runs` bucket in Supabase Storage.
+
+Local checks that need Chromium:
+
+```bash
+CHROMIUM_PATH=/path/to/chrome node scripts/runner-check.ts   # the runner against a local site
+CHROMIUM_PATH=/path/to/chrome node scripts/worker-check.ts   # the run handler with a stand-in database
+```
 
 ## Setup
 
