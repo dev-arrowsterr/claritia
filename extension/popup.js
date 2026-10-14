@@ -73,6 +73,11 @@ async function init() {
   }
 }
 
+$("signin").onclick = async () => {
+  const rec = await call({ type: "get" });
+  await chrome.tabs.create({ url: `${rec.settings.app}/extension` });
+  window.close();
+};
 $("connect").onclick = async () => {
   await call({ type: "saveSettings", key: $("key").value, app: $("app").value });
   await init();

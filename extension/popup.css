@@ -29,3 +29,5 @@ li .x { height: 20px; padding: 0 6px; border: 0; color: var(--faint); }
 .error { margin: 0 12px 12px; padding: 8px; border: 1px solid #f3c4c6; background: #ffe9e9; color: var(--danger); }
 .note { margin: 0 12px 12px; color: var(--muted); }
 .note a { color: var(--brand); }
+details summary { cursor: pointer; color: var(--muted); font-size: 12.5px; }
+.stack { display: flex; flex-direction: column; gap: 10px; margin-top: 10px; }

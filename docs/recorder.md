@@ -5,8 +5,10 @@ Playwright code each, ready to run in Claritia with no AI.
 
 1. Install (until it's on the Chrome Web Store): `npm run pack:extension`, then Chrome → `chrome://extensions` →
    Developer mode → **Load unpacked** → the `extension/` folder.
-2. Open the recorder, paste an API key (Settings → API keys), **Connect**. The key is saved only once Claritia
-   accepts it.
+2. Open the recorder and click **Connect to Claritia**. It opens app.tryclaritia.com/extension (signed in); click
+   **Connect Claritia Recorder** there. The app makes a key named "Chrome recorder" (revocable in Settings → API
+   keys) and hands it to the extension, which takes it only from the Claritia app's own address. If the extension
+   doesn't answer, the key is revoked again. **Use an API key** in the popup still works too.
 3. Open your site, click **Record**, and use the site. **Add check** makes the next click a check that the element
    shows, instead of a click (the element under the pointer is outlined in blue).
 4. **Stop**, remove any step with ×, name the test, pick the project, **Save test**.
@@ -25,6 +27,8 @@ environment in Claritia.
 - `scripts/recorder-check.ts` records a session on a local site with a real browser (sign-in with a password, two
   identical buttons, a check, a checkbox, a dropdown, Enter, a test id, an icon button, a link to a new page and a
   check there), then replays the recorded test with the runner: every step passes.
+- `scripts/connect-check.ts` loads the extension in Chrome: a look-alike page on another address is refused, and the
+  app's /extension page connects it so the popup lists the projects.
 - `scripts/pack-extension.ts` makes the icons and `dist/claritia-recorder.zip` for the Chrome Web Store.
 
 ## Running cost

@@ -206,4 +206,16 @@
     // Not in an extension (tests drive apply directly).
   }
   window.__claritiaApply = apply;
+
+  // One-click connect: app.tryclaritia.com/extension hands over a key it just made. The background worker only takes it
+  // when this page really is the Claritia app.
+  window.addEventListener("message", (e) => {
+    if (e.source !== window || e.origin !== window.location.origin || e.data?.type !== "claritia-recorder-connect") return;
+    const reply = (ok, error) => window.postMessage({ type: "claritia-recorder-connected", ok, error }, window.location.origin);
+    try {
+      chrome.runtime.sendMessage({ type: "connect", key: String(e.data.key ?? ""), app: String(e.data.app ?? "") }, (r) => reply(!!r?.ok, r?.error));
+    } catch {
+      reply(false, "The recorder was reloaded. Reload this page.");
+    }
+  });
 })();

@@ -8,9 +8,15 @@
   <body>
     <header><span class="mark"></span>Claritia Recorder</header>
     <section id="setup" hidden>
-      <label>API key<input id="key" type="password" placeholder="clr_…" autocomplete="off" /></label>
-      <label>App<input id="app" placeholder="https://app.tryclaritia.com" /></label>
-      <button id="connect" class="primary">Connect</button>
+      <button id="signin" class="primary">Connect to Claritia</button>
+      <details>
+        <summary>Use an API key</summary>
+        <div class="stack">
+          <label>API key<input id="key" type="password" placeholder="clr_…" autocomplete="off" /></label>
+          <label>App<input id="app" placeholder="https://app.tryclaritia.com" /></label>
+          <button id="connect">Connect with key</button>
+        </div>
+      </details>
     </section>
     <section id="main" hidden>
       <div class="row">

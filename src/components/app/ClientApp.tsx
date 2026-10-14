@@ -15,6 +15,7 @@ import { EnvironmentsView } from "./views/EnvironmentsView";
 import { InsightsView } from "./views/InsightsView";
 import { SchedulesView } from "./views/SchedulesView";
 import { RunsView } from "./views/RunsView";
+import { ConnectExtension } from "./ConnectExtension";
 import { MapView } from "./views/MapView";
 import { SettingsView } from "./views/SettingsView";
 import { TestsView } from "./views/TestsView";
@@ -184,6 +185,7 @@ export function ClientApp({ config }: { config: SupaConfig }) {
       </main>
     );
   if (!ws || projects === null) return <Splash />;
+  if (window.location.pathname === "/extension") return <ConnectExtension sb={sb} session={session} ws={ws} />;
 
   const project = projects.find((p) => p.id === projectId) ?? null;
   const props: ViewProps = { sb, session, ws, role, project, projectsChanged: loadProjects, navigate, id: loc.id };

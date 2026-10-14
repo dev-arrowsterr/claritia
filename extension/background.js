@@ -3,6 +3,8 @@
 import { addStep } from "./steps.js";
 
 const DEFAULT_APP = "https://app.tryclaritia.com";
+// Where one-click connect may come from: the Claritia app, or a local copy of it for development.
+const CONNECT_FROM = new Set([DEFAULT_APP, "http://localhost:3000"]);
 const empty = { recording: false, tabId: null, mode: "record", steps: [], origin: "" };
 
 async function state() {
@@ -53,6 +55,15 @@ chrome.runtime.onMessage.addListener((m, sender, reply) => {
         return reply(await setState({ ...rec, steps: rec.steps.filter((_, i) => i !== m.index) }));
       case "clear":
         return reply(await setState({ ...empty, tabId: rec.tabId }));
+      case "connect": {
+        // From the Claritia app's /extension page only: checked by the page's real address, not what it says.
+        const from = sender.url ? new URL(sender.url).origin : "";
+        if (!CONNECT_FROM.has(from) || m.app !== from) return reply({ error: "Connect only works from the Claritia app." });
+        const next = { key: m.key.trim(), app: from };
+        await api("/projects", {}, next);
+        await chrome.storage.local.set(next);
+        return reply({ ok: true });
+      }
       case "saveSettings": {
         // Saved only once Claritia accepts the key.
         const next = { key: m.key.trim(), app: (m.app || DEFAULT_APP).trim().replace(/\/+$/, "") };
