@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Claritia Recorder</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <header><span class="mark"></span>Claritia Recorder</header>
+    <section id="setup" hidden>
+      <label>API key<input id="key" type="password" placeholder="clr_…" autocomplete="off" /></label>
+      <label>App<input id="app" placeholder="https://app.tryclaritia.com" /></label>
+      <button id="connect" class="primary">Connect</button>
+    </section>
+    <section id="main" hidden>
+      <div class="row">
+        <button id="record" class="primary">Record</button>
+        <button id="check">Add check</button>
+        <button id="clear" class="plain">Clear</button>
+      </div>
+      <ol id="steps"></ol>
+      <label>Name<input id="name" placeholder="Checkout with a coupon" /></label>
+      <label>Use case<input id="useCase" placeholder="Checkout" /></label>
+      <div class="label">Project</div>
+      <div id="projects" class="choices"></div>
+      <div class="row">
+        <button id="save" class="primary">Save test</button>
+        <button id="settings" class="plain">Settings</button>
+      </div>
+    </section>
+    <p id="error" class="error" hidden></p>
+    <p id="note" class="note" hidden></p>
+    <script type="module" src="popup.js"></script>
+  </body>
+</html>

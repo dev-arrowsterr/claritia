@@ -15,3 +15,4 @@ next-env.d.ts
 # env files
 .env*
 !.env.example
+dist/
