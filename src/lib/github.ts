@@ -1,7 +1,7 @@
 // The Claritia GitHub App: webhook signatures, the app's sign-in token, the install link's state, and what each
 // GitHub event asks for. No network calls here; those are in githubApp.ts.
 
-import { createHmac, createSign, timingSafeEqual } from "node:crypto";
+import { createHmac, createPrivateKey, createSign, timingSafeEqual } from "node:crypto";
 import type { Outcome } from "./outcome.ts";
 
 /** GitHub signs each webhook body with the app's webhook secret (X-Hub-Signature-256). */
@@ -14,12 +14,35 @@ export function verifySignature(body: string, header: string | null, secret: str
 
 const b64url = (s: string | Buffer) => Buffer.from(s).toString("base64url");
 
+/**
+ * The app's private key as a clean PEM, however it was pasted: with its line breaks lost or turned into spaces,
+ * with "\\n" written out, in quotes, or the whole .pem file base64-encoded. Throws a plain error if it isn't a key.
+ */
+export function readPrivateKey(raw: string): string {
+  let text = raw.trim().replace(/^["']|["']$/g, "").replace(/\\n/g, "\n");
+  if (!text.includes("-----BEGIN")) {
+    const decoded = Buffer.from(text.replace(/\s+/g, ""), "base64").toString("utf8");
+    if (decoded.includes("-----BEGIN")) text = decoded;
+  }
+  const m = text.match(/-----BEGIN ([A-Z ]+)-----([\s\S]*?)-----END \1-----/);
+  if (!m) throw new Error("GITHUB_APP_PRIVATE_KEY isn't a private key. Paste the whole .pem file from GitHub, from -----BEGIN to -----END.");
+  const body = m[2]!.replace(/\s+/g, "");
+  if (!body) throw new Error("GITHUB_APP_PRIVATE_KEY is empty between -----BEGIN and -----END. Paste the whole .pem file.");
+  const pem = `-----BEGIN ${m[1]}-----\n${body.match(/.{1,64}/g)!.join("\n")}\n-----END ${m[1]}-----\n`;
+  try {
+    createPrivateKey(pem);
+  } catch {
+    throw new Error("GITHUB_APP_PRIVATE_KEY is cut off or changed. Make a new private key on GitHub and paste the whole .pem file.");
+  }
+  return pem;
+}
+
 /** The token the app signs in to GitHub with: a JWT signed with its private key, good for 9 minutes. */
 export function appJwt(appId: string, privateKey: string, now = Date.now()): string {
   const iat = Math.floor(now / 1000) - 60;
   const head = b64url(JSON.stringify({ alg: "RS256", typ: "JWT" }));
   const body = b64url(JSON.stringify({ iat, exp: iat + 600, iss: appId }));
-  const sig = createSign("RSA-SHA256").update(`${head}.${body}`).sign(privateKey.replace(/\\n/g, "\n"));
+  const sig = createSign("RSA-SHA256").update(`${head}.${body}`).sign(readPrivateKey(privateKey));
   return `${head}.${body}.${b64url(sig)}`;
 }
 

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { createHmac, createVerify, generateKeyPairSync } from "node:crypto";
 import { test } from "node:test";
-import { appJwt, checkSummary, conclusionOf, planEvent, readState, signState, verifySignature } from "../src/lib/github.ts";
+import { appJwt, checkSummary, conclusionOf, planEvent, readPrivateKey, readState, signState, verifySignature } from "../src/lib/github.ts";
 import type { Outcome } from "../src/lib/outcome.ts";
 
 test("a webhook body is accepted only with the right signature", () => {
@@ -28,6 +28,26 @@ test("the app's token is a JWT signed with its key, naming the app, good for und
   assert.equal(claims.iat, now / 1000 - 60);
   assert.ok(claims.exp - claims.iat <= 600);
   assert.ok(createVerify("RSA-SHA256").update(`${head}.${body}`).verify(publicKey, Buffer.from(sig!, "base64url")));
+});
+
+test("the private key works however it was pasted", () => {
+  const { privateKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
+  const pem = privateKey.export({ type: "pkcs1", format: "pem" }).toString();
+  const clean = readPrivateKey(pem);
+  const pasted = {
+    "as is": pem,
+    "line breaks as spaces": pem.replace(/\n/g, " "),
+    "line breaks lost": pem.replace(/\n/g, ""),
+    "\\n written out": pem.replace(/\n/g, "\\n"),
+    "in quotes": `"${pem}"`,
+    "windows line breaks": pem.replace(/\n/g, "\r\n"),
+    "base64 of the file": Buffer.from(pem).toString("base64"),
+  };
+  for (const [how, raw] of Object.entries(pasted)) assert.equal(readPrivateKey(raw), clean, how);
+  assert.ok(appJwt("1", pem.replace(/\n/g, " ")).split(".").length === 3);
+  assert.throws(() => readPrivateKey("not a key"), /isn't a private key/);
+  assert.throws(() => readPrivateKey(pem.slice(0, 200) + pem.slice(-40)), /cut off or changed/);
+  assert.throws(() => readPrivateKey("-----BEGIN RSA PRIVATE KEY----- -----END RSA PRIVATE KEY-----"), /empty/);
 });
 
 test("the install state comes back only unchanged and in time", () => {
