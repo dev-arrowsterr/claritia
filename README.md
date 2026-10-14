@@ -126,6 +126,10 @@ npm run build
 
 ## Deploy
 
+**Fly.io:** see `docs/fly.md` to move the site and the runner from Render to Fly (`fly.toml`, `fly.runner.toml`), about $12 to $14 a month instead of about $32 (check).
+
+**Render (current):**
+
 One Render service (`claritia`) serves both domains. `src/proxy.ts` sends `/` on `tryclaritia.com` to the site, and everything on `app.tryclaritia.com` to the app (`/start` for now). `www.` goes to the bare domain.
 
 Add `tryclaritia.com`, `www.tryclaritia.com` and `app.tryclaritia.com` under the web service's Custom Domains, then add the DNS records Render shows at your domain registrar.

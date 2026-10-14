@@ -1,0 +1,16 @@
+# The Claritia runner on Fly.io: one always-on machine that takes runs from the queue and fires schedules.
+#   fly deploy --config fly.runner.toml
+app = "claritia-runner"
+primary_region = "nrt" # Tokyo, next to the Supabase database
+
+[build]
+  dockerfile = "worker/Dockerfile"
+
+[env]
+  WORKER_SLOTS = "2"
+
+# No public web address: the runner only reaches out to Supabase, Claude and the sites it tests.
+# Chromium needs room, so 2 GB.
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "2gb"
