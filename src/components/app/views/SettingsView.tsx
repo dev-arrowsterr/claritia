@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { LogOut, Settings } from "../../Icons";
+import { Copy, Key, LogOut, Plus, Settings } from "../../Icons";
 import { amount, planById, PLANS, type PlanId } from "@/lib/plans";
 import { INBOX_DOMAIN } from "@/lib/site";
 import { askConfirm, askText } from "../Dialogs";
@@ -17,6 +17,7 @@ import {
   Page,
   Panel,
   postJson,
+  timeAgo,
   useLoad,
   type ViewProps,
 } from "../ui";
@@ -106,6 +107,107 @@ function PlanPanel({ sb, session, ws, role }: Pick<ViewProps, "sb" | "session" |
   );
 }
 
+type ApiKey = { id: string; name: string; prefix: string; created_at: string; last_used_at: string | null };
+
+/** The workspace's API keys, for the REST API and the CLI. A new key shows once. */
+function KeysPanel({ sb, session, ws }: Pick<ViewProps, "sb" | "session" | "ws">) {
+  const keys = useLoad(async () => must(await sb.from("api_keys").select("id, name, prefix, created_at, last_used_at").eq("workspace_id", ws.id).is("revoked_at", null).order("created_at")) as ApiKey[], ws.id);
+  const [fresh, setFresh] = useState<{ name: string; key: string } | null>(null);
+  const [copied, setCopied] = useState(false);
+  const [error, setError] = useState("");
+  const act = async (fn: () => Promise<unknown>) => {
+    setError("");
+    try {
+      await fn();
+    } catch (e) {
+      setError(errorText(e));
+    }
+  };
+
+  return (
+    <Panel>
+      <CardHead label="API keys" count={keys.data?.length}>
+        <Button
+          variant="plain"
+          className="h-7 px-2"
+          onClick={() =>
+            act(async () => {
+              const name = await askText("Key name", { placeholder: "GitHub Actions", ok: "Create key" });
+              if (!name) return;
+              const { key } = await postJson<{ key: string }>(session, "/api/keys", { workspaceId: ws.id, name });
+              setCopied(false);
+              setFresh({ name, key });
+              keys.reload();
+            })
+          }
+        >
+          <Plus size={13} />
+          New key
+        </Button>
+      </CardHead>
+      {fresh ? (
+        <div className="flex flex-col gap-2 border-b border-line px-4 py-3">
+          <span className="text-[13px] font-medium">Copy {fresh.name} now. It won&apos;t show again.</span>
+          <div className="flex items-center gap-2">
+            <code className="min-w-0 flex-1 truncate border border-line bg-canvas px-2.5 py-1.5 font-mono text-[12.5px]">{fresh.key}</code>
+            <Button
+              variant="ghost"
+              onClick={() =>
+                navigator.clipboard?.writeText(fresh.key).then(() => {
+                  setCopied(true);
+                  setTimeout(() => setCopied(false), 1500);
+                })
+              }
+            >
+              <Copy size={12} />
+              {copied ? "Copied" : "Copy"}
+            </Button>
+            <Button variant="plain" onClick={() => setFresh(null)}>
+              Done
+            </Button>
+          </div>
+        </div>
+      ) : null}
+      {keys.error ? (
+        <div className="p-4">
+          <ErrorNote message={keys.error} />
+        </div>
+      ) : !keys.data ? (
+        <Loading />
+      ) : keys.data.length ? (
+        <ul className="divide-y divide-line">
+          {keys.data.map((k) => (
+            <li key={k.id} className="flex items-center gap-3 px-4 py-3">
+              <Key size={13} />
+              <span className="min-w-0 truncate text-[13.5px] font-medium">{k.name}</span>
+              <span className="font-mono text-[12px] text-faint">{k.prefix}…</span>
+              <span className="ml-auto hidden text-[12px] text-muted sm:inline">{k.last_used_at ? `Used ${timeAgo(k.last_used_at)}` : "Never used"}</span>
+              <Button
+                variant="plain"
+                className="h-7 px-2"
+                onClick={() =>
+                  act(async () => {
+                    if (!(await askConfirm(`Revoke ${k.name}?`, { body: "Anything using this key stops working.", ok: "Revoke key", danger: true }))) return;
+                    must(await sb.rpc("revoke_api_key", { p_key: k.id }));
+                    keys.reload();
+                  })
+                }
+              >
+                Revoke
+              </Button>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+      {error ? (
+        <div className="px-4 pb-3">
+          <ErrorNote message={error} />
+        </div>
+      ) : null}
+    </Panel>
+  );
+}
+
 export function SettingsView({ sb, session, ws, role, project, projectsChanged, navigate }: ViewProps) {
   const [error, setError] = useState("");
   const inbox = useLoad(async () => (project ? ((must(await sb.from("projects").select("inbox_id").eq("id", project.id).single()) as { inbox_id: string }).inbox_id) : ""), project?.id ?? "none");
@@ -172,6 +274,8 @@ export function SettingsView({ sb, session, ws, role, project, projectsChanged, 
 
 
         <PlanPanel sb={sb} session={session} ws={ws} role={role} />
+
+        <KeysPanel sb={sb} session={session} ws={ws} />
 
         <Panel>
           <CardHead label="Workspace" count={members.data ? `${members.data.length} ${members.data.length === 1 ? "member" : "members"}` : undefined}>

@@ -309,6 +309,36 @@ update app_config set value = 'https://claritia-runner.fly.dev/' where key = 'ru
 select minute_tick();
 select pg_temp.check(not exists (select 1 from app_config where key = 'runner_last_wake'), 'A wake-up was recorded with no way to send it');
 
+-- API keys: members make and revoke their own workspace's keys, nobody reads a key's hash,
+-- and only the server signs in with a key or starts runs with one.
+select pg_temp.as_user('b0000000-0000-0000-0000-000000000000');
+set role authenticated;
+select create_api_key('11111111-0000-0000-0000-000000000000', 'CI', 'clr_abcd', repeat('a', 64));
+select pg_temp.fails($$select create_api_key('22222222-0000-0000-0000-000000000000', 'CI', 'clr_abcd', repeat('b', 64))$$, 'Ben makes a key in Cat''s workspace');
+select pg_temp.fails($$select key_hash from api_keys$$, 'Ben reads a key''s hash');
+select pg_temp.check((select count(*) from api_keys) = 1, 'Ben can''t see his workspace''s key');
+select pg_temp.fails($$insert into api_keys (workspace_id, name, prefix, key_hash) values ('11111111-0000-0000-0000-000000000000', 'x', 'clr_x', repeat('c', 64))$$, 'Ben adds a key without the server');
+select pg_temp.fails($$select * from api_key_auth(repeat('a', 64))$$, 'Ben signs in with a key hash');
+select pg_temp.fails($$select * from api_start_runs((select id from api_keys limit 1), 'a1000000-0000-0000-0000-000000000000', 'a2000000-0000-0000-0000-000000000000', array['a5000000-0000-0000-0000-000000000000'::uuid])$$, 'Ben starts runs as the server');
+reset role;
+select pg_temp.as_user('c0000000-0000-0000-0000-000000000000');
+set role authenticated;
+select pg_temp.check((select count(*) from api_keys) = 0, 'Cat sees Acme''s keys');
+select pg_temp.fails($$select revoke_api_key((select id from public.api_keys where workspace_id = '11111111-0000-0000-0000-000000000000'))$$, 'Cat revokes Acme''s key');
+reset role;
+select set_config('request.jwt.claim.sub', '', false);
+select pg_temp.check((select workspace_id from api_key_auth(repeat('a', 64))) = '11111111-0000-0000-0000-000000000000', 'The server can''t find a key''s workspace');
+select pg_temp.check(not exists (select 1 from api_key_auth(repeat('f', 64))), 'An unknown key signs in');
+select pg_temp.fails_with($$select * from api_start_runs((select id from api_keys where key_hash = repeat('a', 64)), 'c1000000-0000-0000-0000-000000000000', 'c2000000-0000-0000-0000-000000000000', array['c5000000-0000-0000-0000-000000000000'::uuid])$$, '%Project not found%', 'An Acme key starts runs in Cat''s project');
+select pg_temp.fails_with($$select * from api_start_runs((select id from api_keys where key_hash = repeat('a', 64)), 'a1000000-0000-0000-0000-000000000000', 'a2000000-0000-0000-0000-000000000000', array['c5000000-0000-0000-0000-000000000000'::uuid])$$, '%Test not found%', 'An Acme key runs Cat''s test');
+select pg_temp.check((select count(*) from api_start_runs((select id from api_keys where key_hash = repeat('a', 64)), 'a1000000-0000-0000-0000-000000000000', 'a2000000-0000-0000-0000-000000000000', array['a5000000-0000-0000-0000-000000000000'::uuid])) = 1, 'A key can''t start a run');
+select pg_temp.check((select count(*) from runs where trigger = 'api' and api_key_id is not null and created_by = 'b0000000-0000-0000-0000-000000000000') = 1, 'A key''s run doesn''t name its key and who made it');
+select pg_temp.as_user('b0000000-0000-0000-0000-000000000000');
+set role authenticated;
+select revoke_api_key((select id from api_keys limit 1));
+reset role;
+select pg_temp.check(not exists (select 1 from api_key_auth(repeat('a', 64))), 'A revoked key still signs in');
+
 -- Cloud minutes: once Acme has used its 2,000, nobody there can start a run.
 insert into runs (workspace_id, project_id, test_name, test_version, environment_name, base_url, lock, status, duration_ms)
 values ('11111111-0000-0000-0000-000000000000', 'a1000000-0000-0000-0000-000000000000', 'long', 1, 'staging', 'https://x.com', '', 'passed', 2000 * 60000);

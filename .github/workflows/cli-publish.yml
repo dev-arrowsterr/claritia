@@ -1,0 +1,38 @@
+# Publish the CLI (cli/) to npm as `claritia` when its version changes on main.
+# Needs one repository secret, NPM_TOKEN (an npm automation token). Without it, the publish is skipped.
+name: Publish the CLI
+
+on:
+  push:
+    branches: [main]
+    paths: [cli/**]
+  workflow_dispatch:
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    env:
+      NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+      - run: npm ci
+      - run: node --conditions=react-server --test tests/cli.test.ts
+      - name: Publish if this version is new
+        if: env.NPM_TOKEN != ''
+        working-directory: cli
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          version=$(node -p "require('./package.json').version")
+          if npm view "claritia@$version" version >/dev/null 2>&1; then
+            echo "claritia@$version is already on npm."
+          else
+            npm publish --access public
+          fi
+      - name: No npm token yet
+        if: env.NPM_TOKEN == ''
+        run: echo "::notice::Add the NPM_TOKEN repository secret to publish the CLI to npm."
