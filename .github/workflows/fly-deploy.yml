@@ -48,7 +48,8 @@ jobs:
         run: flyctl status --app ${{ matrix.app }} >/dev/null 2>&1 || flyctl apps create ${{ matrix.app }}
       - name: Deploy ${{ matrix.app }}
         if: env.FLY_API_TOKEN != ''
-        run: flyctl deploy --remote-only --config ${{ matrix.config }} --app ${{ matrix.app }}
+        # --ha=false: one machine per app. Fly would start two on the first deploy, which doubles the bill.
+        run: flyctl deploy --remote-only --ha=false --config ${{ matrix.config }} --app ${{ matrix.app }}
       - name: No Fly token yet
         if: env.FLY_API_TOKEN == ''
         run: echo "::notice::Add the FLY_API_TOKEN repository secret to deploy ${{ matrix.app }} to Fly.io."

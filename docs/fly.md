@@ -49,8 +49,8 @@ fly secrets set --app claritia-runner \
 ## 4. Deploy
 
 ```bash
-fly deploy                              # the web app
-fly deploy --config fly.runner.toml     # the runner
+fly deploy --ha=false                    # the web app
+fly deploy --ha=false --config fly.runner.toml # the runner
 ```
 
 Check `https://claritia-web.fly.dev` loads. Then tell the database where to wake the runner, in the Supabase SQL editor:
@@ -84,4 +84,4 @@ Every push to `main` deploys both apps, through `.github/workflows/fly-deploy.ym
 1. Make a token: `fly tokens create org` (one token works for both apps).
 2. In GitHub → the `claritia` repo → Settings → Secrets and variables → Actions → New repository secret, name it `FLY_API_TOKEN` and paste the token.
 
-Until the secret is there, the workflow runs the checks and skips the deploy. To deploy by hand, run `fly deploy` and `fly deploy --config fly.runner.toml`. Turn off Render's auto deploy (or delete the Render services) so pushes don't deploy to both.
+Until the secret is there, the workflow runs the checks and skips the deploy. To deploy by hand, run `fly deploy --ha=false` and `fly deploy --ha=false --config fly.runner.toml`. Turn off Render's auto deploy (or delete the Render services) so pushes don't deploy to both.
