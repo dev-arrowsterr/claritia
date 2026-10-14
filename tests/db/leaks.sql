@@ -472,6 +472,48 @@ select set_config('request.jwt.claim.sub', '', false);
 select pg_temp.check((select status from explorations where id = (select id from x1)) = 'canceled', 'Ben couldn''t stop his exploration');
 select minute_tick();
 
+-- Planner: members ask for plans and accept or dismiss proposals in their own projects; plans and proposals are
+-- written by the runner only.
+select pg_temp.as_user('b0000000-0000-0000-0000-000000000000');
+set role authenticated;
+create temp table p1 as select start_plan('a1000000-0000-0000-0000-000000000000', 'Users can apply coupons at checkout.') as id;
+select pg_temp.fails_with($$select start_plan('a1000000-0000-0000-0000-000000000000')$$, '%already being made%', 'Two plans of one project at once');
+select pg_temp.fails($$select start_plan('c1000000-0000-0000-0000-000000000000', 'x')$$, 'Ben plans Cat''s project');
+select pg_temp.fails($$insert into test_proposals (workspace_id, project_id, name, steps) values ('11111111-0000-0000-0000-000000000000', 'a1000000-0000-0000-0000-000000000000', 'x', '[]')$$, 'Ben writes a proposal');
+select pg_temp.fails($$select * from claim_plan('me')$$, 'Ben claims a plan as the runner');
+reset role;
+select pg_temp.as_user('c0000000-0000-0000-0000-000000000000');
+set role authenticated;
+select pg_temp.fails_with($$select start_plan('c1000000-0000-0000-0000-000000000000')$$, '%Explore the app in Map first%', 'A plan with no map and no notes was taken');
+select pg_temp.check((select count(*) from plans) = 0, 'Cat sees Acme''s plans');
+reset role;
+select set_config('request.jwt.claim.sub', '', false);
+select pg_temp.check((select count(*) from claim_plan('runner-1')) = 1, 'The runner can''t take a waiting plan');
+insert into test_proposals (id, workspace_id, project_id, plan_id, name, use_case, priority, steps) values
+  ('ac000000-0000-0000-0000-000000000001', '11111111-0000-0000-0000-000000000000', 'a1000000-0000-0000-0000-000000000000', (select id from p1), 'Apply a coupon', 'Checkout', 'high',
+   '[{"kind":"use","block":"a4000000-0000-0000-0000-000000000000"},{"kind":"use","block":"c4000000-0000-0000-0000-000000000000"},{"kind":"do","text":"Type SAVE10 into the coupon field"},{"kind":"check","text":"The total drops 10%"}]'),
+  ('ac000000-0000-0000-0000-000000000002', '11111111-0000-0000-0000-000000000000', 'a1000000-0000-0000-0000-000000000000', (select id from p1), 'Remove an item', 'Cart', 'medium', '[{"kind":"do","text":"Remove the hoodie"}]');
+select pg_temp.as_user('c0000000-0000-0000-0000-000000000000');
+set role authenticated;
+select pg_temp.check((select count(*) from test_proposals) = 0, 'Cat sees Acme''s proposals');
+select pg_temp.fails($$select accept_proposal('ac000000-0000-0000-0000-000000000001')$$, 'Cat accepts Acme''s proposal');
+select pg_temp.fails($$select dismiss_proposal('ac000000-0000-0000-0000-000000000002')$$, 'Cat dismisses Acme''s proposal');
+reset role;
+select pg_temp.as_user('b0000000-0000-0000-0000-000000000000');
+set role authenticated;
+create temp table t1 as select accept_proposal('ac000000-0000-0000-0000-000000000001') as id;
+select pg_temp.check((select jsonb_array_length(steps) from tests where id = (select id from t1)) = 3, 'An accepted proposal kept a block from another project');
+select pg_temp.check((select bool_and(length(s ->> 'id') = 8) from tests t, jsonb_array_elements(t.steps) s where t.id = (select id from t1)), 'An accepted proposal''s steps have no ids');
+select pg_temp.check((select status from test_proposals where id = 'ac000000-0000-0000-0000-000000000001') = 'accepted', 'An accepted proposal isn''t marked accepted');
+select pg_temp.fails_with($$select accept_proposal('ac000000-0000-0000-0000-000000000001')$$, '%already accepted%', 'A proposal accepted twice');
+select dismiss_proposal('ac000000-0000-0000-0000-000000000002');
+select pg_temp.fails($$select accept_proposal('ac000000-0000-0000-0000-000000000002')$$, 'A dismissed proposal was accepted');
+reset role;
+select set_config('request.jwt.claim.sub', '', false);
+update plans set ai_calls = 10 where id = (select id from p1);
+select pg_temp.check((select credits_used from workspace_usage('11111111-0000-0000-0000-000000000000')) >= 10, 'A plan''s AI credits aren''t counted');
+select minute_tick();
+
 -- Cloud minutes: once Acme has used its 2,000, nobody there can start a run.
 insert into runs (workspace_id, project_id, test_name, test_version, environment_name, base_url, lock, status, duration_ms)
 values ('11111111-0000-0000-0000-000000000000', 'a1000000-0000-0000-0000-000000000000', 'long', 1, 'staging', 'https://x.com', '', 'passed', 2000 * 60000);

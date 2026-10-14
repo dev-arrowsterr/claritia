@@ -5,6 +5,7 @@ import { stepId } from "@/lib/testfile";
 import { Globe, Key, ListIcon, Play, Plus } from "../../Icons";
 import { askText } from "../Dialogs";
 import { announceChange, Badge, Button, StatusTag, Empty, ErrorNote, errorText, Field, hostOf, Input, Loading, must, Page, postJson, PriorityBars, cleanUrl, Th, timeAgo, useLoad, type Environment, type ViewProps } from "../ui";
+import { Proposals } from "./Proposals";
 import { latestRuns } from "./RunsView";
 import { TestView, type TestRow } from "./TestView";
 
@@ -166,6 +167,7 @@ function StartScreen({ sb, session, ws, project, projectsChanged }: ViewProps) {
 function TestList(props: ViewProps & { env: Environment }) {
   const { sb, project, navigate, env } = props;
   const [error, setError] = useState("");
+  const [asking, setAsking] = useState(false);
   const list = useLoad(
     async () => must(await sb.from("tests").select("id, name, use_case, priority, steps, updated_at").eq("project_id", project!.id).order("use_case").order("name")) as ListRow[],
     project!.id,
@@ -203,12 +205,18 @@ function TestList(props: ViewProps & { env: Environment }) {
       count={list.data?.length}
       flush={!!list.data?.length}
       actions={
-        <Button onClick={create}>
-          <Plus size={13} />
-          New test
-        </Button>
+        <>
+          <Button variant="ghost" onClick={() => setAsking(true)} disabled={asking}>
+            Plan tests
+          </Button>
+          <Button onClick={create}>
+            <Plus size={13} />
+            New test
+          </Button>
+        </>
       }
     >
+      <Proposals sb={sb} project={project!} navigate={navigate} asking={asking} onAsked={() => setAsking(false)} onAccepted={list.reload} />
       {error || list.error ? (
         <div className="p-4">
           <ErrorNote message={error || list.error} />
