@@ -4,12 +4,15 @@
 // Needs SUPABASE_URL, SUPABASE_SECRET_KEY (or its older name SUPABASE_SERVICE_ROLE_KEY) and SECRETS_KEY. Answers health checks on PORT.
 // With ANTHROPIC_API_KEY it writes code for steps that have none (CLAUDE_MODEL and CLAUDE_EFFORT are optional).
 // Test inboxes read mail on INBOX_DOMAIN (default inbox.tryclaritia.com).
+// With IDLE_EXIT_MS, the runner exits after that long with nothing to run, so a Fly.io machine can sleep for free
+// between runs. The database wakes it by calling its address when a run is queued (supabase/migrations/011).
 
 import { randomUUID } from "node:crypto";
 import { createServer } from "node:http";
 import { hostname } from "node:os";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { handleRun, type Run } from "./handle.ts";
+import { shouldSleep } from "./idle.ts";
 import { claudeJudge, type Judge } from "./judge.ts";
 import { claudeWriter, type Writer } from "./writer.ts";
 
@@ -25,6 +28,8 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 let stopping = false;
 const busy = new Set<string>();
+const IDLE_EXIT_MS = Number(env("IDLE_EXIT_MS") || 0);
+let lastWorkAt = Date.now();
 
 // Health checks: Render needs a port to know the service is up.
 createServer((req, res) => {
@@ -46,6 +51,23 @@ if (missing.length) {
   log(`Runner ${WORKER_ID} started with ${SLOTS} slots${writer ? "" : ". No ANTHROPIC_API_KEY, so steps with no code can't be written"}.`);
   for (let i = 0; i < SLOTS; i++) void slot(sb, i, writer, judge);
   void scheduler(sb);
+
+  // Go to sleep when there's been nothing to run for IDLE_EXIT_MS. One last look first, so a run queued
+  // just now isn't left waiting.
+  if (IDLE_EXIT_MS > 0) {
+    log(`Sleeps after ${Math.round(IDLE_EXIT_MS / 1000)}s with nothing to run.`);
+    setInterval(async () => {
+      if (stopping || !shouldSleep({ idleExitMs: IDLE_EXIT_MS, lastWorkAt, now: Date.now(), running: busy.size })) return;
+      const { count } = await sb.from("runs").select("id", { count: "exact", head: true }).eq("status", "queued");
+      if (count) {
+        lastWorkAt = Date.now();
+        return;
+      }
+      stopping = true;
+      log("Nothing to run: going to sleep.");
+      process.exit(0);
+    }, 5000);
+  }
 
   // On shutdown, hand running runs back to the queue so another runner picks them up right away.
   const shutdown = async () => {
@@ -70,10 +92,12 @@ async function slot(sb: SupabaseClient, n: number, writer: Writer | undefined, j
         continue;
       }
       busy.add(run.id);
+      lastWorkAt = Date.now();
       try {
         await handleRun(sb, run, { workerId: WORKER_ID, chromiumPath: env("CHROMIUM_PATH") || undefined, log, writer, judge, inboxDomain: env("INBOX_DOMAIN") || undefined });
       } finally {
         busy.delete(run.id);
+        lastWorkAt = Date.now();
       }
     } catch (e) {
       log(`Slot ${n}:`, e instanceof Error ? e.message : e);

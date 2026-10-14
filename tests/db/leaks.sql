@@ -147,6 +147,10 @@ select pg_temp.check(pg_temp.touched($$insert into schedules (id, project_id, en
 select pg_temp.check((select next_run_at from schedules) > now() and (select workspace_id from schedules) = '11111111-0000-0000-0000-000000000000', 'A new schedule didn''t get its own next run time and workspace');
 select pg_temp.check(pg_temp.touched($$update schedules set last_run_at = now() - interval '1 year', last_count = 999 where id = 'a9000000-0000-0000-0000-000000000000'$$) = 1 and (select last_count from schedules) is null, 'Ben fakes when a schedule last ran');
 select pg_temp.fails($$select fire_due_schedules()$$, 'Ben fires schedules like the runner');
+select pg_temp.fails($$select * from app_config$$, 'Ben reads the server''s settings');
+select pg_temp.fails($$update app_config set value = 'https://evil.example'$$, 'Ben points the runner wake-up somewhere else');
+select pg_temp.fails($$select wake_runner()$$, 'Ben wakes the runner directly');
+select pg_temp.fails($$select minute_tick()$$, 'Ben runs the minute tick');
 -- Inboxes
 select pg_temp.check((select count(*) from inbox_messages) = 1 and (select subject from inbox_messages) = 'Acme code', 'Ben can''t read only his own inbox');
 select pg_temp.fails($$insert into inbox_messages (workspace_id, project_id, to_address) values ('11111111-0000-0000-0000-000000000000', 'a1000000-0000-0000-0000-000000000000', 'fake')$$, 'Ben plants an email');
@@ -299,6 +303,11 @@ set session_replication_role = origin;
 select fire_due_schedules();
 select pg_temp.check((select last_count from schedules where id = 'a9000000-0000-0000-0000-000000000000') = 0 and (select count(*) from runs where schedule_id = 'a9000000-0000-0000-0000-000000000000') = (select count(*) from tests where project_id = 'a1000000-0000-0000-0000-000000000000' and jsonb_array_length(steps) > 0), 'A schedule queued tests that were still waiting');
 select pg_temp.check(fire_due_schedules() = 0, 'A schedule fired before its time');
+
+-- Without pg_net, queuing a run and the minute tick still work, and nothing is called.
+update app_config set value = 'https://claritia-runner.fly.dev/' where key = 'runner_wake_url';
+select minute_tick();
+select pg_temp.check(not exists (select 1 from app_config where key = 'runner_last_wake'), 'A wake-up was recorded with no way to send it');
 
 -- Cloud minutes: once Acme has used its 2,000, nobody there can start a run.
 insert into runs (workspace_id, project_id, test_name, test_version, environment_name, base_url, lock, status, duration_ms)

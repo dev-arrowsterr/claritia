@@ -5,10 +5,17 @@ Two Fly apps, both in Tokyo (`nrt`), next to the Supabase database:
 | App | Config | Machine | Cost a month (check) |
 |---|---|---|---|
 | `claritia-web` (site and app) | `fly.toml`, `Dockerfile` | shared-cpu-1x, 512 MB, sleeps when idle | about $1 to $3 |
-| `claritia-runner` (runs tests, fires schedules) | `fly.runner.toml`, `worker/Dockerfile` | shared-cpu-1x, 2 GB, always on | about $11 |
-| **Total** | | | **about $12 to $14** |
+| `claritia-runner` (runs tests) | `fly.runner.toml`, `worker/Dockerfile` | shared-cpu-1x, 2 GB, sleeps when there's nothing to run | about $0.30 stopped, plus about $0.015 per hour of runs |
+| **Total before launch** | | | **about $1 to $2** |
 
 Render today: about $32 (runner $25, web $7). Fly bills by the second; Tokyo can cost a little more than US regions.
+
+### How the runner sleeps and wakes
+
+- After 5 minutes with nothing to run (`IDLE_EXIT_MS`), the runner exits and Fly stops the machine. A stopped machine only costs its disk.
+- When a run is queued, the database calls `https://claritia-runner.fly.dev/` (pg_net). Fly starts the machine, which takes about 2 to 5 seconds, then the runner takes the run.
+- Every minute the database fires due schedules itself (pg_cron), so schedules work while the runner sleeps, and it wakes the runner again if a run has been waiting.
+- The wake address lives in the database, in `app_config`. Set it once after the runner's first deploy (step 4).
 
 ## 1. Sign up and install
 
@@ -46,7 +53,13 @@ fly deploy                              # the web app
 fly deploy --config fly.runner.toml     # the runner
 ```
 
-Check `https://claritia-web.fly.dev` loads. The runner and Render's runner can run side by side safely: each run is taken by one of them only.
+Check `https://claritia-web.fly.dev` loads. Then tell the database where to wake the runner, in the Supabase SQL editor:
+
+```sql
+update app_config set value = 'https://claritia-runner.fly.dev/' where key = 'runner_wake_url';
+```
+
+ The runner and Render's runner can run side by side safely: each run is taken by one of them only.
 
 ## 5. Point the domains at Fly
 

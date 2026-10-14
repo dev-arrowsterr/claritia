@@ -1,5 +1,8 @@
-# The Claritia runner on Fly.io: one always-on machine that takes runs from the queue and fires schedules.
+# The Claritia runner on Fly.io. It sleeps when there's nothing to run, so it only costs money while tests run.
 #   fly deploy --config fly.runner.toml
+# How it wakes: the database calls https://claritia-runner.fly.dev/ when a run is queued (supabase/migrations/011),
+# Fly starts the machine, and the runner takes the run. After IDLE_EXIT_MS with nothing to run, it exits and the
+# machine stops.
 app = "claritia-runner"
 primary_region = "nrt" # Tokyo, next to the Supabase database
 
@@ -8,8 +11,22 @@ primary_region = "nrt" # Tokyo, next to the Supabase database
 
 [env]
   WORKER_SLOTS = "2"
+  IDLE_EXIT_MS = "300000" # 5 minutes
 
-# No public web address: the runner only reaches out to Supabase, Claude and the sites it tests.
+# The wake-up address. Fly starts the machine on a request; the runner decides when to stop, never Fly's proxy,
+# so a run is never cut off halfway.
+[http_service]
+  internal_port = 10000
+  force_https = true
+  auto_stop_machines = "off"
+  auto_start_machines = true
+  min_machines_running = 0
+
+# Exiting on purpose (going to sleep) leaves the machine stopped. A crash restarts it.
+[[restart]]
+  policy = "on-failure"
+  retries = 5
+
 # Chromium needs room, so 2 GB.
 [[vm]]
   size = "shared-cpu-1x"
