@@ -57,11 +57,11 @@ Assuming each team writes or rewrites 150 steps a month:
 
 | | Beta (50 teams) | Growth (500 teams) |
 |---|---|---|
-| Mailgun inbound (test inboxes) | $0 (free plan, 1 route) | about $35 (a paid plan for the mail volume) |
+| Resend receiving (test inboxes) | $0 on your current plan (check) | a paid Resend plan for the mail volume, about $20 (check) |
 | Stripe fees | 2.9% + $0.30 a charge: about $90 on 50 teams at $49 | about $1,900 on 500 teams averaging $120 |
 | Storage for network logs and email | about $0 | about $1 |
 | New servers | $0 | $0 |
-| **Added each month** | **about $90** | **about $1,935** |
+| **Added each month** | **about $90** | **about $1,920** |
 
 Stripe's fee comes out of revenue, so it grows only with paying customers.
 
@@ -69,7 +69,7 @@ Stripe's fee comes out of revenue, so it grows only with paying customers.
 
 1. **Supabase:** run each file in `supabase/migrations` in order (SQL Editor). Under Authentication → URL Configuration, set the Site URL to `https://app.tryclaritia.com` and add `https://app.tryclaritia.com/**` and `http://localhost:3000/**` to the redirect list. Under Providers, turn on Google and GitHub.
 2. **Render:** add `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY` and `SECRETS_KEY` (32+ random characters, never change it once secrets are saved). The web service also needs `SUPABASE_SECRET_KEY` for the mail and Stripe webhooks.
-3. **Test inboxes (Mailgun):** add the domain `inbox.tryclaritia.com` in Mailgun and add the DNS records it shows (MX, SPF, DKIM) at the domain registrar. Create one route: match recipient `.*@inbox.tryclaritia.com`, action forward to `https://app.tryclaritia.com/api/inbox/mailgun`. Copy the HTTP webhook signing key into `MAILGUN_SIGNING_KEY` on the web service.
+3. **Test inboxes (Resend):** in Resend, add the domain `inbox.tryclaritia.com`, turn on receiving, and add the MX record it shows at the domain registrar. Add a webhook for the `email.received` event to `https://app.tryclaritia.com/api/inbox/resend`. Put a full-access API key in `RESEND_API_KEY` on the web service. No webhook secret is needed: the app fetches each email back from Resend with the key before it saves it.
 4. **Billing (Stripe):** set `STRIPE_SECRET_KEY` on the web service. That's all: prices come from `src/lib/plans.ts`, and the first checkout makes the webhook to `/api/billing/webhook` in Stripe, and the first "Manage billing" makes the billing page. The webhook needs no signing secret, because each event is fetched back from Stripe with the secret key before it's used.
 
 ## Local development

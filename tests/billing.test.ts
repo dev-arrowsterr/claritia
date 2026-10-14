@@ -1,29 +1,33 @@
 import assert from "node:assert/strict";
-import { createHmac } from "node:crypto";
 import { test } from "node:test";
 import Stripe from "stripe";
 import { applySubscription, handleWebhook, lineFor } from "../src/lib/billing.ts";
-import { readRecipient, verifyMailgun } from "../src/lib/mailgun.ts";
+import { fetchReceived, firstInbox, readRecipient } from "../src/lib/inbound.ts";
 
-
-test("Mailgun requests are checked by their signature and age", () => {
-  const key = "key-test";
-  const now = Date.now();
-  const ts = String(Math.floor(now / 1000));
-  const sig = createHmac("sha256", key).update(ts + "tok").digest("hex");
-  assert.ok(verifyMailgun(key, ts, "tok", sig, now));
-  assert.ok(!verifyMailgun(key, ts, "tok2", sig, now), "another token");
-  assert.ok(!verifyMailgun("other", ts, "tok", sig, now), "another key");
-  assert.ok(!verifyMailgun(key, ts, "tok", sig, now + 20 * 60_000), "too old");
-  assert.ok(!verifyMailgun(key, ts, "tok", "nothex", now));
-  assert.ok(!verifyMailgun("", ts, "tok", sig, now));
-});
 
 test("inbox addresses map to a project's inbox id", () => {
   assert.deepEqual(readRecipient("a1b2c3d4-signup-1f2e3d@inbox.tryclaritia.com", "inbox.tryclaritia.com"), { inboxId: "a1b2c3d4", address: "a1b2c3d4-signup-1f2e3d@inbox.tryclaritia.com" });
   assert.equal(readRecipient("Sam <A1B2C3D4-X@Inbox.TryClaritia.com>", "inbox.tryclaritia.com")?.inboxId, "a1b2c3d4");
   assert.equal(readRecipient("a1b2c3d4@evil.com", "inbox.tryclaritia.com"), null);
   assert.equal(readRecipient("nothex-x@inbox.tryclaritia.com", "inbox.tryclaritia.com"), null);
+  assert.equal(firstInbox(["boss@acme.com", "a1b2c3d4-x-123456@inbox.tryclaritia.com"], "inbox.tryclaritia.com")?.address, "a1b2c3d4-x-123456@inbox.tryclaritia.com");
+  assert.equal(firstInbox("boss@acme.com", "inbox.tryclaritia.com"), null);
+});
+
+test("received emails are fetched from Resend with our key", async () => {
+  const calls: { url: string; auth: string | null }[] = [];
+  const fake = (async (url: string, init?: RequestInit) => {
+    calls.push({ url, auth: new Headers(init?.headers).get("authorization") });
+    if (url.endsWith("/missing")) return new Response("{}", { status: 404 });
+    return Response.json({ id: "em_1", from: "Acme <no-reply@acme.com>", to: ["a1b2c3d4-signup-abc123@inbox.tryclaritia.com"], subject: "Your code", text: null, html: "<p>Code 123456</p>" });
+  }) as typeof fetch;
+  const e = await fetchReceived("re_key", "em_1", fake);
+  assert.equal(calls[0]!.url, "https://api.resend.com/emails/receiving/em_1");
+  assert.equal(calls[0]!.auth, "Bearer re_key");
+  assert.equal(e.text, "");
+  assert.equal(e.html, "<p>Code 123456</p>");
+  assert.deepEqual(e.to, ["a1b2c3d4-signup-abc123@inbox.tryclaritia.com"]);
+  await assert.rejects(() => fetchReceived("re_key", "missing", fake), /404/);
 });
 
 /** A stand-in for the admin Supabase client: just workspace_billing. */
