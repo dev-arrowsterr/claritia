@@ -30,6 +30,7 @@ This repo holds the marketing site (`/` on tryclaritia.com) and the app (app.try
 - Schedules: run every test, one use case or picked tests on one environment, hourly, daily, on weekdays or weekly, in the schedule's own time zone. The runner checks every minute (`fire_due_schedules`), queues the due schedules' tests (up to 50 each) and moves them to their next time. A test still waiting from the last fire isn't queued again, and two runners never fire the same schedule twice. Scheduled runs are tagged on the Runs page. Once the plan's cloud minutes are used up, a schedule skips its fires and says why.
 - Insights: for the last 7 or 30 days, the pass rate, runs and cloud minutes, failures saved by re-runs, AI calls, failures by kind (App bug, Flaky, Setup) and every test ranked worst first.
 - API keys and the CLI: Settings → API keys makes a workspace key (shown once; only its SHA-256 is stored, `supabase/migrations/012_api_keys.sql`). The REST API at `/api/v1` lists projects and tests, starts up to 50 runs at once and reports where they stand, following a flaky run to its re-run. `npx claritia run` (`cli/`, no dependencies) starts the runs, prints each result as it finishes, writes the GitHub Actions job summary and exits 0 on pass, 1 on a failed test, 2 when a test couldn't run. See `cli/README.md`.
+- GitHub: Settings → GitHub connects the Claritia GitHub App and links a repository to the project. Each push to a pull request, or each preview deploy, runs the tests and posts a **Claritia** check that fails on a failed test, stays neutral when tests couldn't run, and re-runs from GitHub's Re-run button. A composite Action in `action/` wraps the CLI. See `docs/github.md`.
 - `tryclaritia.com/llms.txt` and `tryclaritia.com/pricing.md` describe Claritia and its pricing for AI agents.
 - Time to a first passing test is tracked: `workspaces.first_pass_at` is set by the first passing run. See "Launch numbers" below.
 
@@ -107,7 +108,8 @@ Stripe's fee comes out of revenue, so it grows only with paying customers.
 3. **Test inboxes (Resend):** in Resend, add the domain `inbox.tryclaritia.com`, turn on receiving, and add the MX record it shows at the domain registrar. Add a webhook for the `email.received` event to `https://app.tryclaritia.com/api/inbox/resend`. Put a full-access API key in `RESEND_API_KEY` on the web service. No webhook secret is needed: the app fetches each email back from Resend with the key before it saves it.
 4. **Billing (Stripe):** set `STRIPE_SECRET_KEY` on the web service. That's all: prices come from `src/lib/plans.ts`, and the first checkout makes the webhook to `/api/billing/webhook` in Stripe, and the first "Manage billing" makes the billing page. The webhook needs no signing secret, because each event is fetched back from Stripe with the secret key before it's used.
 
-5. **CLI on npm:** add an npm automation token as the `NPM_TOKEN` repository secret. `.github/workflows/cli-publish.yml` publishes `cli/` as `claritia` whenever its version changes on main.
+5. **GitHub App:** see `docs/github.md` (five `GITHUB_*` secrets on the web app).
+6. **CLI on npm:** add an npm automation token as the `NPM_TOKEN` repository secret. `.github/workflows/cli-publish.yml` publishes `cli/` as `claritia` whenever its version changes on main.
 
 ## Local development
 

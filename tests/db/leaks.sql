@@ -339,6 +339,37 @@ select revoke_api_key((select id from api_keys limit 1));
 reset role;
 select pg_temp.check(not exists (select 1 from api_key_auth(repeat('a', 64))), 'A revoked key still signs in');
 
+-- GitHub: installations and checks are written by the server only; links stay inside their workspace.
+insert into github_installations (id, workspace_id, account_login) values
+  (101, '11111111-0000-0000-0000-000000000000', 'acme'),
+  (202, '22222222-0000-0000-0000-000000000000', 'cat');
+select pg_temp.as_user('b0000000-0000-0000-0000-000000000000');
+set role authenticated;
+select pg_temp.fails($$insert into github_installations (id, workspace_id, account_login) values (303, '11111111-0000-0000-0000-000000000000', 'x')$$, 'Ben adds an installation without GitHub');
+select pg_temp.check((select count(*) from github_installations) = 1, 'Ben sees installations outside Acme');
+insert into github_links (id, project_id, installation_id, repo_id, repo_full_name, environment_id) values
+  ('ab000000-0000-0000-0000-000000000000', 'a1000000-0000-0000-0000-000000000000', 101, 9001, 'acme/shop', 'a2000000-0000-0000-0000-000000000000');
+select pg_temp.fails($$insert into github_links (project_id, installation_id, repo_id, repo_full_name, environment_id) values ('a1000000-0000-0000-0000-000000000000', 202, 9002, 'cat/app', 'a2000000-0000-0000-0000-000000000000')$$, 'Ben links Acme''s project through Cat''s installation');
+select pg_temp.fails($$insert into github_links (project_id, installation_id, repo_id, repo_full_name, environment_id) values ('a1000000-0000-0000-0000-000000000000', 101, 9003, 'acme/x', 'c2000000-0000-0000-0000-000000000000')$$, 'Ben links Acme''s project to Cat''s environment');
+select pg_temp.fails($$insert into github_checks (workspace_id, link_id, installation_id, repo_full_name, head_sha, base_url) values ('11111111-0000-0000-0000-000000000000', 'ab000000-0000-0000-0000-000000000000', 101, 'acme/shop', repeat('a', 40), 'https://x.com')$$, 'Ben writes a check');
+select pg_temp.fails($$select * from github_start_check('ab000000-0000-0000-0000-000000000000', repeat('a', 40), 1)$$, 'Ben starts a check as the server');
+reset role;
+select pg_temp.as_user('c0000000-0000-0000-0000-000000000000');
+set role authenticated;
+select pg_temp.check((select count(*) from github_links) = 0, 'Cat sees Acme''s GitHub links');
+update github_links set enabled = false;
+reset role;
+select pg_temp.check((select enabled from github_links where id = 'ab000000-0000-0000-0000-000000000000'), 'Cat turned off Acme''s GitHub link');
+select set_config('request.jwt.claim.sub', '', false);
+select pg_temp.check((select cardinality(run_ids) from github_start_check('ab000000-0000-0000-0000-000000000000', repeat('a', 40), 7)) >= 1, 'A pull request didn''t queue the project''s tests');
+select pg_temp.check((select count(*) from runs r join github_checks c on r.id = any (c.run_ids) where c.head_sha = repeat('a', 40) and r.trigger = 'ci' and r.base_url = 'https://staging.acme.com' and r.created_by = 'b0000000-0000-0000-0000-000000000000') >= 1, 'A check''s runs aren''t on the environment, as CI, by the person who linked it');
+select pg_temp.check(not exists (select 1 from github_start_check('ab000000-0000-0000-0000-000000000000', repeat('a', 40), 7)), 'The same commit got a second open check');
+create temp table preview_check as select * from github_start_check('ab000000-0000-0000-0000-000000000000', repeat('a', 40), 7, 'https://pr-7.acme.vercel.app');
+select pg_temp.check((select r.base_url from preview_check c join runs r on r.id = c.run_ids[1]) = 'https://pr-7.acme.vercel.app', 'A preview deploy didn''t run on its own address');
+select pg_temp.fails_with($$select * from github_start_check('ab000000-0000-0000-0000-000000000000', repeat('b', 40), 7, 'javascript:alert(1)')$$, '%Not a web address%', 'A check runs on something that isn''t a web address');
+update runs set status = 'passed' where id = (select run_ids[1] from preview_check);
+select minute_tick();
+
 -- Cloud minutes: once Acme has used its 2,000, nobody there can start a run.
 insert into runs (workspace_id, project_id, test_name, test_version, environment_name, base_url, lock, status, duration_ms)
 values ('11111111-0000-0000-0000-000000000000', 'a1000000-0000-0000-0000-000000000000', 'long', 1, 'staging', 'https://x.com', '', 'passed', 2000 * 60000);

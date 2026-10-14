@@ -1,6 +1,6 @@
 import { findProject, isUuid, requireKey } from "@/lib/apiAuth";
 import { firstError, parseLock } from "@/lib/lock";
-import { outcomeOf, type FailedStep, type OutcomeRun } from "@/lib/outcome";
+import { loadOutcomes } from "@/lib/runOutcomes";
 
 const MAX_RUNS = 50;
 
@@ -85,37 +85,20 @@ export async function POST(request: Request) {
   return Response.json({ project, environment: env, runs }, { status: 201 });
 }
 
-const RUN_FIELDS = "id, test_id, test_name, environment_name, status, verdict, verdict_reason, error, duration_ms, finished_at, retry_of, retried_as";
-
 /** Where runs stand: GET /api/v1/runs?ids=<id>,<id>. A flaky failure's outcome is its re-run's. */
 export async function GET(request: Request) {
   const caller = await requireKey(request);
   if ("denied" in caller) return caller.denied;
-  const { sb, workspaceId } = caller;
   const ids = [...new Set((new URL(request.url).searchParams.get("ids") ?? "").split(",").map((s) => s.trim()).filter(Boolean))];
   if (!ids.length) return Response.json({ error: "Pass the run ids: ?ids=<id>,<id>." }, { status: 400 });
   if (ids.length > 100 || !ids.every(isUuid)) return Response.json({ error: "Pass up to 100 run ids." }, { status: 400 });
-
-  const { data, error } = await sb.from("runs").select(RUN_FIELDS).eq("workspace_id", workspaceId).in("id", ids);
-  if (error) return Response.json({ error: error.message }, { status: 500 });
-  const started = (data ?? []) as OutcomeRun[];
-  const byId = new Map(started.map((r) => [r.id, r]));
-  const retryIds = started.map((r) => r.retried_as).filter((x): x is string => !!x && !byId.has(x));
-  if (retryIds.length) {
-    const { data: retries, error: retryErr } = await sb.from("runs").select(RUN_FIELDS).eq("workspace_id", workspaceId).in("id", retryIds);
-    if (retryErr) return Response.json({ error: retryErr.message }, { status: 500 });
-    for (const r of (retries ?? []) as OutcomeRun[]) byId.set(r.id, r);
+  let runs;
+  try {
+    runs = await loadOutcomes(caller.sb, caller.workspaceId, ids);
+  } catch (e) {
+    return Response.json({ error: e instanceof Error ? e.message : String(e) }, { status: 500 });
   }
-  const failedIds = [...byId.values()].filter((r) => r.status === "failed").map((r) => r.id);
-  let failedSteps: FailedStep[] = [];
-  if (failedIds.length) {
-    const { data: steps, error: stepErr } = await sb.from("run_steps").select("run_id, position, label, error").eq("workspace_id", workspaceId).in("run_id", failedIds).eq("status", "failed");
-    if (stepErr) return Response.json({ error: stepErr.message }, { status: 500 });
-    failedSteps = (steps ?? []) as FailedStep[];
-  }
-
-  const missing = ids.filter((id) => !byId.has(id));
-  if (missing.length) return Response.json({ error: `Run ${missing[0]} not found.` }, { status: 404 });
-  const runs = ids.map((id) => outcomeOf(byId.get(id)!, byId, failedSteps));
+  const missing = ids.find((id) => !runs.some((r) => r.id === id));
+  if (missing) return Response.json({ error: `Run ${missing} not found.` }, { status: 404 });
   return Response.json({ done: runs.every((r) => r.done), runs });
 }

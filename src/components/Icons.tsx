@@ -144,3 +144,12 @@ export const BarChart = (p: P) => (
     <path d="M4 20h16M7 16v-5M12 16V7M17 16v-8" />
   </Svg>
 );
+
+export const Branch = (p: P) => (
+  <Svg {...p}>
+    <circle cx="6" cy="5" r="2" />
+    <circle cx="6" cy="19" r="2" />
+    <circle cx="18" cy="8" r="2" />
+    <path d="M6 7v10M18 10c0 4-6 3-11.2 7.5" />
+  </Svg>
+);

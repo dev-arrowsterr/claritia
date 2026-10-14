@@ -1,0 +1,53 @@
+name: Claritia
+description: Run your Claritia end-to-end tests in the cloud and wait for the results.
+branding:
+  icon: check-square
+  color: blue
+
+inputs:
+  api-key:
+    description: A Claritia API key (Settings → API keys). Pass it from a secret.
+    required: true
+  project:
+    description: The project's name or id. Needed when the workspace has more than one.
+    required: false
+  environment:
+    description: The environment's name or id. Default is the project's first.
+    required: false
+  tests:
+    description: Test names or ids, one per line. Default is every test.
+    required: false
+  use-case:
+    description: Run every test in one use case.
+    required: false
+  timeout:
+    description: Minutes to wait for the results.
+    required: false
+    default: "30"
+  version:
+    description: The CLI version to use.
+    required: false
+    default: "latest"
+
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        CLARITIA_API_KEY: ${{ inputs.api-key }}
+        IN_PROJECT: ${{ inputs.project }}
+        IN_ENV: ${{ inputs.environment }}
+        IN_TESTS: ${{ inputs.tests }}
+        IN_USE_CASE: ${{ inputs.use-case }}
+        IN_TIMEOUT: ${{ inputs.timeout }}
+        IN_VERSION: ${{ inputs.version }}
+      run: |
+        args=(run --timeout "$IN_TIMEOUT")
+        [ -n "$IN_PROJECT" ] && args+=(--project "$IN_PROJECT")
+        [ -n "$IN_ENV" ] && args+=(--env "$IN_ENV")
+        [ -n "$IN_USE_CASE" ] && args+=(--use-case "$IN_USE_CASE")
+        while IFS= read -r t; do
+          t="${t#"${t%%[![:space:]]*}"}"; t="${t%"${t##*[![:space:]]}"}"
+          [ -n "$t" ] && args+=(--test "$t")
+        done <<< "$IN_TESTS"
+        npx --yes "claritia@$IN_VERSION" "${args[@]}"

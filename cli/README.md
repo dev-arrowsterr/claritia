@@ -57,6 +57,8 @@ Add `CLARITIA_API_KEY` as a repository secret.
 
 The results also go in the job summary, with a link to each run.
 
+For a check on every pull request (and on preview deploys) without a workflow, connect the GitHub App in Settings → GitHub.
+
 ## REST API
 
 Every call sends `Authorization: Bearer clr_...` to `https://app.tryclaritia.com/api/v1`.
