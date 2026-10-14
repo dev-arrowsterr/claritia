@@ -126,7 +126,7 @@ npm run build
 
 ## Deploy
 
-**Fly.io:** see `docs/fly.md` to move the site and the runner from Render to Fly (`fly.toml`, `fly.runner.toml`). The site sleeps when nobody visits, and the runner sleeps when there's nothing to run (`IDLE_EXIT_MS`); the database wakes it when a run is queued and fires schedules itself every minute (`supabase/migrations/011_wake_runner.sql`). About $1 to $2 a month before launch instead of about $32 (check).
+**Fly.io:** see `docs/fly.md` to move the site and the runner from Render to Fly (`fly.toml`, `fly.runner.toml`). The app is always on. The runner sleeps when there's nothing to run (`IDLE_EXIT_MS`); the database wakes it when a run is queued and fires schedules itself every minute (`supabase/migrations/011_wake_runner.sql`). About $3.50 to $5 a month before launch instead of about $32 (check).
 
 **Render (current):**
 

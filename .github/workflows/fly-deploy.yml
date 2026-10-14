@@ -1,4 +1,4 @@
-# Deploy to Fly.io on every push to main: the checks first, then the site and the runner.
+# Deploy to Fly.io on every push to main: the checks first, then the runner.
 # Needs one repository secret, FLY_API_TOKEN (from `fly tokens create org`). Without it, the deploy steps are skipped.
 name: Deploy to Fly.io
 
@@ -32,9 +32,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        # The app stays on Render for now, so only the runner deploys to Fly.
+        # To move the app too, add: - app: claritia-web / config: fly.toml
         include:
-          - app: claritia-web
-            config: fly.toml
           - app: claritia-runner
             config: fly.runner.toml
     env:
@@ -48,7 +48,8 @@ jobs:
         run: flyctl status --app ${{ matrix.app }} >/dev/null 2>&1 || flyctl apps create ${{ matrix.app }}
       - name: Deploy ${{ matrix.app }}
         if: env.FLY_API_TOKEN != ''
-        run: flyctl deploy --remote-only --config ${{ matrix.config }} --app ${{ matrix.app }}
+        # --ha=false: one machine per app. Fly would start two on the first deploy, which doubles the bill.
+        run: flyctl deploy --remote-only --ha=false --config ${{ matrix.config }} --app ${{ matrix.app }}
       - name: No Fly token yet
         if: env.FLY_API_TOKEN == ''
         run: echo "::notice::Add the FLY_API_TOKEN repository secret to deploy ${{ matrix.app }} to Fly.io."
