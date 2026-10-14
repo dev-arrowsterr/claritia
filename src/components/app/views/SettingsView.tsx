@@ -4,10 +4,11 @@ import { useState } from "react";
 import { Copy, Key, LogOut, Plus, Settings } from "../../Icons";
 import { amount, planById, PLANS, type PlanId } from "@/lib/plans";
 import { APP_URL, INBOX_DOMAIN } from "@/lib/site";
-import { askConfirm, askText } from "../Dialogs";
+import { askConfirm, askText, tell } from "../Dialogs";
 import { AlertsPanel } from "./AlertsPanel";
 import { GitHubPanel } from "./GitHubPanel";
 import {
+  announceChange,
   Avatar,
   Badge,
   Button,
@@ -257,8 +258,46 @@ export function SettingsView({ sb, session, ws, role, project, projectsChanged, 
                 Rename
               </Button>
             </CardHead>
-            <div className="flex items-center justify-between gap-3 px-4 py-4">
-              <span className="text-[15px] font-medium">{project.name}</span>
+            <div className="flex flex-wrap items-center gap-2 px-4 py-4">
+              <span className="mr-auto text-[15px] font-medium">{project.name}</span>
+              <Button
+                variant="ghost"
+                onClick={() =>
+                  act(async () => {
+                    const res = await fetch(`/api/export?projectId=${project.id}`, { headers: { Authorization: `Bearer ${session.access_token}` } });
+                    if (!res.ok) throw new Error(((await res.json().catch(() => ({}))) as { error?: string }).error ?? "Export failed.");
+                    const url = URL.createObjectURL(await res.blob());
+                    const a = Object.assign(document.createElement("a"), { href: url, download: `${project.name.replace(/[^\w-]+/g, "-")}-claritia-tests.zip` });
+                    a.click();
+                    setTimeout(() => URL.revokeObjectURL(url), 1000);
+                  })
+                }
+              >
+                Export tests
+              </Button>
+              <label className="inline-flex h-9 cursor-pointer items-center rounded-md border border-line bg-panel px-3 text-[13px] font-medium hover:border-line-strong">
+                Import tests
+                <input
+                  type="file"
+                  multiple
+                  accept=".yaml,.yml,.ts,.js,.mjs"
+                  className="hidden"
+                  onChange={(e) => {
+                    const picked = [...(e.target.files ?? [])];
+                    e.target.value = "";
+                    if (!picked.length) return;
+                    void act(async () => {
+                      const files = await Promise.all(picked.map(async (f) => ({ name: f.name, text: await f.text() })));
+                      const r = await postJson<{ imported: string[]; skipped: { file: string; test?: string; reason: string }[] }>(session, "/api/import", { projectId: project.id, files });
+                      announceChange();
+                      await tell(
+                        `Imported ${r.imported.length} ${r.imported.length === 1 ? "test" : "tests"}`,
+                        r.skipped.length ? `Skipped:\n${r.skipped.map((x) => `${x.file}${x.test ? ` (${x.test})` : ""}: ${x.reason}`).join("\n")}` : undefined,
+                      );
+                    });
+                  }}
+                />
+              </label>
               <Button
                 variant="danger"
                 onClick={() =>

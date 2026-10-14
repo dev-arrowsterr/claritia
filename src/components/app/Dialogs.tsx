@@ -68,7 +68,7 @@ export function DialogHost() {
       >
         <div className="space-y-3 p-5">
           <h2 className="text-[15px] font-medium">{req.title}</h2>
-          {"body" in req && req.body ? <p className="text-[13px] leading-relaxed text-muted">{req.body}</p> : null}
+          {"body" in req && req.body ? <p className="max-h-64 overflow-auto text-[13px] leading-relaxed whitespace-pre-line text-muted">{req.body}</p> : null}
           {req.kind === "text" ? (
             <input
               autoFocus
