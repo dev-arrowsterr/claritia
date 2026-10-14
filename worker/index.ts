@@ -1,7 +1,7 @@
 // The Claritia runner service. Takes waiting runs from the database, runs each in a fresh browser,
 // writes step results as they happen, and uploads the video, trace, screenshots and console to storage.
 //   node worker/index.ts
-// Needs SUPABASE_URL, SUPABASE_SECRET_KEY and SECRETS_KEY. Answers health checks on PORT.
+// Needs SUPABASE_URL, SUPABASE_SECRET_KEY (or its older name SUPABASE_SERVICE_ROLE_KEY) and SECRETS_KEY. Answers health checks on PORT.
 // With ANTHROPIC_API_KEY it writes code for steps that have none (CLAUDE_MODEL and CLAUDE_EFFORT are optional).
 // Test inboxes read mail on INBOX_DOMAIN (default inbox.tryclaritia.com).
 
@@ -16,7 +16,8 @@ const env = (k: string) => process.env[k]?.trim() ?? "";
 const SLOTS = Math.max(1, Math.min(8, Number(env("WORKER_SLOTS") || 2)));
 const WORKER_ID = `${hostname()}-${randomUUID().slice(0, 8)}`;
 const IDLE_MS = 2000;
-const missing = ["SUPABASE_URL", "SUPABASE_SECRET_KEY", "SECRETS_KEY"].filter((k) => !env(k));
+const supabaseKey = env("SUPABASE_SECRET_KEY") || env("SUPABASE_SERVICE_ROLE_KEY");
+const missing = [...["SUPABASE_URL", "SECRETS_KEY"].filter((k) => !env(k)), ...(supabaseKey ? [] : ["SUPABASE_SECRET_KEY"])];
 
 const log = (...a: unknown[]) => console.log(new Date().toISOString(), ...a);
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -33,7 +34,7 @@ createServer((req, res) => {
 if (missing.length) {
   log(`Waiting: add ${missing.join(", ")} to this service's environment.`);
 } else {
-  const sb = createClient(env("SUPABASE_URL").replace(/\/+$/, ""), env("SUPABASE_SECRET_KEY"), { auth: { persistSession: false, autoRefreshToken: false } });
+  const sb = createClient(env("SUPABASE_URL").replace(/\/+$/, ""), supabaseKey, { auth: { persistSession: false, autoRefreshToken: false } });
   const effort = env("CLAUDE_EFFORT");
   const writer = env("ANTHROPIC_API_KEY")
     ? claudeWriter({ apiKey: env("ANTHROPIC_API_KEY"), model: env("CLAUDE_MODEL") || undefined, effort: effort === "low" || effort === "high" ? effort : "medium" })
