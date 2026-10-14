@@ -25,6 +25,8 @@ export type WriteRequest = {
   done: string[];
   /** What went wrong with the last lines, if anything. */
   error: string | null;
+  /** When the step's saved code broke: that code and its error. The reply should do the same thing on the page as it is now. */
+  heal?: { oldCode: string[]; error: string };
 };
 export type WriteReply = { lines: string[]; done: boolean; problem: string; usage: { input: number; output: number } };
 export type Writer = (req: WriteRequest) => Promise<WriteReply>;
@@ -105,6 +107,9 @@ function prompt(r: WriteRequest) {
     `Write step ${r.position} now. Kind: ${kind}.\n${current.intent}`,
     `Secrets you can use: ${r.secretNames.length ? r.secretNames.map((n) => `process.env.${n}`).join(", ") : "none"}`,
     `Test inboxes: ${r.inbox ? "on" : "off"}`,
+    r.heal
+      ? `This step's saved code stopped working:\n${r.heal.oldCode.join("\n")}\nIt failed with:\n${r.heal.error}\nThe page has probably changed. Write lines that do the same thing on the page as it is now, keeping the same intent and test data. If the thing the step needs is gone, or a check is plainly false now, return no lines and say why in problem. Never weaken a check to make it pass.`
+      : "",
     r.done.length ? `Already done for this step:\n${r.done.join("\n")}` : "",
     r.error ? `Your last lines failed with:\n${r.error}\nWrite lines that will work on the page as it is now.` : "",
     `Page address: ${r.url}\nPage title: ${r.title}`,

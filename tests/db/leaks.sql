@@ -42,6 +42,10 @@ insert into workspace_billing (workspace_id, plan, stripe_customer_id) values ('
 insert into inbox_messages (workspace_id, project_id, to_address, subject, text_body) values
   ('11111111-0000-0000-0000-000000000000', 'a1000000-0000-0000-0000-000000000000', 'x-signup@inbox.tryclaritia.com', 'Acme code', 'Your code is 123456'),
   ('22222222-0000-0000-0000-000000000000', 'c1000000-0000-0000-0000-000000000000', 'y-signup@inbox.tryclaritia.com', 'Cat code', 'Your code is 654321');
+insert into heals (id, workspace_id, project_id, test_id, test_version, position, step_label, old_code, new_code, error) values
+  ('a7000000-0000-0000-0000-000000000000', '11111111-0000-0000-0000-000000000000', 'a1000000-0000-0000-0000-000000000000', 'a5000000-0000-0000-0000-000000000000', 1, 1, 'Pay', 'old', 'new', 'broke'),
+  ('a7100000-0000-0000-0000-000000000000', '11111111-0000-0000-0000-000000000000', 'a1000000-0000-0000-0000-000000000000', 'a5000000-0000-0000-0000-000000000000', 1, 2, 'Ship', 'old', 'new', 'broke'),
+  ('c7000000-0000-0000-0000-000000000000', '22222222-0000-0000-0000-000000000000', 'c1000000-0000-0000-0000-000000000000', 'c5000000-0000-0000-0000-000000000000', 1, 1, 'Cat', 'old', 'new', 'broke');
 insert into storage.objects (bucket_id, name) values
   ('runs', '11111111-0000-0000-0000-000000000000/r1/video.webm'),
   ('runs', '22222222-0000-0000-0000-000000000000/r2/video.webm');
@@ -122,6 +126,16 @@ select pg_temp.fails($$update workspaces set first_pass_at = now()$$, 'Ben fakes
 select pg_temp.check((select plan from workspace_billing) = 'starter' and (select count(*) from workspace_billing) = 1, 'Ben can''t read only his own plan');
 select pg_temp.check((select plan from workspace_usage('11111111-0000-0000-0000-000000000000')) = 'starter' and (select minutes_limit from workspace_usage('11111111-0000-0000-0000-000000000000')) = 2000, 'Ben can''t see his usage');
 select pg_temp.fails($$select * from workspace_usage('22222222-0000-0000-0000-000000000000')$$, 'Ben reads Cat''s usage');
+-- Fixes from the Healer
+select pg_temp.check((select count(*) from heals) = 2 and not exists (select 1 from heals where step_label = 'Cat'), 'Ben can''t see only his own fixes');
+select pg_temp.fails($$insert into heals (workspace_id, project_id, test_id, test_version, position, step_label, old_code, new_code, error) values ('11111111-0000-0000-0000-000000000000', 'a1000000-0000-0000-0000-000000000000', 'a5000000-0000-0000-0000-000000000000', 1, 1, 'x', 'x', 'x', 'x')$$, 'Ben writes a fix himself');
+select pg_temp.fails($$update heals set new_code = 'evil'$$, 'Ben edits a fix''s code');
+select pg_temp.fails($$select decide_heal('c7000000-0000-0000-0000-000000000000', 'approved')$$, 'Ben approves Cat''s fix');
+select pg_temp.fails($$select decide_heal('a7000000-0000-0000-0000-000000000000', 'merged')$$, 'Ben makes up a decision');
+select decide_heal('a7000000-0000-0000-0000-000000000000', 'approved');
+select pg_temp.check((select status from heals where id = 'a7000000-0000-0000-0000-000000000000') = 'approved' and (select decided_by from heals where id = 'a7000000-0000-0000-0000-000000000000') = 'b0000000-0000-0000-0000-000000000000', 'Ben''s approval isn''t recorded');
+select pg_temp.fails_with($$select decide_heal('a7000000-0000-0000-0000-000000000000', 'rejected')$$, '%already approved%', 'Ben decides the same fix twice');
+select pg_temp.fails($$select record_heal(id, 1, 'x', 'a', 'b', 'c') from runs limit 1$$, 'Ben records a fix as if he were the runner');
 -- Inboxes
 select pg_temp.check((select count(*) from inbox_messages) = 1 and (select subject from inbox_messages) = 'Acme code', 'Ben can''t read only his own inbox');
 select pg_temp.fails($$insert into inbox_messages (workspace_id, project_id, to_address) values ('11111111-0000-0000-0000-000000000000', 'a1000000-0000-0000-0000-000000000000', 'fake')$$, 'Ben plants an email');
@@ -229,6 +243,11 @@ select pg_temp.check((select lock from tests where id = 'a5000000-0000-0000-0000
 select pg_temp.check((select count(*) from env_secret_values) = 3, 'Sealed values went missing');
 delete from env_secrets where id = 'a3000000-0000-0000-0000-000000000000';
 select pg_temp.check(not exists (select 1 from env_secret_values where secret_id = 'a3000000-0000-0000-0000-000000000000'), 'Deleting a secret leaves its value behind');
+
+-- The runner records a fix; a newer fix for the same step replaces the older one, and the same fix twice is kept once.
+select pg_temp.check(record_heal((select id from runs where test_id = 'a5000000-0000-0000-0000-000000000000' order by created_at limit 1), 2, 'Ship', 'old', 'newer', 'broke') is not null, 'The runner can''t record a fix');
+select pg_temp.check((select status from heals where id = 'a7100000-0000-0000-0000-000000000000') = 'stale' and (select count(*) from heals where position = 2 and status = 'pending') = 1, 'An older fix for the same step is still waiting');
+select pg_temp.check(record_heal((select id from runs where test_id = 'a5000000-0000-0000-0000-000000000000' order by created_at limit 1), 2, 'Ship', 'old', 'newer', 'broke') = (select id from heals where position = 2 and status = 'pending'), 'The same fix was saved twice');
 
 -- Cloud minutes: once Acme has used its 2,000, nobody there can start a run.
 insert into runs (workspace_id, project_id, test_name, test_version, environment_name, base_url, lock, status, duration_ms)

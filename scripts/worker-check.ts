@@ -148,6 +148,19 @@ await handleRun(sb as never, { id: "run6", workspace_id: "ws1", environment_id: 
 const step6 = db.run_steps.find((s) => s.run_id === "run6")!;
 check(!called && db.runs.find((r) => r.id === "run6")!.status === "failed" && /AI credits are used up/.test(String(step6.error)), `a run past the plan's AI credits doesn't call the writer (${step6.error})`);
 
+// A broken step is healed, and the fix is sent for approval.
+usage.credits_used = 0;
+db.runs.push({ id: "run7", workspace_id: "ws1", locked_by: "w1", status: "running" });
+db.run_steps.push({ run_id: "run7", position: 1, kind: "do", label: "Sign in", intent: "Sign in", status: "pending" });
+const brokenLock = `import { test, expect } from '@playwright/test';\n\ntest('Sign in', async ({ page }) => {\n  // step 1: Sign in\n  await page.goto('/login');\n  await page.getByRole('button', { name: 'Log in' }).click();\n});\n`;
+const fixer: Writer = async () => ({ lines: ["await page.getByRole('button', { name: 'Sign in' }).click();"], done: true, problem: "", usage: { input: 1, output: 1 } });
+await handleRun(sb as never, { id: "run7", workspace_id: "ws1", environment_id: "env1", base_url: base, lock: brokenLock, attempts: 1, test_name: "Sign in" }, { workerId: "w1", chromiumPath: process.env.CHROMIUM_PATH, allowPrivate: true, writer: fixer });
+const heal = rpcs.find((r) => r.fn === "record_heal" && r.args.p_run === "run7");
+const step7 = db.run_steps.find((s) => s.run_id === "run7")!;
+check(db.runs.find((r) => r.id === "run7")!.status === "passed" && step7.healed === true, `a broken step is healed and the run passes (${db.runs.find((r) => r.id === "run7")!.status})`);
+check(!!heal && /Sign in/.test(String(heal.args.p_new)) && /Log in/.test(String(heal.args.p_old)) && /Log in/.test(String(heal.args.p_error)), "the fix is sent for approval with the old code, new code and error");
+check(!rpcs.some((r) => r.fn === "save_written_lock" && r.args.p_run === "run7"), "a healed run doesn't change the test's code");
+
 // With no writer, a test with no code ends with a plain error.
 db.runs.push({ id: "run5", workspace_id: "ws1", locked_by: "w1", status: "running" });
 db.run_steps.push({ run_id: "run5", position: 1, kind: "do", label: "Open", status: "pending" });

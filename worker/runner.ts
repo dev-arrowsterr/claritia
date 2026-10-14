@@ -13,7 +13,7 @@ import { buildLock, lockSections, parseLock, type Action, type Arg, type Call } 
 import type { Writer } from "./writer.ts";
 
 export type StepStatus = "running" | "passed" | "failed" | "skipped";
-export type StepUpdate = { position: number; status: StepStatus; retried?: boolean; startedMs?: number; durationMs?: number; error?: string | null; screenshot?: string; written?: boolean; code?: string };
+export type StepUpdate = { position: number; status: StepStatus; retried?: boolean; startedMs?: number; durationMs?: number; error?: string | null; screenshot?: string; written?: boolean; healed?: boolean; code?: string };
 /** An email that reached a test inbox. */
 export type InboxMail = { subject: string; text: string; html: string; receivedAt: string };
 /** The project's test inbox: an address per name for this run, and the mail that reached it. */
@@ -33,8 +33,10 @@ export type RunInput = {
   actionTimeoutMs?: number;
   expectTimeoutMs?: number;
   runTimeoutMs?: number;
-  /** With a writer, steps that have no code are written by AI during the run. */
+  /** With a writer, steps that have no code are written by AI during the run, and broken steps are healed. */
   writer?: Writer;
+  /** Set to false to fail broken steps without trying a fix. */
+  heal?: boolean;
   testName?: string;
   steps?: RunStep[];
   /** How often to send a live frame of the page while the run goes, in ms. */
@@ -53,6 +55,8 @@ export type RunResult = {
   networkFile: string | null;
   /** The test's code with the steps written in this run added, when any were. */
   lock: string | null;
+  /** Steps whose saved code broke and that a new fix got through. Waiting for approval; the test's code is unchanged. */
+  heals: { position: number; label: string; oldLines: string[]; newLines: string[]; error: string }[];
   ai: { calls: number; input: number; output: number };
 };
 export type Hooks = { step: (u: StepUpdate) => Promise<void>; frame?: (jpeg: Buffer) => Promise<void> };
@@ -176,7 +180,8 @@ export async function executeRun(input: RunInput, hooks: Hooks): Promise<RunResu
   const runTimeout = input.runTimeoutMs ?? 5 * 60_000;
   const mask = (t: string) => maskSecrets(t, input.secrets);
   const ai = { calls: 0, input: 0, output: 0 };
-  const result = (status: RunResult["status"], error: string | null, extra: Partial<RunResult> = {}): RunResult => ({ status, error: error && mask(error), durationMs: Date.now() - started, video: null, traces: [], consoleFile: null, networkFile: null, lock: null, ai, ...extra });
+  const heals: RunResult["heals"] = [];
+  const result = (status: RunResult["status"], error: string | null, extra: Partial<RunResult> = {}): RunResult => ({ status, error: error && mask(error), durationMs: Date.now() - started, video: null, traces: [], consoleFile: null, networkFile: null, lock: null, heals, ai, ...extra });
 
   const writer = input.writer;
   const parsed = parseLock(input.lock.trim() ? input.lock : "test('x', async ({ page }) => {});");
@@ -475,8 +480,8 @@ export async function executeRun(input: RunInput, hooks: Hooks): Promise<RunResu
   };
 
   // Write a step with AI: ask for lines, check them, run them one by one, and ask again with the error or the new page.
-  const writeStep = async (p: Page, info: RunStep): Promise<{ lines: string[]; error: string | null }> => {
-    const done: string[] = [];
+  const writeStep = async (p: Page, info: RunStep, heal?: { oldLines: string[]; error: string; doneLines: string[] }): Promise<{ lines: string[]; error: string | null }> => {
+    const done: string[] = [...(heal?.doneLines ?? [])];
     let lastError: string | null = null;
     for (let round = 0; round < MAX_WRITES_PER_STEP; round++) {
       // Let the page settle after the last lines, so the writer sees where they led.
@@ -497,6 +502,7 @@ export async function executeRun(input: RunInput, hooks: Hooks): Promise<RunResu
           inbox: !!input.inbox,
           done: [...done],
           error: lastError && mask(lastError),
+          heal: heal ? { oldCode: heal.oldLines, error: mask(heal.error) } : undefined,
         });
       } catch (e) {
         return { lines: done, error: e instanceof Error ? e.message : String(e) };
@@ -622,19 +628,42 @@ export async function executeRun(input: RunInput, hooks: Hooks): Promise<RunResu
       await hooks.step({ position, status: "running", startedMs });
       let error: string | null = null;
       let retried = false;
+      let ranOk = 0;
       for (let attempt = 0; attempt < 2; attempt++) {
         error = null;
+        ranOk = 0;
         try {
-          for (const a of step.actions) await perform(page, a);
+          for (const a of step.actions) {
+            await perform(page, a);
+            ranOk++;
+          }
           break;
         } catch (e) {
-          error = blocked.size ? `Claritia blocked ${[...blocked].join(", ")} because it points to a private network address.` : shortError(e);
+          // Name the line that failed, when the code has one statement per line.
+          const lines = sections.get(position) ?? [];
+          const where = lines.length === step.actions.length && lines[ranOk] ? `${lines[ranOk]} → ` : "";
+          error = blocked.size ? `Claritia blocked ${[...blocked].join(", ")} because it points to a private network address.` : `${where}${shortError(e)}`;
           // One retry for the whole step, so a slow page doesn't fail the run. A step that passes on retry is marked as retried.
           if (attempt === 0) {
             retried = true;
             await sleep(1000);
           }
         }
+      }
+      // Healing: the saved code broke even after a retry. Ask for a fix on the page as it is now, keeping the lines that
+      // already ran. A fix that gets through passes the step and waits for approval; the test's code doesn't change.
+      if (error && writer && info && input.heal !== false && !blocked.size) {
+        const oldLines = sections.get(position) ?? [];
+        const doneLines = oldLines.length === step.actions.length ? oldLines.slice(0, ranOk) : [];
+        const fix = await writeStep(page, info, { oldLines, error, doneLines });
+        if (!fix.error && fix.lines.join("\n") !== oldLines.join("\n")) {
+          heals.push({ position, label: info.label, oldLines, newLines: fix.lines, error: mask(error) });
+          const shot = join(input.dir, `step-${position}.jpg`);
+          await page.screenshot({ path: shot, type: "jpeg", quality: 70 }).catch(() => undefined);
+          await hooks.step({ position, status: "passed", retried, startedMs, durationMs: Date.now() - pageStart - startedMs, error: null, screenshot: shot, healed: true, code: fix.lines.join("\n") });
+          continue;
+        }
+        error = `${error} Claritia tried a fix: ${fix.error ?? "the fix was the same code."}`;
       }
       const shot = join(input.dir, `step-${position}.jpg`);
       await page.screenshot({ path: shot, type: "jpeg", quality: 70 }).catch(() => undefined);

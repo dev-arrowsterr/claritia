@@ -3,12 +3,13 @@
 import type { Session } from "@supabase/supabase-js";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { getSupabase, type SupaConfig } from "@/lib/supa";
-import { Box, ListIcon, LogOut, Play, Settings } from "../Icons";
+import { Box, Check, ListIcon, LogOut, Play, Settings } from "../Icons";
 import { Logo } from "../Logo";
 import { AuthScreen } from "./AuthScreen";
 import { askText, DialogHost } from "./Dialogs";
 import { Select } from "./Select";
 import { Avatar, ErrorNote, errorText, mayLeave, must, type Project, type Role, type Route, type ViewProps, type Workspace } from "./ui";
+import { ApprovalsView } from "./views/ApprovalsView";
 import { BlocksView } from "./views/BlocksView";
 import { RunsView } from "./views/RunsView";
 import { SettingsView } from "./views/SettingsView";
@@ -18,6 +19,7 @@ const NAV: { route: Route; label: string; icon: React.ReactNode }[] = [
   { route: "tests", label: "Tests", icon: <ListIcon size={15} /> },
   { route: "blocks", label: "Blocks", icon: <Box size={15} /> },
   { route: "runs", label: "Runs", icon: <Play size={15} /> },
+  { route: "approvals", label: "Approvals", icon: <Check size={15} /> },
   { route: "settings", label: "Settings", icon: <Settings size={15} /> },
 ];
 
@@ -118,6 +120,26 @@ export function ClientApp({ config }: { config: SupaConfig }) {
 
   useEffect(() => loadProjects(), [loadProjects]);
 
+  // How many fixes wait for approval in the open project, for the sidebar.
+  const [waiting, setWaiting] = useState(0);
+  useEffect(() => {
+    if (!projectId) return;
+    const count = () =>
+      void sb
+        .from("heals")
+        .select("id", { count: "exact", head: true })
+        .eq("project_id", projectId)
+        .eq("status", "pending")
+        .then(({ count: n }) => setWaiting(n ?? 0));
+    count();
+    window.addEventListener("claritia:changed", count);
+    const t = setInterval(count, 60_000);
+    return () => {
+      window.removeEventListener("claritia:changed", count);
+      clearInterval(t);
+    };
+  }, [sb, projectId, loc]);
+
   // Pages with unsaved changes get to ask first.
   const navigate = useCallback((r: Route, id = "") => {
     mayLeave().then((ok) => {
@@ -178,6 +200,7 @@ export function ClientApp({ config }: { config: SupaConfig }) {
     >
       <span className={route === n.route ? "text-ink" : "text-muted"}>{n.icon}</span>
       {n.label}
+      {n.route === "approvals" && waiting ? <span className="ml-auto bg-brand px-1.5 font-mono text-[10px] leading-4 text-white">{waiting}</span> : null}
     </a>
   ));
 
@@ -213,7 +236,7 @@ export function ClientApp({ config }: { config: SupaConfig }) {
             <ErrorNote message={error} />
           </div>
         ) : null}
-        {route === "tests" ? <TestsView {...props} /> : route === "blocks" ? <BlocksView {...props} /> : route === "runs" ? <RunsView {...props} /> : <SettingsView {...props} />}
+        {route === "tests" ? <TestsView {...props} /> : route === "blocks" ? <BlocksView {...props} /> : route === "runs" ? <RunsView {...props} /> : route === "approvals" ? <ApprovalsView {...props} /> : <SettingsView {...props} />}
       </main>
     </div>
   );

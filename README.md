@@ -23,6 +23,7 @@ This repo holds the marketing site (`/` on tryclaritia.com) and the app (app.try
 - Test inboxes: each project has an inbox id. `inbox.address('signup')` in a test is a fresh address for that run, like `a1b2c3d4-signup-1f2e3d@inbox.tryclaritia.com`. `inbox.code('signup')` and `inbox.link('signup', /verify/)` wait up to a minute for the email and read the code or link from it. `await inbox.waitFor('signup', /Welcome/)` waits for a subject. The writer uses these when a step signs up or needs a code. Mail is kept 7 days.
 - First screens: the start screen can fill in a demo site (`demo.playwright.dev/todomvc`), and an empty test list offers "Try" tests to start from.
 - Plans: Free, Starter ($49) and Team ($199), from `src/lib/plans.ts`. Settings shows the plan, cloud minutes, AI credits and projects used this period, with Upgrade (Stripe Checkout) and Manage billing (Stripe's billing page). Limits hold in the database: a new project past the plan's limit is refused, a run can't start once the cloud minutes are used, and the runner stops writing once the AI credits are used.
+- Healer: when a step's saved code fails even after its retry, the runner sends Claude the old code, the error and the page as it is now, keeping the lines that already ran. If the new code gets the step through, the step passes with a Healed tag and the fix goes to **Approvals** as a diff. The test's code only changes when someone approves it (saved as a normal version with their name). If what the step needs is gone, or a check is plainly false, Claude says so and the step fails with that reason. A slow page that passes on its retry never calls Claude. Each fix uses AI credits like writing does.
 - `tryclaritia.com/llms.txt` and `tryclaritia.com/pricing.md` describe Claritia and its pricing for AI agents.
 - Time to a first passing test is tracked: `workspaces.first_pass_at` is set by the first passing run. See "Launch numbers" below.
 
@@ -39,6 +40,7 @@ CHROMIUM_PATH=/path/to/chrome node scripts/runner-check.ts   # the runner agains
 CHROMIUM_PATH=/path/to/chrome node scripts/worker-check.ts   # the run handler with a stand-in database
 CHROMIUM_PATH=/path/to/chrome node scripts/writer-check.ts   # the AI writer with a scripted stand-in for Claude
 CHROMIUM_PATH=/path/to/chrome node scripts/inbox-check.ts    # sign-up with an emailed code and link, and the network log
+CHROMIUM_PATH=/path/to/chrome node scripts/heal-check.ts     # the Healer on a page that changed, a page that lost a button, and a slow page
 ```
 
 ### What the AI writer costs (all prices "check")
@@ -52,6 +54,16 @@ Assuming each team writes or rewrites 150 steps a month:
 | Claude tokens (writer) | about $750 | about $7,500 |
 | New servers | $0 | $0 |
 | **Added each month** | **about $750** | **about $7,500** |
+
+### What the Healer adds to the bill (all prices "check")
+
+A fix takes 1 to 2 Claude calls, about $0.10. Assuming each team gets 10 fixes a month as their apps change:
+
+| | Beta (50 teams) | Growth (500 teams) |
+|---|---|---|
+| Claude tokens (Healer) | about $50 | about $500 |
+| New servers | $0 | $0 |
+| **Added each month** | **about $50** | **about $500** |
 
 ### What Weeks 5 and 6 add to the bill (all prices "check")
 

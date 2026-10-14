@@ -377,3 +377,15 @@ export function buildLock(name: string, steps: { label: string; lines: string[] 
   const body = steps.flatMap((s, i) => [`  // step ${i + 1}: ${s.label.replace(/\n/g, " ").replace(/\*\//g, "* /")}`, ...s.lines.map((l) => `  ${l}`)]);
   return [`import { test, expect } from '@playwright/test';`, ``, `test(${JSON.stringify(name)}, async ({ page }) => {`, ...body, `});`, ``].join("\n");
 }
+
+/** The lock with one step's code swapped for new lines. Null when the lock can't be read or has no such step. */
+export function replaceStepCode(code: string, position: number, lines: string[]) {
+  const parsed = parseLock(code);
+  if (!parsed.ok || !parsed.steps.some((s) => s.number === position)) return null;
+  const sections = lockSections(code);
+  const next = buildLock(
+    parsed.name,
+    parsed.steps.map((s) => ({ label: s.label, lines: s.number === position ? lines : (sections.get(s.number) ?? []) })),
+  );
+  return parseLock(next).ok ? next : null;
+}

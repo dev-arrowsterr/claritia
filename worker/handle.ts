@@ -149,6 +149,7 @@ export async function handleRun(sb: SupabaseClient, run: Run, opts: Options) {
       if (u.durationMs !== undefined) fields.duration_ms = u.durationMs;
       if (u.error !== undefined) fields.error = u.error && maskSecrets(u.error, secrets).slice(0, 2000);
       if (u.written !== undefined) fields.written = u.written;
+      if (u.healed !== undefined) fields.healed = u.healed;
       if (u.code !== undefined) fields.code = u.code;
       if (u.screenshot) fields.screenshot_path = await upload(u.screenshot, `step-${u.position}.jpg`, "image/jpeg").catch(() => null);
       await sb.from("run_steps").update(fields).eq("run_id", run.id).eq("position", u.position);
@@ -184,6 +185,12 @@ export async function handleRun(sb: SupabaseClient, run: Run, opts: Options) {
       { step: stepHook, frame: frameHook },
     );
     if (frames.length) await Promise.resolve(sb.storage.from("runs").remove(frames)).catch(() => undefined);
+
+    // Fixes for broken steps wait for a person to approve them.
+    for (const h of result.heals) {
+      const { error: healErr } = await sb.rpc("record_heal", { p_run: run.id, p_position: h.position, p_label: h.label, p_old: h.oldLines.join("\n"), p_new: h.newLines.join("\n"), p_error: maskSecrets(h.error, secrets) });
+      if (healErr) log(`Run ${run.id}: couldn't save a fix: ${healErr.message}`);
+    }
 
     // Save the code the writer wrote, so the next run replays it with no AI calls.
     if (result.lock) {

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { firstError, parseLock, lockSections, buildLock } from "../src/lib/lock.ts";
+import { firstError, parseLock, lockSections, buildLock, replaceStepCode } from "../src/lib/lock.ts";
 import { lockOutline } from "../src/lib/testfile.ts";
 
 const wrap = (body: string) => `import { test, expect } from '@playwright/test';\n\ntest('Checkout', async ({ page }) => {\n${body}\n});\n`;
@@ -123,4 +123,21 @@ test('Contact', async ({ page }) => {
   assert.equal(parsed.ok && parsed.steps[2]!.label, "check: It says thanks");
   // A label can't end the comment early or break the line.
   assert.ok(parseLock(buildLock("x", [{ label: "a\nawait page.evaluate(() => 1)", lines: [] }])).ok);
+});
+
+test("replaceStepCode swaps one step's code and keeps the rest", () => {
+  const code = buildLock("Checkout", [
+    { label: "Open the shop", lines: ["await page.goto('/shop');"] },
+    { label: "Pay", lines: ["await page.getByRole('button', { name: 'Pay' }).click();"] },
+    { label: "check: It says thanks", lines: ["await expect(page.getByText('Thanks')).toBeVisible();"] },
+  ]);
+  const next = replaceStepCode(code, 2, ["await page.getByRole('button', { name: 'Pay now' }).click();"])!;
+  assert.ok(next);
+  const s = lockSections(next);
+  assert.deepEqual(s.get(1), ["await page.goto('/shop');"]);
+  assert.deepEqual(s.get(2), ["await page.getByRole('button', { name: 'Pay now' }).click();"]);
+  assert.deepEqual(s.get(3), ["await expect(page.getByText('Thanks')).toBeVisible();"]);
+  assert.match(next, /test\("Checkout"/);
+  assert.equal(replaceStepCode(code, 9, ["await page.goto('/');"]), null);
+  assert.equal(replaceStepCode(code, 2, ["await page.evaluate(() => 1);"]), null);
 });

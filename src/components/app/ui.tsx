@@ -3,7 +3,7 @@
 import type { Session, SupabaseClient } from "@supabase/supabase-js";
 import { useCallback, useEffect, useRef, useState } from "react";
 
-export type Route = "tests" | "blocks" | "runs" | "settings";
+export type Route = "tests" | "blocks" | "runs" | "approvals" | "settings";
 export type Workspace = { id: string; name: string };
 export type Project = { id: string; name: string; workspace_id: string; created_at: string };
 export type Environment = { id: string; project_id: string; name: string; base_url: string; created_at: string };

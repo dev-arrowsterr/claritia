@@ -29,7 +29,7 @@ type RunRow = {
   ai_calls: number;
   lock_saved: boolean;
 };
-type StepRow = { id: string; position: number; kind: string; label: string; status: StepStatus; retried: boolean; started_ms: number | null; duration_ms: number | null; error: string | null; screenshot_path: string | null; written: boolean; code: string | null };
+type StepRow = { id: string; position: number; kind: string; label: string; status: StepStatus; retried: boolean; started_ms: number | null; duration_ms: number | null; error: string | null; screenshot_path: string | null; written: boolean; healed: boolean; code: string | null };
 type ConsoleLine = { ms: number; type: string; text: string };
 type NetworkLine = { ms: number; method: string; url: string; status: number | null; type: string; durationMs: number | null; failure?: string };
 type Email = { id: string; to_address: string; from_address: string | null; subject: string | null; text_body: string | null; received_at: string };
@@ -142,7 +142,7 @@ function RunDetail({ sb, session, id, navigate }: ViewProps) {
   const video = useRef<HTMLVideoElement>(null);
 
   const load = () => {
-    Promise.all([sb.from("runs").select(RUN_COLUMNS).eq("id", id).maybeSingle(), sb.from("run_steps").select("id, position, kind, label, status, retried, started_ms, duration_ms, error, screenshot_path, written, code").eq("run_id", id).order("position")]).then(([r, s]) => {
+    Promise.all([sb.from("runs").select(RUN_COLUMNS).eq("id", id).maybeSingle(), sb.from("run_steps").select("id, position, kind, label, status, retried, started_ms, duration_ms, error, screenshot_path, written, healed, code").eq("run_id", id).order("position")]).then(([r, s]) => {
       if (r.error || s.error) return setError((r.error ?? s.error)!.message);
       if (!r.data) return setError("This run was deleted or isn't in this workspace.");
       setRun(r.data as RunRow);
@@ -241,6 +241,11 @@ function RunDetail({ sb, session, id, navigate }: ViewProps) {
       actions={
         <>
           <StatusTag status={run.status} />
+          {steps.some((s) => s.healed) && !live ? (
+            <Button variant="ghost" onClick={() => navigate("approvals")}>
+              Review fix
+            </Button>
+          ) : null}
           {run.test_id ? (
             <>
               <Button variant="ghost" onClick={() => navigate("tests", run.test_id!)}>
@@ -287,6 +292,7 @@ function RunDetail({ sb, session, id, navigate }: ViewProps) {
                     <span className="w-5 shrink-0 font-mono text-[11px] text-faint">{s.position}</span>
                     <span className="min-w-0 flex-1 truncate text-[13px] font-medium">{s.label || "(empty step)"}</span>
                     {s.written ? <Badge tone="violet">{s.status === "running" ? "Writing" : "Written"}</Badge> : null}
+                    {s.healed ? <Badge tone="violet">Healed</Badge> : null}
                     {s.retried ? <Badge tone="amber">Retried</Badge> : null}
                     <StatusTag status={s.status} />
                     <span className="hidden w-12 shrink-0 text-right font-mono text-[11px] text-faint sm:inline">{s.duration_ms != null ? duration(s.duration_ms) : ""}</span>
