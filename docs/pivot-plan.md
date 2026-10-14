@@ -3,6 +3,7 @@
 Goal: one platform that sees every buyer, knows every account, shows each account the right content, acts at the right time, and learns what works. One orchestrator agent moves each account from first visit to a booked sales meeting.
 
 Companion docs:
+- `docs/account-intelligence.md`: Phase 1 in full depth, with compliance. It runs 14 weeks and costs $3,799 at Beta and $33,220 at Growth, which replaces the Phase 1 numbers below. Later phases shift by 5 weeks.
 - `docs/identity.md`: identity stitching in full
 - `docs/brand.md`: look and copy
 
