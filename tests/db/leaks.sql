@@ -179,6 +179,7 @@ select pg_temp.fails($$select save_written_lock(id, 'test(''x'', async ({ page }
 select pg_temp.check((select created_by from runs) = 'b0000000-0000-0000-0000-000000000000' and (select status from runs) = 'queued', 'A new run has the wrong owner or status');
 select pg_temp.fails($$update runs set status = 'passed'$$, 'Ben marks his own run as passed');
 select pg_temp.fails($$update runs set verdict = 'flaky'$$, 'Ben calls his own failure flaky');
+select pg_temp.fails($$select retry_run(id) from runs limit 1$$, 'Ben re-runs a run like the runner');
 select pg_temp.fails($$update run_steps set status = 'passed'$$, 'Ben marks a step as passed');
 select pg_temp.fails($$insert into runs (workspace_id, project_id, test_name, test_version, environment_name, base_url, lock, status) values ('11111111-0000-0000-0000-000000000000', 'a1000000-0000-0000-0000-000000000000', 'fake', 1, 'x', 'https://x.com', 'x', 'passed')$$, 'Ben writes a fake passing run');
 select pg_temp.fails($$delete from runs$$, 'Ben deletes run history');
@@ -249,6 +250,21 @@ select pg_temp.check(not exists (select 1 from env_secret_values where secret_id
 select pg_temp.check(record_heal((select id from runs where test_id = 'a5000000-0000-0000-0000-000000000000' order by created_at limit 1), 2, 'Ship', 'old', 'newer', 'broke') is not null, 'The runner can''t record a fix');
 select pg_temp.check((select status from heals where id = 'a7100000-0000-0000-0000-000000000000') = 'stale' and (select count(*) from heals where position = 2 and status = 'pending') = 1, 'An older fix for the same step is still waiting');
 select pg_temp.check(record_heal((select id from runs where test_id = 'a5000000-0000-0000-0000-000000000000' order by created_at limit 1), 2, 'Ship', 'old', 'newer', 'broke') = (select id from heals where position = 2 and status = 'pending'), 'The same fix was saved twice');
+
+-- Smart retries: a failed run is re-run once, with its steps; a re-run is never re-run; saved code is replayed.
+insert into runs (id, workspace_id, project_id, test_id, test_name, test_version, environment_name, base_url, lock, status, lock_saved)
+values ('a8000000-0000-0000-0000-000000000000', '11111111-0000-0000-0000-000000000000', 'a1000000-0000-0000-0000-000000000000', 'a5000000-0000-0000-0000-000000000000', 'acme-checkout', 1, 'staging', 'https://staging.acme.com', '', 'failed', true);
+insert into run_steps (run_id, workspace_id, position, kind, label, intent) values
+  ('a8000000-0000-0000-0000-000000000000', '11111111-0000-0000-0000-000000000000', 1, 'do', 'Add a hoodie', 'Add a hoodie'),
+  ('a8000000-0000-0000-0000-000000000000', '11111111-0000-0000-0000-000000000000', 2, 'check', 'Check: Cart has 1', 'Cart has 1');
+select pg_temp.check(retry_run('a8000000-0000-0000-0000-000000000000') is not null, 'A flaky run couldn''t be re-run');
+select pg_temp.check((select trigger from runs where retry_of = 'a8000000-0000-0000-0000-000000000000') = 'retry' and (select status from runs where retry_of = 'a8000000-0000-0000-0000-000000000000') = 'queued', 'The re-run isn''t a queued retry');
+select pg_temp.check((select retried_as from runs where id = 'a8000000-0000-0000-0000-000000000000') = (select id from runs where retry_of = 'a8000000-0000-0000-0000-000000000000'), 'The failed run doesn''t point at its re-run');
+select pg_temp.check((select count(*) from run_steps where run_id = (select id from runs where retry_of = 'a8000000-0000-0000-0000-000000000000') and status = 'pending') = 2, 'The re-run didn''t get the steps');
+select pg_temp.check((select lock from runs where retry_of = 'a8000000-0000-0000-0000-000000000000') = (select lock from tests where id = 'a5000000-0000-0000-0000-000000000000'), 'The re-run doesn''t replay the code the failed run saved');
+select pg_temp.check(retry_run('a8000000-0000-0000-0000-000000000000') is null, 'A run was re-run twice');
+select pg_temp.check(retry_run((select id from runs where retry_of = 'a8000000-0000-0000-0000-000000000000')) is null, 'A re-run was re-run');
+select pg_temp.check(retry_run((select id from runs where status = 'queued' and retry_of is null limit 1)) is null, 'A run that didn''t fail was re-run');
 
 -- Cloud minutes: once Acme has used its 2,000, nobody there can start a run.
 insert into runs (workspace_id, project_id, test_name, test_version, environment_name, base_url, lock, status, duration_ms)

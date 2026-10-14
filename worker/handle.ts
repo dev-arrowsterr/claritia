@@ -286,6 +286,12 @@ export async function handleRun(sb: SupabaseClient, run: Run, opts: Options) {
       verdict,
       verdict_reason,
     });
+    // Smart retry: a failure the Judge calls flaky is run once more, as a new run, before the red sticks.
+    if (result.status === "failed" && verdict === "flaky") {
+      const { data: retryId, error: retryErr } = await sb.rpc("retry_run", { p_run: run.id });
+      if (retryErr) log(`Run ${run.id}: couldn't queue a re-run: ${retryErr.message}`);
+      else if (retryId) log(`Run ${run.id}: flaky, re-running as ${retryId}.`);
+    }
     // The workspace's first passing run, to track how long sign-up to a passing test takes.
     if (result.status === "passed") await sb.from("workspaces").update({ first_pass_at: new Date().toISOString() }).eq("id", run.workspace_id).is("first_pass_at", null);
     log(`Run ${run.id}: ${result.status} in ${result.durationMs}ms${result.ai.calls ? `, ${result.ai.calls} AI calls` : ""}.`);

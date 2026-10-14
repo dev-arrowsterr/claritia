@@ -29,6 +29,7 @@ const base = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
 type Row = Record<string, unknown>;
 const db: Record<string, Row[]> = { runs: [], run_steps: [], workspaces: [{ id: "ws1", first_pass_at: null }] };
 const usage = { credits_used: 0, credits_limit: 200 as number | null };
+const retries: unknown[] = [];
 function query(table: string) {
   const filters: ((r: Row) => boolean)[] = [];
   let patch: Row | null = null;
@@ -51,7 +52,10 @@ function query(table: string) {
 }
 const sb = {
   from: query,
-  rpc: async (fn: string) => ({ data: fn === "workspace_usage" ? [usage] : true, error: null }),
+  rpc: async (fn: string, args: { p_run?: string }) => {
+    if (fn === "retry_run") retries.push(args.p_run);
+    return { data: fn === "workspace_usage" ? [usage] : fn === "retry_run" ? "retry-1" : true, error: null };
+  },
   storage: { from: () => ({ upload: async () => ({ error: null }), remove: async () => ({ data: [], error: null }) }) },
 };
 
@@ -93,6 +97,7 @@ function scripted(reply: Omit<JudgeReply, "usage">) {
   check(!!r && !!r.screenshot && r.screenshot.length > 1000, "the Judge gets a screenshot of the page");
   check(!!r && r.steps.map((s) => s.status).join() === "passed,passed,failed", "the Judge sees which steps passed");
   check(run.ai_calls === 1 && run.ai_input_tokens === 3000, "the Judge's call is counted");
+  check(!retries.includes(run.id), "an app bug isn't re-run");
 }
 
 // 2. A flaky page: nothing failed on the page, the text was just late. The evidence says so.
@@ -102,6 +107,7 @@ function scripted(reply: Omit<JudgeReply, "usage">) {
   const r = seen[0];
   check(run.verdict === "flaky", `a flaky failure is saved as flaky (${run.verdict})`);
   check(!!r && r.failedRequests.length === 0 && r.consoleErrors.length === 0 && r.failed.retried, "on a flaky page the Judge sees no errors and no failed requests");
+  check(retries.filter((x) => x === run.id).length === 1, "a flaky failure is re-run once");
 }
 
 // 3. A site that doesn't resolve is a setup problem, sorted by rule with no AI call.
@@ -109,6 +115,7 @@ function scripted(reply: Omit<JudgeReply, "usage">) {
   const { judge, seen } = scripted({ verdict: "app_bug", reason: "wrong" });
   const run = await judged(`  // step 1: Open the site\n  await page.goto('/');`, [{ kind: "do", label: "Open the site" }], judge, "http://claritia-nowhere.invalid");
   check(run.verdict === "setup" && /doesn't resolve/.test(String(run.verdict_reason)) && seen.length === 0, `an unreachable site is setup, with no AI call (${run.verdict}: ${run.verdict_reason})`);
+  check(!retries.includes(run.id), "a setup problem isn't re-run");
 }
 
 // 4. A passing run is never judged.
@@ -124,6 +131,7 @@ function scripted(reply: Omit<JudgeReply, "usage">) {
   const { judge, seen } = scripted({ verdict: "flaky", reason: "x" });
   const run = await judged(`  // step 1: Open the page\n  await page.goto('/slow');\n  // step 2: check: It says saved\n  await expect(page.getByText('Saved')).toBeVisible();`, [{ kind: "do", label: "Open the page" }, { kind: "check", label: "Check: It says saved" }], judge);
   check(run.status === "failed" && run.verdict === null && seen.length === 0, "with no credits left, the failure isn't judged");
+  check(!retries.includes(run.id), "an unjudged failure isn't re-run");
   usage.credits_used = 0;
 }
 

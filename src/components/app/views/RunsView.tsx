@@ -30,6 +30,8 @@ type RunRow = {
   lock_saved: boolean;
   verdict: Verdict | null;
   verdict_reason: string | null;
+  retry_of: string | null;
+  retried_as: string | null;
 };
 type StepRow = { id: string; position: number; kind: string; label: string; status: StepStatus; retried: boolean; started_ms: number | null; duration_ms: number | null; error: string | null; screenshot_path: string | null; written: boolean; healed: boolean; code: string | null };
 type ConsoleLine = { ms: number; type: string; text: string };
@@ -40,7 +42,7 @@ type Email = { id: string; to_address: string; from_address: string | null; subj
 const runCode = (runId: string) => runId.replace(/-/g, "").slice(0, 6);
 
 const LIVE = new Set<RunStatus>(["queued", "running"]);
-const RUN_COLUMNS = "id, test_id, test_name, test_version, environment_id, environment_name, base_url, trigger, status, error, created_at, started_at, finished_at, duration_ms, video_path, trace_paths, console_path, network_path, project_id, attempts, live_path, ai_calls, lock_saved, verdict, verdict_reason";
+const RUN_COLUMNS = "id, test_id, test_name, test_version, environment_id, environment_name, base_url, trigger, status, error, created_at, started_at, finished_at, duration_ms, video_path, trace_paths, console_path, network_path, project_id, attempts, live_path, ai_calls, lock_saved, verdict, verdict_reason, retry_of, retried_as";
 
 /** Load again every few seconds while `live` is true. */
 function usePoll(live: boolean, ms: number, tick: () => void) {
@@ -118,6 +120,7 @@ function RunList({ sb, project, navigate }: ViewProps) {
                   <span className="flex gap-1.5">
                     <StatusTag status={r.status} />
                     <VerdictTag verdict={r.verdict} />
+                    {r.retry_of ? <Badge>Re-run</Badge> : null}
                   </span>
                 </td>
                 <td className="hidden border-b border-line px-4 text-[12.5px] text-muted md:table-cell">{r.environment_name}</td>
@@ -284,10 +287,21 @@ function RunDetail({ sb, session, id, navigate }: ViewProps) {
             {run.lock_saved ? " · code saved to test" : ""}
           </span>
         </Panel>
-        {run.verdict ? (
-          <Panel className="flex items-start gap-3 px-4 py-3">
+        {run.verdict || run.retry_of ? (
+          <Panel className="flex flex-wrap items-center gap-3 px-4 py-3">
+            {run.retry_of ? <Badge>Re-run</Badge> : null}
             <VerdictTag verdict={run.verdict} />
-            <span className="text-[13px] leading-relaxed text-body">{run.verdict_reason}</span>
+            {run.verdict_reason ? <span className="min-w-0 flex-1 text-[13px] leading-relaxed text-body">{run.verdict_reason}</span> : <span className="flex-1" />}
+            {run.retried_as ? (
+              <Button variant="ghost" onClick={() => navigate("runs", run.retried_as!)}>
+                Open re-run
+              </Button>
+            ) : null}
+            {run.retry_of ? (
+              <Button variant="ghost" onClick={() => navigate("runs", run.retry_of!)}>
+                Open first run
+              </Button>
+            ) : null}
           </Panel>
         ) : null}
         {run.error ? <ErrorNote message={run.error} /> : null}

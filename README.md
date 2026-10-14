@@ -25,6 +25,7 @@ This repo holds the marketing site (`/` on tryclaritia.com) and the app (app.try
 - Plans: Free, Starter ($49) and Team ($199), from `src/lib/plans.ts`. Settings shows the plan, cloud minutes, AI credits and projects used this period, with Upgrade (Stripe Checkout) and Manage billing (Stripe's billing page). Limits hold in the database: a new project past the plan's limit is refused, a run can't start once the cloud minutes are used, and the runner stops writing once the AI credits are used.
 - Healer: when a step's saved code fails even after its retry, the runner sends Claude the old code, the error and the page as it is now, keeping the lines that already ran. If the new code gets the step through, the step passes with a Healed tag and the fix goes to **Approvals** as a diff. The test's code only changes when someone approves it (saved as a normal version with their name). If what the step needs is gone, or a check is plainly false, Claude says so and the step fails with that reason. A slow page that passes on its retry never calls Claude. Each fix uses AI credits like writing does.
 - Judge: every failed run is sorted into **App bug**, **Flaky** or **Setup**, with a one-line reason, shown on the run page, the runs list and the test's run log. Clear setup problems (a site that doesn't resolve or refuses the connection, a bad certificate, a missing secret, a used-up plan, a private address) are sorted by fixed rules with no AI call. The rest go to Claude with the failed step, its code and error, a screenshot, console errors, failed requests and whether it was retried. A judgment uses one AI credit; with none left, the failure isn't judged.
+- Smart retries: a failure the Judge calls Flaky is run once more on its own, as a new run marked **Re-run** (trigger `retry`). The test shows the re-run's result, and the two runs link to each other. If the first run saved code it wrote, the re-run replays it. App bugs and setup problems are never re-run, and a re-run is never re-run again.
 - `tryclaritia.com/llms.txt` and `tryclaritia.com/pricing.md` describe Claritia and its pricing for AI agents.
 - Time to a first passing test is tracked: `workspaces.first_pass_at` is set by the first passing run. See "Launch numbers" below.
 
@@ -77,7 +78,9 @@ One Claude call per failed run that the rules don't settle: about 5,000 tokens i
 | New servers | $0 | $0 |
 | **Added each month** | **about $80** | **about $800** |
 
-With the Healer, Phase 2 so far adds about $130 at Beta and $1,300 at Growth.
+Smart retries add no servers and no writing. A re-run replays saved code, and only uses Claude again if it fails and needs judging: about $10 at Beta and $100 at Growth (check), plus the re-run's cloud minutes, which count toward the plan.
+
+With the Healer and smart retries, Phase 2 so far adds about $140 at Beta and $1,400 at Growth.
 
 ### What Weeks 5 and 6 add to the bill (all prices "check")
 
