@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { Copy, Key, LogOut, Plus, Settings } from "../../Icons";
 import { amount, planById, PLANS, type PlanId } from "@/lib/plans";
-import { INBOX_DOMAIN } from "@/lib/site";
+import { APP_URL, INBOX_DOMAIN } from "@/lib/site";
 import { askConfirm, askText } from "../Dialogs";
 import { AlertsPanel } from "./AlertsPanel";
 import { GitHubPanel } from "./GitHubPanel";
@@ -109,13 +109,35 @@ function PlanPanel({ sb, session, ws, role }: Pick<ViewProps, "sb" | "session" |
   );
 }
 
+/** A label, a line to copy, and a Copy button. */
+function CopyRow({ label, text }: { label: string; text: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <div className="flex items-center gap-2">
+      <span className="label-mono w-24 shrink-0">{label}</span>
+      <code className="min-w-0 flex-1 truncate border border-line bg-canvas px-2.5 py-1.5 font-mono text-[12.5px]">{text}</code>
+      <Button
+        variant="ghost"
+        onClick={() =>
+          navigator.clipboard?.writeText(text).then(() => {
+            setCopied(true);
+            setTimeout(() => setCopied(false), 1500);
+          })
+        }
+      >
+        <Copy size={12} />
+        {copied ? "Copied" : "Copy"}
+      </Button>
+    </div>
+  );
+}
+
 type ApiKey = { id: string; name: string; prefix: string; created_at: string; last_used_at: string | null };
 
 /** The workspace's API keys, for the REST API and the CLI. A new key shows once. */
 function KeysPanel({ sb, session, ws }: Pick<ViewProps, "sb" | "session" | "ws">) {
   const keys = useLoad(async () => must(await sb.from("api_keys").select("id, name, prefix, created_at, last_used_at").eq("workspace_id", ws.id).is("revoked_at", null).order("created_at")) as ApiKey[], ws.id);
   const [fresh, setFresh] = useState<{ name: string; key: string } | null>(null);
-  const [copied, setCopied] = useState(false);
   const [error, setError] = useState("");
   const act = async (fn: () => Promise<unknown>) => {
     setError("");
@@ -137,7 +159,6 @@ function KeysPanel({ sb, session, ws }: Pick<ViewProps, "sb" | "session" | "ws">
               const name = await askText("Key name", { placeholder: "GitHub Actions", ok: "Create key" });
               if (!name) return;
               const { key } = await postJson<{ key: string }>(session, "/api/keys", { workspaceId: ws.id, name });
-              setCopied(false);
               setFresh({ name, key });
               keys.reload();
             })
@@ -150,20 +171,9 @@ function KeysPanel({ sb, session, ws }: Pick<ViewProps, "sb" | "session" | "ws">
       {fresh ? (
         <div className="flex flex-col gap-2 border-b border-line px-4 py-3">
           <span className="text-[13px] font-medium">Copy {fresh.name} now. It won&apos;t show again.</span>
-          <div className="flex items-center gap-2">
-            <code className="min-w-0 flex-1 truncate border border-line bg-canvas px-2.5 py-1.5 font-mono text-[12.5px]">{fresh.key}</code>
-            <Button
-              variant="ghost"
-              onClick={() =>
-                navigator.clipboard?.writeText(fresh.key).then(() => {
-                  setCopied(true);
-                  setTimeout(() => setCopied(false), 1500);
-                })
-              }
-            >
-              <Copy size={12} />
-              {copied ? "Copied" : "Copy"}
-            </Button>
+          <CopyRow label="Key" text={fresh.key} />
+          <CopyRow label="Claude Code" text={`claude mcp add --transport http claritia ${APP_URL}/api/mcp --header "Authorization: Bearer ${fresh.key}"`} />
+          <div>
             <Button variant="plain" onClick={() => setFresh(null)}>
               Done
             </Button>

@@ -320,6 +320,7 @@ select pg_temp.check((select count(*) from api_keys) = 1, 'Ben can''t see his wo
 select pg_temp.fails($$insert into api_keys (workspace_id, name, prefix, key_hash) values ('11111111-0000-0000-0000-000000000000', 'x', 'clr_x', repeat('c', 64))$$, 'Ben adds a key without the server');
 select pg_temp.fails($$select * from api_key_auth(repeat('a', 64))$$, 'Ben signs in with a key hash');
 select pg_temp.fails($$select * from api_start_runs((select id from api_keys limit 1), 'a1000000-0000-0000-0000-000000000000', 'a2000000-0000-0000-0000-000000000000', array['a5000000-0000-0000-0000-000000000000'::uuid])$$, 'Ben starts runs as the server');
+select pg_temp.fails($$select * from api_start_runs((select id from api_keys limit 1), 'a1000000-0000-0000-0000-000000000000', 'a2000000-0000-0000-0000-000000000000', array['a5000000-0000-0000-0000-000000000000'::uuid], 'mcp', null)$$, 'Ben starts agent runs as the server');
 reset role;
 select pg_temp.as_user('c0000000-0000-0000-0000-000000000000');
 set role authenticated;
@@ -333,6 +334,10 @@ select pg_temp.fails_with($$select * from api_start_runs((select id from api_key
 select pg_temp.fails_with($$select * from api_start_runs((select id from api_keys where key_hash = repeat('a', 64)), 'a1000000-0000-0000-0000-000000000000', 'a2000000-0000-0000-0000-000000000000', array['c5000000-0000-0000-0000-000000000000'::uuid])$$, '%Test not found%', 'An Acme key runs Cat''s test');
 select pg_temp.check((select count(*) from api_start_runs((select id from api_keys where key_hash = repeat('a', 64)), 'a1000000-0000-0000-0000-000000000000', 'a2000000-0000-0000-0000-000000000000', array['a5000000-0000-0000-0000-000000000000'::uuid])) = 1, 'A key can''t start a run');
 select pg_temp.check((select count(*) from runs where trigger = 'api' and api_key_id is not null and created_by = 'b0000000-0000-0000-0000-000000000000') = 1, 'A key''s run doesn''t name its key and who made it');
+create temp table mcp_run as select * from api_start_runs((select id from api_keys where key_hash = repeat('a', 64)), 'a1000000-0000-0000-0000-000000000000', 'a2000000-0000-0000-0000-000000000000', array['a5000000-0000-0000-0000-000000000000'::uuid], 'mcp', 'https://pr-9.acme.dev');
+select pg_temp.check((select r.trigger || ' ' || r.base_url from mcp_run x join runs r on r.id = x.run_id) = 'mcp https://pr-9.acme.dev', 'An agent''s run isn''t marked mcp on its own address');
+select pg_temp.fails_with($$select * from api_start_runs((select id from api_keys where key_hash = repeat('a', 64)), 'a1000000-0000-0000-0000-000000000000', 'a2000000-0000-0000-0000-000000000000', array['a5000000-0000-0000-0000-000000000000'::uuid], 'schedule')$$, '%Unknown trigger%', 'A key starts a run marked as a schedule');
+select pg_temp.fails_with($$select * from api_start_runs((select id from api_keys where key_hash = repeat('a', 64)), 'a1000000-0000-0000-0000-000000000000', 'a2000000-0000-0000-0000-000000000000', array['a5000000-0000-0000-0000-000000000000'::uuid], 'mcp', 'file:///etc/passwd')$$, '%Not a web address%', 'A key runs on something that isn''t a web address');
 select pg_temp.as_user('b0000000-0000-0000-0000-000000000000');
 set role authenticated;
 select revoke_api_key((select id from api_keys limit 1));

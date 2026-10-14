@@ -17,6 +17,7 @@ export function GET() {
 - Secrets (passwords, API keys) are sealed before they're saved and hidden in errors, logs and traces.
 - Runs can't reach private network addresses.
 - CI and scripts: \`npx claritia run\` runs tests in the cloud with a workspace API key, waits, and exits 1 on a failed test. A flaky failure is re-run once and passes if the re-run passes. The REST API is at ${APP_URL}/api/v1 (projects, tests, runs).
+- Coding agents: the MCP server at ${APP_URL}/api/mcp (Streamable HTTP, API key as a Bearer token) has list_projects, list_tests, get_test, save_test, verify_change, get_results and list_fixes. The agent skill is at ${APP_URL}/skill.md.
 
 ## Pages
 

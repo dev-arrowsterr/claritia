@@ -1,6 +1,6 @@
 import "server-only";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
-import { supabaseUrl } from "./serverAuth";
+import { supabaseUrl } from "./serverAuth.ts";
 
 /** A Supabase client with the secret key, for webhooks that no signed-in person makes. Null when it isn't set up. */
 export function serviceClient(): SupabaseClient | null {
