@@ -17,7 +17,7 @@ import { shouldSleep } from "./idle.ts";
 import { claudeJudge, type Judge } from "./judge.ts";
 import { claudeNamer, type Namer } from "./namer.ts";
 import { handlePlan, type Plan } from "./planHandle.ts";
-import { claudePlanner, type Planner } from "./planner.ts";
+import { claudePlanner, type Planner } from "../src/lib/planner.ts";
 import { claudeWriter, type Writer } from "./writer.ts";
 
 const env = (k: string) => process.env[k]?.trim() ?? "";

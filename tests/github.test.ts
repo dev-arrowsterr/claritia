@@ -67,8 +67,8 @@ const SHA = "a".repeat(40);
 const inst = { installation: { id: 77 }, repository: { id: 9001 } };
 
 test("pull requests run on open, push, reopen and ready, but not drafts or closed ones", () => {
-  const pr = (action: string, over: Record<string, unknown> = {}) => planEvent("pull_request", { ...inst, action, pull_request: { number: 7, state: "open", draft: false, head: { sha: SHA }, ...over } }, "1");
-  for (const a of ["opened", "synchronize", "reopened", "ready_for_review"]) assert.deepEqual(pr(a), { kind: "pull_request", installationId: 77, repoId: 9001, sha: SHA, pr: 7 });
+  const pr = (action: string, over: Record<string, unknown> = {}) => planEvent("pull_request", { ...inst, action, pull_request: { number: 7, title: "Add coupons", state: "open", draft: false, head: { sha: SHA }, ...over } }, "1");
+  for (const a of ["opened", "synchronize", "reopened", "ready_for_review"]) assert.deepEqual(pr(a), { kind: "pull_request", installationId: 77, repoId: 9001, sha: SHA, pr: 7, opened: a === "opened" || a === "ready_for_review", title: "Add coupons" });
   assert.equal(pr("opened", { draft: true }).kind, "ignore");
   assert.equal(pr("closed").kind, "ignore");
   assert.equal(pr("labeled").kind, "ignore");

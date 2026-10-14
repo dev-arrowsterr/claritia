@@ -4,7 +4,15 @@
 import Anthropic from "@anthropic-ai/sdk";
 
 export type PlanPage = { pattern: string; name: string | null; purpose: string | null; title: string | null; forms: { fields: { label: string; type: string }[]; submit: string }[]; buttons: string[]; links: string[] };
-export type PlanRequest = { site: string; pages: PlanPage[]; tests: { name: string; use_case: string }[]; blocks: string[]; notes: string };
+export type PlanRequest = {
+  site: string;
+  pages: PlanPage[];
+  tests: { name: string; use_case: string }[];
+  blocks: string[];
+  notes: string;
+  /** A pull request's changes. With it, only tests for what the pull request adds or changes are proposed. */
+  change?: string;
+};
 export type ProposedStep = { kind: "do" | "check"; text: string } | { kind: "use"; block: string };
 export type Proposal = { name: string; use_case: string; priority: "low" | "medium" | "high"; reason: string; pages: string[]; steps: ProposedStep[] };
 export type Planner = (r: PlanRequest) => Promise<{ proposals: Proposal[]; usage: { input: number; output: number } }>;
@@ -25,7 +33,8 @@ Rules:
 - Passwords and keys: write them as process.env.NAME in the step ("Type process.env.LOGIN_PASSWORD into the Password field"). Never invent real credentials.
 - Only use pages, fields and buttons that appear in the map or the notes. Don't guess at hidden features.
 - Never propose deleting accounts, sending real payments or emailing real people.
-- Up to ${MAX_PROPOSALS} tests.`;
+- Up to ${MAX_PROPOSALS} tests.
+- When a pull request is given, propose only tests for the new or changed flows it adds (up to 5), and none if it adds no user-facing flow.`;
 
 const SCHEMA = {
   type: "object",
@@ -77,6 +86,7 @@ export function planPrompt(r: PlanRequest): string {
     `# Tests that already exist\n${r.tests.length ? r.tests.map((t) => `- ${t.use_case} / ${t.name}`).join("\n") : "(none)"}`,
     `# Blocks\n${r.blocks.length ? r.blocks.map((b) => `- ${b}`).join("\n") : "(none)"}`,
     r.notes.trim() ? `# Notes from the team\n${r.notes.trim()}` : "",
+    r.change?.trim() ? `# This pull request\n${r.change.trim()}` : "",
   ]
     .filter(Boolean)
     .join("\n\n");

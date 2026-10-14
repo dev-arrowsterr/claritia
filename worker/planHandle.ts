@@ -3,7 +3,7 @@
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { PageElements } from "./explorer.ts";
-import type { PlanPage, Planner } from "./planner.ts";
+import type { PlanPage, Planner } from "../src/lib/planner.ts";
 
 export type Plan = { id: string; workspace_id: string; project_id: string; notes: string; attempts: number };
 /** A plan counts as this many AI credits: it's one large call. */

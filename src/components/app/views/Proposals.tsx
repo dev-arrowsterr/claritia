@@ -6,7 +6,7 @@ import { Badge, Button, CardHead, ErrorNote, errorText, must, Panel, PriorityBar
 
 type Plan = { id: string; status: "queued" | "running" | "done" | "error"; proposals: number; error: string | null; created_at: string };
 type Step = { kind: "do" | "check"; text: string } | { kind: "use"; block: string };
-type Proposal = { id: string; name: string; use_case: string; priority: "low" | "medium" | "high"; reason: string | null; steps: Step[]; pages: string[] };
+type Proposal = { id: string; name: string; use_case: string; priority: "low" | "medium" | "high"; reason: string | null; steps: Step[]; pages: string[]; source: string | null };
 
 const ACTIVE = new Set(["queued", "running"]);
 
@@ -16,7 +16,7 @@ export function Proposals({ sb, project, navigate, asking, onAsked, onAccepted }
   const data = useLoad(async () => {
     const [plan, list, blocks] = await Promise.all([
       sb.from("plans").select("id, status, proposals, error, created_at").eq("project_id", project.id).order("created_at", { ascending: false }).limit(1),
-      sb.from("test_proposals").select("id, name, use_case, priority, reason, steps, pages").eq("project_id", project.id).eq("status", "pending").order("priority").order("created_at"),
+      sb.from("test_proposals").select("id, name, use_case, priority, reason, steps, pages, source").eq("project_id", project.id).eq("status", "pending").order("priority").order("created_at"),
       sb.from("blocks").select("id, name").eq("project_id", project.id),
     ]);
     const rank = { high: 0, medium: 1, low: 2 };
@@ -79,6 +79,7 @@ export function Proposals({ sb, project, navigate, asking, onAsked, onAccepted }
                     <span className="flex items-center gap-2">
                       <Badge>{p.use_case}</Badge>
                       <PriorityBars value={p.priority} />
+                      {p.source ? <Badge tone="violet">{p.source}</Badge> : null}
                     </span>
                   </div>
                 </div>

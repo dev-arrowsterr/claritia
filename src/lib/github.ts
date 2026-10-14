@@ -69,7 +69,7 @@ export function readState(state: string | null, key: string, now = Date.now()): 
 }
 
 export type EventPlan =
-  | { kind: "pull_request"; installationId: number; repoId: number; sha: string; pr: number }
+  | { kind: "pull_request"; installationId: number; repoId: number; sha: string; pr: number; opened: boolean; title: string }
   | { kind: "preview"; installationId: number; repoId: number; sha: string; url: string }
   | { kind: "rerun"; installationId: number; checkRunId: number }
   | { kind: "uninstalled"; installationId: number }
@@ -90,7 +90,7 @@ export function planEvent(event: string | null, p: Payload, appId: string): Even
     if (pr.state !== "open") return { kind: "ignore", why: "closed" };
     const sha = String(pr.head?.sha ?? "");
     if (!/^[0-9a-f]{40}$/.test(sha)) return { kind: "ignore", why: "no commit" };
-    return { kind: "pull_request", installationId, repoId: Number(p.repository?.id), sha, pr: Number(pr.number) };
+    return { kind: "pull_request", installationId, repoId: Number(p.repository?.id), sha, pr: Number(pr.number), opened: p.action === "opened" || p.action === "ready_for_review", title: String(pr.title ?? "").slice(0, 200) };
   }
 
   if (event === "deployment_status") {

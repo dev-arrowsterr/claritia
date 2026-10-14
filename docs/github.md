@@ -16,6 +16,25 @@ Each run posts a check named `Claritia (staging)` (or `Claritia (preview)`) with
 
 The **Re-run** button on GitHub runs the check again. To block merges on a failure, add the check under the repository's Settings → Branches → branch protection → Require status checks.
 
+## Only the tests a change affects
+
+With **Only run the tests a change affects** on (the default for new links), each check runs the tests the pull
+request's changed files can affect, and says why at the top of the check:
+
+1. Fixed rules first, no AI: a pull request that only changes docs, tests or CI runs nothing (a neutral check, which
+   doesn't block). One that changes shared code (dependencies, config, global styles, layouts, sign-in, routing, 100+
+   files) runs every test.
+2. Otherwise Claude Haiku reads the changed files, their diffs (up to 40,000 characters), the tests and the app map,
+   and picks the tests with a reason for each. Unsure, or nothing picked, runs everything.
+3. Anything that fails (files can't be read, the picker errors, no `ANTHROPIC_API_KEY` on the web app) runs every
+   test. A missed failure costs more than a few extra runs.
+
+When a pull request opens with a user-facing flow no test covers, Claude Sonnet proposes up to 5 tests for it. They
+show on the Tests page marked with the pull request.
+
+**Needs:** `ANTHROPIC_API_KEY` on `claritia-web`, and the GitHub App's **Contents: Read** permission (to read a
+pull request's files on private repositories; owners accept the new permission on their installation).
+
 ## How it works
 
 - `POST /api/github/webhook`: GitHub's events, checked against the webhook secret. A pull request or preview deploy calls `github_start_check()` (`supabase/migrations/013_github.sql`), which queues the tests (up to 50, trigger `ci`), then posts the check run.
@@ -29,7 +48,7 @@ The **Re-run** button on GitHub runs the check again. To block merges on a failu
    - Callback URL: `https://app.tryclaritia.com/api/github/setup`.
    - Turn on **Request user authorization (OAuth) during installation** and **Redirect on update**.
    - Webhook: active, URL `https://app.tryclaritia.com/api/github/webhook`, and a long random secret.
-   - Repository permissions: **Checks** read and write, **Pull requests** read, **Deployments** read. Metadata read is set already.
+   - Repository permissions: **Checks** read and write, **Contents** read, **Pull requests** read, **Deployments** read. Metadata read is set already.
    - Events: **Pull request**, **Deployment status**, **Check run**.
    - Where it can be installed: **Any account**.
 2. After saving: note the **App ID** and **Client ID**, make a **client secret**, and make a **private key** (downloads a `.pem`).
@@ -63,4 +82,8 @@ The Action lives in `action/` and needs this repository to be public, or copied 
 
 ## Running cost
 
-$0 added at Beta (50 teams) and Growth (500 teams): GitHub Apps are free, webhooks and syncs run on the existing web app, and runs use the same runner and cloud minutes.
+Picking: Claude Haiku, about $0.004 a push. Proposals for new flows: Claude Sonnet, about $0.10 on the pull requests
+that add one. At 150 pushes and 15 such pull requests per team a month: about $105 at Beta (50 teams) and $1,050 at
+Growth (500 teams), about $2.10 per team. A pick counts as 1 AI credit, proposals as 5.
+
+The GitHub App itself adds $0 at Beta (50 teams) and Growth (500 teams): GitHub Apps are free, webhooks and syncs run on the existing web app, and runs use the same runner and cloud minutes.

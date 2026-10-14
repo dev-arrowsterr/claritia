@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { handlePlan, PLAN_CREDITS } from "../worker/planHandle.ts";
-import { cleanProposals, MAX_PROPOSALS, planPrompt, type PlanRequest, type Planner } from "../worker/planner.ts";
+import { cleanProposals, MAX_PROPOSALS, planPrompt, type PlanRequest, type Planner } from "../src/lib/planner.ts";
 
 const req: PlanRequest = {
   site: "https://staging.shop.com",

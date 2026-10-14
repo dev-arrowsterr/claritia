@@ -373,6 +373,12 @@ create temp table preview_check as select * from github_start_check('ab000000-00
 select pg_temp.check((select r.base_url from preview_check c join runs r on r.id = c.run_ids[1]) = 'https://pr-7.acme.vercel.app', 'A preview deploy didn''t run on its own address');
 select pg_temp.fails_with($$select * from github_start_check('ab000000-0000-0000-0000-000000000000', repeat('b', 40), 7, 'javascript:alert(1)')$$, '%Not a web address%', 'A check runs on something that isn''t a web address');
 update runs set status = 'passed' where id = (select run_ids[1] from preview_check);
+-- PR-aware: only the picked tests run, an empty pick is a finished neutral check, and the pick's AI call counts.
+create temp table picked_check as select * from github_start_check('ab000000-0000-0000-0000-000000000000', repeat('c', 40), 8, null, array['a5000000-0000-0000-0000-000000000000'::uuid], '{"mode":"picked","reason":"Checkout changed"}', 1);
+select pg_temp.check((select cardinality(run_ids) from picked_check) = 1 and (select selection ->> 'mode' from picked_check) = 'picked', 'A picked check didn''t run only the picked test');
+create temp table none_check as select * from github_start_check('ab000000-0000-0000-0000-000000000000', repeat('d', 40), 9, null, '{}'::uuid[], '{"mode":"none","reason":"Only docs changed."}', 0);
+select pg_temp.check((select status || ' ' || conclusion || ' ' || error from none_check) = 'done neutral Only docs changed.' and (select cardinality(run_ids) from none_check) = 0, 'An empty pick didn''t make a finished neutral check');
+select pg_temp.check((select count(*) from github_checks where ai_calls = 1) = 1, 'A pick''s AI call isn''t saved');
 select minute_tick();
 
 -- Alerts: settings stay in their workspace, the Slack address is never readable, and only real failures alert.

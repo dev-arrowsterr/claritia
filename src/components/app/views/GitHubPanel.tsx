@@ -8,9 +8,9 @@ import { Badge, Button, CardHead, ErrorNote, errorText, Field, Loading, must, Pa
 
 type RunOn = "pull_request" | "preview";
 type Scope = "all" | "use_case";
-type Link = { id: string; repo_full_name: string; run_on: RunOn; scope: Scope; use_case: string | null; enabled: boolean; environment_id: string; environments: { name: string } | null };
+type Link = { id: string; repo_full_name: string; run_on: RunOn; scope: Scope; use_case: string | null; enabled: boolean; pick_tests: boolean; environment_id: string; environments: { name: string } | null };
 type Repo = { id: number; full_name: string; installation_id: number };
-type Draft = { repo: string; run_on: RunOn; environment_id: string; scope: Scope; use_case: string };
+type Draft = { repo: string; run_on: RunOn; environment_id: string; scope: Scope; use_case: string; pick_tests: boolean };
 
 const selectClass = "h-9 w-full rounded-md border border-line bg-panel px-2.5 text-[13px] hover:border-line-strong";
 
@@ -27,7 +27,7 @@ export function GitHubPanel({ sb, session, ws, project }: Pick<ViewProps, "sb" |
   const data = useLoad(async () => {
     const [installs, links, envs, tests] = await Promise.all([
       sb.from("github_installations").select("id, account_login").eq("workspace_id", ws.id).order("created_at"),
-      sb.from("github_links").select("id, repo_full_name, run_on, scope, use_case, enabled, environment_id, environments(name)").eq("project_id", project.id).order("created_at"),
+      sb.from("github_links").select("id, repo_full_name, run_on, scope, use_case, enabled, pick_tests, environment_id, environments(name)").eq("project_id", project.id).order("created_at"),
       sb.from("environments").select("id, name").eq("project_id", project.id).order("created_at"),
       sb.from("tests").select("use_case").eq("project_id", project.id),
     ]);
@@ -113,6 +113,7 @@ export function GitHubPanel({ sb, session, ws, project }: Pick<ViewProps, "sb" |
                     environment_id: f.environment_id,
                     scope: f.scope,
                   use_case: f.scope === "use_case" ? f.use_case : null,
+                  pick_tests: f.pick_tests,
                 });
                 if (e) throw new Error(/duplicate/i.test(e.message) ? `${repo.full_name} is already linked to this project that way.` : e.message);
                 setAdding(false);
@@ -127,7 +128,10 @@ export function GitHubPanel({ sb, session, ws, project }: Pick<ViewProps, "sb" |
                   <Branch size={13} />
                   <span className="min-w-0 truncate font-mono text-[13px]">{l.repo_full_name}</span>
                   <Badge tone={l.run_on === "preview" ? "violet" : "brand"}>{l.run_on === "preview" ? "Preview deploys" : `PRs on ${l.environments?.name ?? "?"}`}</Badge>
-                  <span className="text-[12px] text-muted">{l.scope === "use_case" ? l.use_case : "Every test"}</span>
+                  <span className="text-[12px] text-muted">
+                    {l.scope === "use_case" ? l.use_case : "Every test"}
+                    {l.pick_tests ? " · affected only" : ""}
+                  </span>
                   {l.enabled ? null : <Badge>Paused</Badge>}
                   <span className="ml-auto flex gap-1">
                     <Button
@@ -142,6 +146,19 @@ export function GitHubPanel({ sb, session, ws, project }: Pick<ViewProps, "sb" |
                       }
                     >
                       {l.enabled ? "Pause" : "Resume"}
+                    </Button>
+                    <Button
+                      variant="plain"
+                      className="h-7 px-2"
+                      disabled={busy}
+                      onClick={() =>
+                        act(async () => {
+                          must(await sb.from("github_links").update({ pick_tests: !l.pick_tests }).eq("id", l.id));
+                          data.reload();
+                        })
+                      }
+                    >
+                      {l.pick_tests ? "Run all" : "Affected only"}
                     </Button>
                     <Button
                       variant="plain"
@@ -174,7 +191,7 @@ export function GitHubPanel({ sb, session, ws, project }: Pick<ViewProps, "sb" |
 }
 
 function LinkForm({ repos, envs, useCases, onSave, onCancel }: { repos: Repo[]; envs: { id: string; name: string }[]; useCases: string[]; onSave: (d: Draft) => Promise<void>; onCancel: () => void }) {
-  const [d, setD] = useState<Draft>({ repo: "", run_on: "pull_request", environment_id: envs[0]?.id ?? "", scope: "all", use_case: useCases[0] ?? "" });
+  const [d, setD] = useState<Draft>({ repo: "", run_on: "pull_request", environment_id: envs[0]?.id ?? "", scope: "all", use_case: useCases[0] ?? "", pick_tests: true });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const set = <K extends keyof Draft>(k: K, v: Draft[K]) => setD({ ...d, [k]: v });
@@ -232,6 +249,10 @@ function LinkForm({ repos, envs, useCases, onSave, onCancel }: { repos: Repo[]; 
           ) : null}
         </div>
       </div>
+      <label className="flex cursor-pointer items-center gap-2 text-[13px] sm:col-span-2">
+        <input type="checkbox" checked={d.pick_tests} onChange={(e) => set("pick_tests", e.target.checked)} className="size-3.5 accent-[var(--color-brand)]" />
+        Only run the tests a change affects
+      </label>
       <div className="flex items-center gap-2 sm:col-span-2">
         <Button type="submit" disabled={busy || !d.repo || !d.environment_id}>
           {busy ? "Linking…" : "Link"}

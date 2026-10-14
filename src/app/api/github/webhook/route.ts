@@ -1,3 +1,4 @@
+import { after } from "next/server";
 import { planEvent, verifySignature } from "@/lib/github";
 import { githubConfig } from "@/lib/githubApp";
 import { handlePlan } from "@/lib/githubChecks";
@@ -19,8 +20,10 @@ export async function POST(request: Request) {
   }
   const plan = planEvent(request.headers.get("x-github-event"), payload, config.appId);
   if (plan.kind === "ignore") return Response.json({ ok: true, ignored: plan.why });
-  const errors = await handlePlan(sb, plan);
-  if (errors.length) console.error(`GitHub ${plan.kind}: ${errors.join(" | ")}`);
-  // GitHub only re-sends by hand, so answer 200 and keep the errors in the log.
-  return Response.json({ ok: !errors.length, errors });
+  // Answer GitHub at once (it waits 10 seconds at most), then pick the tests and start the check.
+  after(async () => {
+    const errors = await handlePlan(sb, plan).catch((e: Error) => [e.message]);
+    if (errors.length) console.error(`GitHub ${plan.kind}: ${errors.join(" | ")}`);
+  });
+  return Response.json({ ok: true, accepted: plan.kind });
 }
