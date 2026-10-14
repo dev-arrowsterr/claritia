@@ -2,11 +2,9 @@ import assert from "node:assert/strict";
 import { createHmac } from "node:crypto";
 import { test } from "node:test";
 import Stripe from "stripe";
-import { applySubscription, handleStripeEvent } from "../src/lib/billing.ts";
+import { applySubscription, handleWebhook, lineFor } from "../src/lib/billing.ts";
 import { readRecipient, verifyMailgun } from "../src/lib/mailgun.ts";
 
-process.env.STRIPE_PRICE_STARTER = "price_starter";
-process.env.STRIPE_PRICE_TEAM = "price_team";
 
 test("Mailgun requests are checked by their signature and age", () => {
   const key = "key-test";
@@ -43,36 +41,52 @@ function fakeAdmin(rows: Record<string, unknown>[] = []) {
     }),
   };
 }
-const sub = (status: string, price: string, metadata: Record<string, string> = {}) =>
-  ({ id: "sub_1", status, customer: "cus_1", metadata, items: { data: [{ price: { id: price }, current_period_start: 1_760_000_000, current_period_end: 1_762_600_000 }] } }) as unknown as Stripe.Subscription;
+const sub = (status: string, cents: number, metadata: Record<string, string> = {}) =>
+  ({ id: "sub_1", status, customer: "cus_1", metadata, items: { data: [{ price: { id: "price_x", unit_amount: cents, recurring: { interval: "month" } }, current_period_start: 1_760_000_000, current_period_end: 1_762_600_000 }] } }) as unknown as Stripe.Subscription;
+
+test("checkout prices come from the plan list", () => {
+  const line = lineFor("team");
+  assert.equal(line.price_data?.unit_amount, 19900);
+  assert.equal(line.price_data?.recurring?.interval, "month");
+  assert.equal(lineFor("starter").price_data?.unit_amount, 4900);
+});
 
 test("a subscription sets the workspace's plan, and canceling puts it back on Free", async () => {
   const admin = fakeAdmin([{ workspace_id: "ws1", stripe_customer_id: "cus_1", plan: "free" }]);
-  await applySubscription(admin as never, sub("active", "price_team"));
+  await applySubscription(admin as never, sub("active", 19900, { plan: "team" }));
   assert.equal(admin.rows[0]!.plan, "team");
   assert.equal(admin.rows[0]!.period_end, new Date(1_762_600_000_000).toISOString());
-  await applySubscription(admin as never, sub("past_due", "price_starter"));
+  await applySubscription(admin as never, sub("past_due", 4900, { plan: "starter" }));
   assert.equal(admin.rows[0]!.plan, "starter");
-  await applySubscription(admin as never, sub("canceled", "price_starter"));
+  await applySubscription(admin as never, sub("canceled", 4900, { plan: "starter" }));
   assert.equal(admin.rows[0]!.plan, "free");
   assert.equal(admin.rows[0]!.stripe_subscription_id, null);
-  await applySubscription(admin as never, sub("active", "price_unknown"));
-  assert.equal(admin.rows[0]!.plan, "free", "an unknown price never grants a plan");
-  const none = await applySubscription(fakeAdmin() as never, sub("active", "price_team"));
+  await applySubscription(admin as never, sub("active", 4900, { plan: "team" }));
+  assert.equal(admin.rows[0]!.plan, "free", "a Team plan paid at the Starter price never counts");
+  await applySubscription(admin as never, sub("active", 4900, { plan: "business" }));
+  assert.equal(admin.rows[0]!.plan, "free", "only paid plans come from Stripe");
+  const none = await applySubscription(fakeAdmin() as never, sub("active", 19900, { plan: "team" }));
   assert.equal(none.ok, false);
 });
 
-test("the webhook only trusts events signed with the secret", async () => {
-  const stripe = new Stripe("sk_test_x");
-  const secret = "whsec_test";
-  const payload = JSON.stringify({ id: "evt_1", object: "event", type: "customer.subscription.updated", data: { object: sub("active", "price_starter", { workspace_id: "ws9" }) } });
-  const header = stripe.webhooks.generateTestHeaderString({ payload, secret });
-  const event = stripe.webhooks.constructEvent(payload, header, secret);
+test("the webhook trusts only events it can fetch back from Stripe", async () => {
+  const events: Record<string, unknown> = {
+    evt_real: { id: "evt_real", type: "customer.subscription.updated", data: { object: { id: "sub_1" } } },
+  };
+  const stripe = {
+    events: {
+      retrieve: async (id: string) => {
+        if (!events[id]) throw new Error("No such event");
+        return events[id];
+      },
+    },
+    subscriptions: { retrieve: async () => sub("active", 4900, { plan: "starter", workspace_id: "ws9" }) },
+  };
   const admin = fakeAdmin();
-  const res = await handleStripeEvent(stripe, admin as never, event);
-  assert.equal(res.ok, true);
-  assert.equal(admin.rows[0]!.workspace_id, "ws9");
-  assert.equal(admin.rows[0]!.plan, "starter");
-  assert.throws(() => stripe.webhooks.constructEvent(payload.replace("starter", "team"), header, secret));
-  assert.throws(() => stripe.webhooks.constructEvent(payload, header, "whsec_other"));
+  const ok = await handleWebhook(stripe as never, admin as never, JSON.stringify({ id: "evt_real", type: "customer.subscription.updated", data: { object: { plan: "team" } } }));
+  assert.equal(ok.ok, true);
+  assert.equal(admin.rows[0]!.plan, "starter", "the posted body is ignored; Stripe's copy is used");
+  await assert.rejects(() => handleWebhook(stripe as never, admin as never, JSON.stringify({ id: "evt_fake" })));
+  assert.equal((await handleWebhook(stripe as never, admin as never, "not json")).ok, false);
+  assert.equal((await handleWebhook(stripe as never, admin as never, JSON.stringify({ id: "../x" }))).ok, false);
 });
