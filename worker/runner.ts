@@ -14,6 +14,10 @@ import type { Writer } from "./writer.ts";
 
 export type StepStatus = "running" | "passed" | "failed" | "skipped";
 export type StepUpdate = { position: number; status: StepStatus; retried?: boolean; startedMs?: number; durationMs?: number; error?: string | null; screenshot?: string; written?: boolean; code?: string };
+/** An email that reached a test inbox. */
+export type InboxMail = { subject: string; text: string; html: string; receivedAt: string };
+/** The project's test inbox: an address per name for this run, and the mail that reached it. */
+export type Inbox = { address: (tag: string) => string; read: (address: string, since: Date) => Promise<InboxMail[]> };
 /** A step as the test has it now. `label` is how its step comment reads in the lock. */
 export type RunStep = { position: number; kind: "do" | "check" | "use"; label: string; intent: string };
 export type RunInput = {
@@ -35,6 +39,9 @@ export type RunInput = {
   steps?: RunStep[];
   /** How often to send a live frame of the page while the run goes, in ms. */
   frameMs?: number;
+  inbox?: Inbox;
+  /** How long to wait for an email, in ms. */
+  inboxTimeoutMs?: number;
 };
 export type RunResult = {
   status: "passed" | "failed" | "error";
@@ -43,6 +50,7 @@ export type RunResult = {
   video: string | null;
   traces: string[];
   consoleFile: string | null;
+  networkFile: string | null;
   /** The test's code with the steps written in this run added, when any were. */
   lock: string | null;
   ai: { calls: number; input: number; output: number };
@@ -50,6 +58,42 @@ export type RunResult = {
 export type Hooks = { step: (u: StepUpdate) => Promise<void>; frame?: (jpeg: Buffer) => Promise<void> };
 
 const MAX_WRITES_PER_STEP = 5;
+const MAX_NETWORK = 2000;
+
+/** Text of an email, with tags taken out of the HTML when there's no plain text. */
+function mailText(m: InboxMail) {
+  if (m.text.trim()) return m.text;
+  return m.html.replace(/<(script|style)[\s\S]*?<\/\1>/gi, " ").replace(/<[^>]+>/g, " ").replace(/&nbsp;/g, " ").replace(/&amp;/g, "&");
+}
+
+/** A code right after words like "code" or "verification": 4 to 8 letters and digits, with at least one digit. */
+export function codeNearWords(m: InboxMail): string | null {
+  const text = `${m.subject}\n${mailText(m)}`.replace(/\s+/g, " ");
+  for (const k of text.matchAll(/\b(?:code|pin|otp|passcode|one-time|verification|verify)\b/gi)) {
+    const after = text.slice(k.index! + k[0].length, k.index! + k[0].length + 50);
+    const hit = /(?<![A-Za-z0-9-])(?=[A-Za-z0-9-]*\d)([A-Za-z0-9]{3,8}(?:-[A-Za-z0-9]{3,4})?)(?![A-Za-z0-9-])/.exec(after);
+    if (hit && hit[1]!.length >= 4) return hit[1]!;
+  }
+  return null;
+}
+
+/** Any 4 to 8 digit number on its own, in an email about signing in or verifying. A welcome email's order number never counts. */
+export function anyDigits(m: InboxMail): string | null {
+  if (!/code|verif|otp|\bpin\b|passcode|confirm|sign.?in|log.?in/i.test(`${m.subject}\n${mailText(m)}`)) return null;
+  const digits = /(?<![\d.,/:#-])(\d{4,8})(?![\d.,/:-])/.exec(`${m.subject}\n${mailText(m)}`);
+  return digits ? digits[1]! : null;
+}
+
+/** A link in an email. With a pattern, the first link that matches. Otherwise the first sign-in, confirm or reset style link, then any link. */
+export function extractLink(m: InboxMail, pattern?: RegExp): string | null {
+  const links: string[] = [];
+  for (const h of m.html.matchAll(/href\s*=\s*["']([^"']+)["']/gi)) links.push(h[1]!.replace(/&amp;/g, "&"));
+  for (const t of mailText(m).matchAll(/https?:\/\/[^\s<>"')\]]+/g)) links.push(t[0]);
+  const web = links.filter((l) => /^https?:\/\//i.test(l));
+  if (pattern) return web.find((l) => pattern.test(l)) ?? null;
+  const useful = web.filter((l) => !/unsubscribe|preferences|privacy|terms/i.test(l));
+  return useful.find((l) => /verify|confirm|activate|magic|login|log-in|sign-?in|reset|token|auth|invite/i.test(l)) ?? useful[0] ?? null;
+}
 const same = (a: string, b: string) => a.replace(/\s+/g, " ").trim().toLowerCase() === b.replace(/\s+/g, " ").trim().toLowerCase();
 
 const VIEWPORT = { width: 1280, height: 720 };
@@ -132,7 +176,7 @@ export async function executeRun(input: RunInput, hooks: Hooks): Promise<RunResu
   const runTimeout = input.runTimeoutMs ?? 5 * 60_000;
   const mask = (t: string) => maskSecrets(t, input.secrets);
   const ai = { calls: 0, input: 0, output: 0 };
-  const result = (status: RunResult["status"], error: string | null, extra: Partial<RunResult> = {}): RunResult => ({ status, error: error && mask(error), durationMs: Date.now() - started, video: null, traces: [], consoleFile: null, lock: null, ai, ...extra });
+  const result = (status: RunResult["status"], error: string | null, extra: Partial<RunResult> = {}): RunResult => ({ status, error: error && mask(error), durationMs: Date.now() - started, video: null, traces: [], consoleFile: null, networkFile: null, lock: null, ai, ...extra });
 
   const writer = input.writer;
   const parsed = parseLock(input.lock.trim() ? input.lock : "test('x', async ({ page }) => {});");
@@ -140,6 +184,7 @@ export async function executeRun(input: RunInput, hooks: Hooks): Promise<RunResu
   const missing = parsed.secrets.filter((s) => !(s in input.secrets));
   if (missing.length) return result("error", `Add ${missing.join(", ")} to this environment in Settings.`);
   if (!parsed.actionCount && !writer) return result("error", "This test has no Playwright code yet.");
+  if (parsed.usesInbox && !input.inbox) return result("error", "This test reads email, and test inboxes aren't set up on this runner.");
   const sections = lockSections(input.lock);
   const writtenLines = new Map<number, string[]>();
   const stepInfo = (position: number) => input.steps?.find((s) => s.position === position);
@@ -151,6 +196,7 @@ export async function executeRun(input: RunInput, hooks: Hooks): Promise<RunResu
   let page: Page | null = null;
   const traces: string[] = [];
   const consoleLines: { ms: number; type: string; text: string }[] = [];
+  const network: { ms: number; method: string; url: string; status: number | null; type: string; durationMs: number | null; failure?: string }[] = [];
   const blocked = new Set<string>();
   let pageStart = Date.now();
 
@@ -176,7 +222,30 @@ export async function executeRun(input: RunInput, hooks: Hooks): Promise<RunResu
     return hostChecks.get(host)!;
   };
 
-  const resolve = (a: Arg): unknown => {
+  // Mail sent before the run started doesn't count, so an old code is never used by mistake.
+  const inboxSince = new Date(started - 5000);
+  const inboxTimeout = input.inboxTimeoutMs ?? 60_000;
+  // Picks are tried in order across all the mail, so a clear code in an older email beats a stray number in a newer one.
+  const waitForMail = async <T>(tag: string, what: string, ...picks: ((m: InboxMail) => T | null)[]): Promise<T> => {
+    if (!input.inbox) throw new Error("Test inboxes aren't set up on this runner.");
+    const address = input.inbox.address(tag);
+    const deadline = Date.now() + inboxTimeout;
+    let seen = 0;
+    for (;;) {
+      const mail = await input.inbox.read(address, inboxSince);
+      seen = mail.length;
+      for (const pick of picks) {
+        for (const m of mail) {
+          const hit = pick(m);
+          if (hit !== null) return hit;
+        }
+      }
+      if (Date.now() > deadline) throw new Error(seen ? `${seen} email${seen === 1 ? "" : "s"} reached ${address}, but none had ${what}.` : `No email reached ${address} within ${Math.round(inboxTimeout / 1000)} seconds.`);
+      await sleep(1000);
+    }
+  };
+
+  const resolve = async (a: Arg): Promise<unknown> => {
     switch (a.kind) {
       case "string":
       case "number":
@@ -187,15 +256,25 @@ export async function executeRun(input: RunInput, hooks: Hooks): Promise<RunResu
       case "secret":
         return input.secrets[a.name];
       case "object":
-        return Object.fromEntries(Object.entries(a.entries).map(([k, v]) => [k, resolve(v)]));
+        return Object.fromEntries(await Promise.all(Object.entries(a.entries).map(async ([k, v]) => [k, await resolve(v)])));
       case "array":
-        return a.items.map(resolve);
+        return Promise.all(a.items.map(resolve));
+      case "inbox": {
+        if (a.fn === "address") {
+          if (!input.inbox) throw new Error("Test inboxes aren't set up on this runner.");
+          return input.inbox.address(a.tag);
+        }
+        if (a.fn === "code") return waitForMail(a.tag, "a code", codeNearWords, anyDigits);
+        const pattern = a.pattern ? new RegExp(a.pattern.source, a.pattern.flags) : undefined;
+        return waitForMail(a.tag, pattern ? `a link matching ${pattern}` : "a link", (m) => extractLink(m, pattern));
+      }
     }
   };
+  const resolveAll = (args: Arg[]) => Promise.all(args.map(resolve));
 
-  const locate = (p: Page, chain: Call[]): Locator => {
+  const locate = async (p: Page, chain: Call[]): Promise<Locator> => {
     let loc: unknown = p;
-    for (const c of chain) loc = (loc as Record<string, (...x: unknown[]) => unknown>)[c.fn]!(...c.args.map(resolve));
+    for (const c of chain) loc = (loc as Record<string, (...x: unknown[]) => unknown>)[c.fn]!(...(await resolveAll(c.args)));
     return loc as Locator;
   };
 
@@ -229,8 +308,13 @@ export async function executeRun(input: RunInput, hooks: Hooks): Promise<RunResu
   };
 
   const perform = async (p: Page, a: Action) => {
+    if (a.type === "inbox") {
+      const pattern = a.pattern ? new RegExp(a.pattern.source, a.pattern.flags) : undefined;
+      await waitForMail(a.tag, pattern ? `a subject matching ${pattern}` : "anything", (m) => (!pattern || pattern.test(m.subject) ? true : null));
+      return;
+    }
     if (a.type === "page") {
-      const args = a.args.map(resolve);
+      const args = await resolveAll(a.args);
       switch (a.method) {
         case "goto":
           await p.goto(absolute(String(args[0])), { waitUntil: "load" });
@@ -257,21 +341,21 @@ export async function executeRun(input: RunInput, hooks: Hooks): Promise<RunResu
       throw new Error(`Unknown page action ${a.method}.`);
     }
     if (a.type === "keyboard") {
-      const arg = String(resolve(a.args[0]!));
+      const arg = String(await resolve(a.args[0]!));
       if (a.method === "press") await p.keyboard.press(arg);
       else if (a.method === "type") await p.keyboard.type(arg);
       else await p.keyboard.insertText(arg);
       return;
     }
     if (a.type === "locator") {
-      const loc = locate(p, a.chain);
-      const args = a.args.map(resolve);
+      const loc = await locate(p, a.chain);
+      const args = await resolveAll(a.args);
       const fn = (loc as unknown as Record<string, (...x: unknown[]) => Promise<unknown>>)[a.method]!;
       await fn.apply(loc, args);
       return;
     }
     // expect
-    const args = a.args.map(resolve);
+    const args = await resolveAll(a.args);
     if (a.subject === "page") {
       const want = args[0];
       if (a.matcher === "toHaveURL") {
@@ -289,7 +373,7 @@ export async function executeRun(input: RunInput, hooks: Hooks): Promise<RunResu
       }
       return;
     }
-    const loc = locate(p, a.subject);
+    const loc = await locate(p, a.subject);
     const what = a.subject.map((c) => `${c.fn}(${c.args.map((x) => (x.kind === "string" ? `'${x.value}'` : x.kind === "secret" ? "secret" : "…")).join(", ")})`).join(".");
     const yes = (pass: boolean, actual: string) => ({ pass, actual });
     switch (a.matcher) {
@@ -382,6 +466,7 @@ export async function executeRun(input: RunInput, hooks: Hooks): Promise<RunResu
     if (!one.ok) return { problem: `${line} → ${one.errors[0]!.message}` };
     const actions = one.steps[0]!.actions;
     if (actions.length !== 1) return { problem: `${line} → write one statement per line.` };
+    if (one.usesInbox && !input.inbox) return { problem: `${line} → test inboxes aren't set up on this runner.` };
     const missingSecret = one.secrets.find((n) => !(n in input.secrets));
     if (missingSecret) return { problem: `${line} → there's no secret named ${missingSecret}. Use one of: ${Object.keys(input.secrets).join(", ") || "none"}.` };
     const a = actions[0]!;
@@ -404,10 +489,12 @@ export async function executeRun(input: RunInput, hooks: Hooks): Promise<RunResu
       try {
         reply = await writer!({
           testName: input.testName ?? parsed.name,
+          baseUrl: input.baseUrl,
           steps: (input.steps ?? []).map((s) => ({ position: s.position, kind: s.kind, intent: s.intent })),
           position: info.position,
           ...snap,
           secretNames: Object.keys(input.secrets),
+          inbox: !!input.inbox,
           done: [...done],
           error: lastError && mask(lastError),
         });
@@ -468,6 +555,22 @@ export async function executeRun(input: RunInput, hooks: Hooks): Promise<RunResu
     pageStart = Date.now();
     page.on("console", (m) => consoleLines.push({ ms: Date.now() - pageStart, type: m.type(), text: mask(m.text()).slice(0, 2000) }));
     page.on("pageerror", (e) => consoleLines.push({ ms: Date.now() - pageStart, type: "pageerror", text: mask(e.message).slice(0, 2000) }));
+    // The network log: every request the page made, with its status and how long it took. Secrets are hidden in addresses.
+    const logRequest = (req: import("playwright-core").Request, status: number | null, failure?: string) => {
+      if (network.length >= MAX_NETWORK || req.url().startsWith("data:")) return;
+      const t = req.timing();
+      network.push({
+        ms: Math.max(0, Math.round(t.startTime - pageStart)),
+        method: req.method(),
+        url: mask(req.url()).slice(0, 500),
+        status,
+        type: req.resourceType(),
+        durationMs: t.responseEnd > 0 ? Math.round(t.responseEnd) : null,
+        ...(failure ? { failure: mask(failure).slice(0, 200) } : {}),
+      });
+    };
+    context.on("requestfinished", (req) => void req.response().then((r) => logRequest(req, r?.status() ?? null)).catch(() => undefined));
+    context.on("requestfailed", (req) => logRequest(req, null, req.failure()?.errorText ?? "failed"));
 
     // Live frames, so people can watch the run as it goes.
     const livePage = page;
@@ -580,6 +683,8 @@ export async function executeRun(input: RunInput, hooks: Hooks): Promise<RunResu
   }
   const consoleFile = join(input.dir, "console.json");
   await writeFile(consoleFile, JSON.stringify(consoleLines));
+  const networkFile = join(input.dir, "network.json");
+  await writeFile(networkFile, JSON.stringify(network.sort((a, b) => a.ms - b.ms)));
 
   // The test's code with the newly written steps in it. Steps keep their old code unless they were written now.
   let lock: string | null = null;
@@ -587,5 +692,5 @@ export async function executeRun(input: RunInput, hooks: Hooks): Promise<RunResu
     const next = buildLock(input.testName ?? parsed.name, input.steps.map((s) => ({ label: s.label, lines: writtenLines.get(s.position) ?? (same(sections.size ? (parsed.steps.find((x) => x.number === s.position)?.label ?? "") : "", s.label) ? (sections.get(s.position) ?? []) : []) })));
     if (parseLock(next).ok) lock = next;
   }
-  return result(outcome.status, outcome.error, { video, traces, consoleFile, lock });
+  return result(outcome.status, outcome.error, { video, traces, consoleFile, networkFile, lock });
 }

@@ -22,6 +22,8 @@ type RunRow = {
   video_path: string | null;
   trace_paths: string[];
   console_path: string | null;
+  network_path: string | null;
+  project_id: string;
   attempts: number;
   live_path: string | null;
   ai_calls: number;
@@ -29,9 +31,14 @@ type RunRow = {
 };
 type StepRow = { id: string; position: number; kind: string; label: string; status: StepStatus; retried: boolean; started_ms: number | null; duration_ms: number | null; error: string | null; screenshot_path: string | null; written: boolean; code: string | null };
 type ConsoleLine = { ms: number; type: string; text: string };
+type NetworkLine = { ms: number; method: string; url: string; status: number | null; type: string; durationMs: number | null; failure?: string };
+type Email = { id: string; to_address: string; from_address: string | null; subject: string | null; text_body: string | null; received_at: string };
+
+/** The part of a run's inbox addresses that's unique to the run: <inbox>-<name>-<this>@... */
+const runCode = (runId: string) => runId.replace(/-/g, "").slice(0, 6);
 
 const LIVE = new Set<RunStatus>(["queued", "running"]);
-const RUN_COLUMNS = "id, test_id, test_name, test_version, environment_id, environment_name, base_url, trigger, status, error, created_at, started_at, finished_at, duration_ms, video_path, trace_paths, console_path, attempts, live_path, ai_calls, lock_saved";
+const RUN_COLUMNS = "id, test_id, test_name, test_version, environment_id, environment_name, base_url, trigger, status, error, created_at, started_at, finished_at, duration_ms, video_path, trace_paths, console_path, network_path, project_id, attempts, live_path, ai_calls, lock_saved";
 
 /** Load again every few seconds while `live` is true. */
 function usePoll(live: boolean, ms: number, tick: () => void) {
@@ -125,7 +132,10 @@ function RunDetail({ sb, session, id, navigate }: ViewProps) {
   const [steps, setSteps] = useState<StepRow[]>([]);
   const [urls, setUrls] = useState<Record<string, string>>({});
   const [consoleLines, setConsoleLines] = useState<ConsoleLine[] | null>(null);
-  const [tab, setTab] = useState<"screenshots" | "console" | "trace">("screenshots");
+  const [tab, setTab] = useState<"screenshots" | "console" | "network" | "emails" | "trace">("screenshots");
+  const [network, setNetwork] = useState<NetworkLine[] | null>(null);
+  const [emails, setEmails] = useState<Email[]>([]);
+  const [openEmail, setOpenEmail] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [again, setAgain] = useState(false);
   const [lastFrame, setLastFrame] = useState("");
@@ -143,7 +153,7 @@ function RunDetail({ sb, session, id, navigate }: ViewProps) {
   usePoll(!!run && LIVE.has(run.status), 1500, load);
 
   // Files are private: get short-lived links for the ones this run has.
-  const paths = useMemo(() => (run ? [run.video_path, run.console_path, run.live_path, ...run.trace_paths, ...steps.map((s) => s.screenshot_path)].filter((p): p is string => !!p) : []), [run, steps]);
+  const paths = useMemo(() => (run ? [run.video_path, run.console_path, run.network_path, run.live_path, ...run.trace_paths, ...steps.map((s) => s.screenshot_path)].filter((p): p is string => !!p) : []), [run, steps]);
   const missing = paths.filter((p) => !urls[p]).join("|");
   useEffect(() => {
     if (!missing) return;
@@ -165,6 +175,28 @@ function RunDetail({ sb, session, id, navigate }: ViewProps) {
       .then((lines: ConsoleLine[]) => setConsoleLines(lines))
       .catch(() => setConsoleLines([]));
   }, [consoleUrl]);
+
+  const networkUrl = run?.network_path ? urls[run.network_path] : undefined;
+  useEffect(() => {
+    if (!networkUrl) return;
+    fetch(networkUrl)
+      .then((r) => r.json())
+      .then((lines: NetworkLine[]) => setNetwork(lines))
+      .catch(() => setNetwork([]));
+  }, [networkUrl]);
+
+  // Mail that reached this run's test inboxes.
+  const projectId = run?.project_id;
+  const emailTick = run && LIVE.has(run.status) ? steps.filter((s) => s.status !== "pending").length : -1;
+  useEffect(() => {
+    if (!projectId) return;
+    sb.from("inbox_messages")
+      .select("id, to_address, from_address, subject, text_body, received_at")
+      .eq("project_id", projectId)
+      .like("to_address", `%-${runCode(id)}@%`)
+      .order("received_at")
+      .then(({ data }) => setEmails((data ?? []) as Email[]));
+  }, [sb, id, projectId, emailTick]);
 
   const runAgain = async () => {
     if (!run?.test_id) return;
@@ -294,6 +326,8 @@ function RunDetail({ sb, session, id, navigate }: ViewProps) {
             tabs={[
               { value: "screenshots", label: "Screenshots", count: steps.filter((s) => s.screenshot_path).length },
               { value: "console", label: "Console", count: consoleLines?.length },
+              { value: "network", label: "Network", count: network?.length },
+              { value: "emails", label: "Emails", count: emails.length || undefined },
               { value: "trace", label: "Trace" },
             ]}
           />
@@ -337,6 +371,52 @@ function RunDetail({ sb, session, id, navigate }: ViewProps) {
                 </ul>
               ) : (
                 <p className="text-[13px] text-muted">The page printed nothing to its console.</p>
+              )
+            ) : null}
+            {tab === "network" ? (
+              network === null ? (
+                <p className="text-[13px] text-muted">{live ? "The network log shows up when the run ends." : "No network log for this run."}</p>
+              ) : network.length ? (
+                <div className="overflow-x-auto border border-line">
+                  <table className="w-full border-collapse font-mono text-[12px]">
+                    <tbody>
+                      {network.map((n, i) => (
+                        <tr key={i} className="border-b border-line last:border-b-0">
+                          <td className="w-14 px-3 py-1.5 text-right text-faint">{duration(n.ms)}</td>
+                          <td className="w-14 px-2 py-1.5 text-muted">{n.method}</td>
+                          <td className={`w-12 px-2 py-1.5 ${n.status === null || n.status >= 400 ? "text-danger" : "text-muted"}`}>{n.status ?? "failed"}</td>
+                          <td className="hidden w-20 px-2 py-1.5 text-faint sm:table-cell">{n.type}</td>
+                          <td className="max-w-0 px-2 py-1.5 text-ink">
+                            <span className="block truncate" title={n.failure ? `${n.url} · ${n.failure}` : n.url}>
+                              {n.url}
+                            </span>
+                          </td>
+                          <td className="hidden w-16 px-3 py-1.5 text-right text-faint sm:table-cell">{n.durationMs != null ? duration(n.durationMs) : ""}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <p className="text-[13px] text-muted">The page made no requests.</p>
+              )
+            ) : null}
+            {tab === "emails" ? (
+              emails.length ? (
+                <ul className="divide-y divide-line border border-line">
+                  {emails.map((m) => (
+                    <li key={m.id}>
+                      <button type="button" onClick={() => setOpenEmail(openEmail === m.id ? null : m.id)} className="flex w-full items-center gap-3 px-3 py-2 text-left hover:bg-hover">
+                        <span className="w-14 shrink-0 text-right font-mono text-[11px] text-faint">{timeAgo(m.received_at)}</span>
+                        <span className="min-w-0 flex-1 truncate text-[13px] font-medium">{m.subject || "(no subject)"}</span>
+                        <span className="hidden min-w-0 truncate font-mono text-[11.5px] text-muted sm:block">{m.to_address}</span>
+                      </button>
+                      {openEmail === m.id ? <pre className="border-t border-line px-3 py-2 font-mono text-[12px] leading-relaxed break-words whitespace-pre-wrap text-body">{m.text_body || "(no text)"}</pre> : null}
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="text-[13px] text-muted">No email reached this run&apos;s inboxes.</p>
               )
             ) : null}
             {tab === "trace" ? (

@@ -2,3 +2,4 @@
 export const COMPANY = "Perceptric";
 export const CONTACT_EMAIL = "hello@tryclaritia.com";
 export const APP_URL = "https://app.tryclaritia.com";
+export const INBOX_DOMAIN = "inbox.tryclaritia.com";

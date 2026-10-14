@@ -4,7 +4,7 @@ Tests that write and fix themselves. Describe a user flow in plain English, and 
 
 This repo holds the marketing site (`/` on tryclaritia.com) and the app (app.tryclaritia.com). The vision lives in `docs/vision.md`, Phase 1 in `docs/plan.md`, the homepage plan in `docs/homepage.md`, and the brand notes in `docs/brand.md`.
 
-## What works today (Weeks 1–4)
+## What works today (Weeks 1–6)
 
 - Sign in with Google, GitHub or an email link. Your first sign-in makes a workspace.
 - The first screen asks for a site address and an optional test login, then makes the project and its `staging` environment.
@@ -18,6 +18,13 @@ This repo holds the marketing site (`/` on tryclaritia.com) and the app (app.try
 - Runs: **Run** starts a run on the project's environment. The runner (`worker/`) opens a fresh Chromium, carries out each step, retries a failed step once, and saves a video, a trace, a screenshot after each step and the page's console. The run page updates live, jumps the video to a step when you click it, and opens the trace in Playwright's Trace Viewer.
 - Runs can't reach private network addresses, and secret values are hidden in errors, console logs and traces.
 - AI writer: **Run** works on a test with no code. For each step with no code, the runner sends Claude the step, the page's accessibility tree, its form fields and a screenshot (`worker/writer.ts`). Claude replies with Playwright lines. Each line is checked against the same allowed list as the Code tab, then run. A line that fails goes back to Claude with the error, up to five tries per step. Passing code is saved to the test (`save_written_lock`, only if nobody changed the test during the run), so the next run replays it with no AI calls. A step whose words change is written again. The run page shows a live view of the browser, a Written tag and the code for each step.
+- Run page tabs: Screenshots, Console, Network (every request with its status and time, failures in red) and Emails (mail that reached the run's test inboxes), plus Trace.
+- Test page tabs: Steps, YAML, Code, Preview (the latest run's video with its steps) and Run log (every run of the test).
+- Test inboxes: each project has an inbox id. `inbox.address('signup')` in a test is a fresh address for that run, like `a1b2c3d4-signup-1f2e3d@inbox.tryclaritia.com`. `inbox.code('signup')` and `inbox.link('signup', /verify/)` wait up to a minute for the email and read the code or link from it. `await inbox.waitFor('signup', /Welcome/)` waits for a subject. The writer uses these when a step signs up or needs a code. Mail is kept 7 days.
+- First screens: the start screen can fill in a demo site (`demo.playwright.dev/todomvc`), and an empty test list offers "Try" tests to start from.
+- Plans: Free, Starter ($49) and Team ($199), from `src/lib/plans.ts`. Settings shows the plan, cloud minutes, AI credits and projects used this period, with Upgrade (Stripe Checkout) and Manage billing (Stripe's billing page). Limits hold in the database: a new project past the plan's limit is refused, a run can't start once the cloud minutes are used, and the runner stops writing once the AI credits are used.
+- `tryclaritia.com/llms.txt` and `tryclaritia.com/pricing.md` describe Claritia and its pricing for AI agents.
+- Time to a first passing test is tracked: `workspaces.first_pass_at` is set by the first passing run. See "Launch numbers" below.
 
 ## The runner
 
@@ -31,6 +38,7 @@ Local checks that need Chromium:
 CHROMIUM_PATH=/path/to/chrome node scripts/runner-check.ts   # the runner against a local site
 CHROMIUM_PATH=/path/to/chrome node scripts/worker-check.ts   # the run handler with a stand-in database
 CHROMIUM_PATH=/path/to/chrome node scripts/writer-check.ts   # the AI writer with a scripted stand-in for Claude
+CHROMIUM_PATH=/path/to/chrome node scripts/inbox-check.ts    # sign-up with an emailed code and link, and the network log
 ```
 
 ### What the AI writer costs (all prices "check")
@@ -45,10 +53,24 @@ Assuming each team writes or rewrites 150 steps a month:
 | New servers | $0 | $0 |
 | **Added each month** | **about $750** | **about $7,500** |
 
+### What Weeks 5 and 6 add to the bill (all prices "check")
+
+| | Beta (50 teams) | Growth (500 teams) |
+|---|---|---|
+| Mailgun inbound (test inboxes) | $0 (free plan, 1 route) | about $35 (a paid plan for the mail volume) |
+| Stripe fees | 2.9% + $0.30 a charge: about $90 on 50 teams at $49 | about $1,900 on 500 teams averaging $120 |
+| Storage for network logs and email | about $0 | about $1 |
+| New servers | $0 | $0 |
+| **Added each month** | **about $90** | **about $1,935** |
+
+Stripe's fee comes out of revenue, so it grows only with paying customers.
+
 ## Setup
 
 1. **Supabase:** run each file in `supabase/migrations` in order (SQL Editor). Under Authentication → URL Configuration, set the Site URL to `https://app.tryclaritia.com` and add `https://app.tryclaritia.com/**` and `http://localhost:3000/**` to the redirect list. Under Providers, turn on Google and GitHub.
-2. **Render:** add `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY` and `SECRETS_KEY` (32+ random characters, never change it once secrets are saved).
+2. **Render:** add `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY` and `SECRETS_KEY` (32+ random characters, never change it once secrets are saved). The web service also needs `SUPABASE_SECRET_KEY` for the mail and Stripe webhooks.
+3. **Test inboxes (Mailgun):** add the domain `inbox.tryclaritia.com` in Mailgun and add the DNS records it shows (MX, SPF, DKIM) at the domain registrar. Create one route: match recipient `.*@inbox.tryclaritia.com`, action forward to `https://app.tryclaritia.com/api/inbox/mailgun`. Copy the HTTP webhook signing key into `MAILGUN_SIGNING_KEY` on the web service.
+4. **Billing (Stripe):** make two monthly prices, Starter $49 and Team $199. On the web service set `STRIPE_SECRET_KEY`, `STRIPE_PRICE_STARTER`, `STRIPE_PRICE_TEAM` and `STRIPE_WEBHOOK_SECRET`. Add a webhook endpoint `https://app.tryclaritia.com/api/billing/webhook` with the events `checkout.session.completed`, `customer.subscription.created`, `customer.subscription.updated` and `customer.subscription.deleted`. Turn on the customer portal (Settings → Billing → Customer portal).
 
 ## Local development
 
@@ -73,3 +95,13 @@ npm run build
 One Render service (`claritia`) serves both domains. `src/proxy.ts` sends `/` on `tryclaritia.com` to the site, and everything on `app.tryclaritia.com` to the app (`/start` for now). `www.` goes to the bare domain.
 
 Add `tryclaritia.com`, `www.tryclaritia.com` and `app.tryclaritia.com` under the web service's Custom Domains, then add the DNS records Render shows at your domain registrar.
+
+## Launch numbers
+
+Time from sign-up to a first passing test, per workspace (run in the Supabase SQL editor):
+
+```sql
+select w.name, w.created_at, w.first_pass_at, w.first_pass_at - w.created_at as time_to_pass
+from workspaces w order by w.created_at desc;
+```
+

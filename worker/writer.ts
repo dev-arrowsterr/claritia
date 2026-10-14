@@ -6,6 +6,8 @@ import Anthropic from "@anthropic-ai/sdk";
 
 export type WriteRequest = {
   testName: string;
+  /** The environment's address. Relative paths in goto open on it. */
+  baseUrl: string;
   steps: { position: number; kind: string; intent: string }[];
   position: number;
   url: string;
@@ -17,6 +19,8 @@ export type WriteRequest = {
   /** A JPEG of the page, base64. */
   screenshot: string | null;
   secretNames: string[];
+  /** Whether test inboxes work on this run. */
+  inbox: boolean;
   /** Lines already run for this step, in this run. */
   done: string[];
   /** What went wrong with the last lines, if anything. */
@@ -39,17 +43,24 @@ Every line is one statement in one of these forms, and nothing else:
   await <locator>.<action>;
   await expect(page).toHaveURL(/pattern/);  (also toHaveTitle)
   await expect(<locator>).<matcher>;  (expect(...).not.<matcher> works too)
+  await inbox.waitFor('signup');  (or inbox.waitFor('signup', /Welcome/) to match the subject)
 
 A locator starts from page with getByRole, getByLabel, getByText, getByPlaceholder, getByAltText, getByTitle, getByTestId or locator('css'), and can continue with first(), last(), nth(n) or filter({ hasText: '...' }).
 Locator options: name, exact, hasText, hasNotText, level, checked, selected, pressed, expanded, disabled, includeHidden.
 Actions: click(), dblclick(), fill('text'), clear(), press('Key'), pressSequentially('text'), check(), uncheck(), setChecked(true), selectOption('value'), hover(), focus(), scrollIntoViewIfNeeded(), waitFor().
 Matchers: toBeVisible(), toBeHidden(), toBeEnabled(), toBeDisabled(), toBeChecked(), toBeEmpty(), toBeFocused(), toHaveText('...'), toContainText('...'), toHaveValue('...'), toHaveCount(n), toHaveAttribute('name', 'value').
-Arguments are plain strings in single quotes, numbers, true or false, /regex/ with flags i, m, s or u, objects with the options above, or process.env.NAME for a secret. No variables, no template strings with \${}, no other JavaScript.
+Arguments are plain strings in single quotes, numbers, true or false, /regex/ with flags i, m, s or u, objects with the options above, process.env.NAME for a secret, or a test inbox value. No variables, no template strings with \${}, no other JavaScript.
+
+Test inboxes, when the request says they're on: inbox.address('signup') is a fresh email address that receives real mail during this run. inbox.code('signup') waits for mail to that address and gives the code in it. inbox.link('signup') gives the sign-in or confirm link in it, and inbox.link('signup', /verify/) the first link that matches. Name inboxes with lowercase letters and numbers. Examples:
+  await page.getByLabel('Email').fill(inbox.address('signup'));
+  await page.getByLabel('Code').fill(inbox.code('signup'));
+  await page.goto(inbox.link('signup', /confirm/));
 
 How to write good lines:
 - Prefer getByRole with a name, then getByLabel, getByPlaceholder and getByText. Use locator('css') only when nothing else is unique, for example label[for="id"] when a radio or checkbox input is hidden behind a styled label.
 - Make each locator match exactly one element. Add { exact: true }, first() or a filter when the text appears more than once.
 - To fill a form, invent realistic test data that fits each field. Use the listed secrets for passwords, logins and keys, as process.env.NAME. Never type a secret's value.
+- When a step signs up, asks for a new email address, or needs a code or link sent by email, use a test inbox. Use the same inbox name for the address and for reading the mail.
 - A "check" step only checks: use expect lines (and waitForURL if the page has to arrive first). Never click or type in a check step.
 - A "wait until" step waits with waitForURL or an expect that waits, for example await expect(page.getByText('Thanks')).toBeVisible();
 - Match patterns loosely enough to survive small changes, for example /calendly\\.com/ rather than a full address with a query string.
@@ -69,15 +80,31 @@ const SCHEMA = {
   additionalProperties: false,
 };
 
+/** Where the site is. On a bare address, paths keep the test working on every environment (staging, production). */
+function siteNote(baseUrl: string) {
+  const bare = (() => {
+    try {
+      return new URL(baseUrl).pathname.replace(/\/+$/, "") === "";
+    } catch {
+      return false;
+    }
+  })();
+  return bare
+    ? `Site under test: ${baseUrl}. The browser starts on a blank page. page.goto('/') opens the site's home page and page.goto('/pricing') a page on it. Use paths like these for this site, so the test works on every environment.`
+    : `Site under test: ${baseUrl}. The browser starts on a blank page. Open it with page.goto('${baseUrl}').`;
+}
+
 function prompt(r: WriteRequest) {
   const current = r.steps.find((s) => s.position === r.position)!;
   const kind = current.kind === "use" ? "do (a saved block of steps)" : current.kind;
   const outline = r.steps.map((s) => `${s.position === r.position ? "→" : " "} ${s.position}. [${s.kind}] ${s.intent.replace(/\n/g, " / ")}`).join("\n");
   return [
     `Test: ${r.testName}`,
+    siteNote(r.baseUrl),
     `All steps:\n${outline}`,
     `Write step ${r.position} now. Kind: ${kind}.\n${current.intent}`,
     `Secrets you can use: ${r.secretNames.length ? r.secretNames.map((n) => `process.env.${n}`).join(", ") : "none"}`,
+    `Test inboxes: ${r.inbox ? "on" : "off"}`,
     r.done.length ? `Already done for this step:\n${r.done.join("\n")}` : "",
     r.error ? `Your last lines failed with:\n${r.error}\nWrite lines that will work on the page as it is now.` : "",
     `Page address: ${r.url}\nPage title: ${r.title}`,

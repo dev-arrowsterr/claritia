@@ -9,11 +9,72 @@ import { join } from "node:path";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { parseLock } from "../src/lib/lock.ts";
 import { unseal } from "../src/lib/seal.ts";
-import { executeRun, maskSecrets, type RunStep, type StepUpdate } from "./runner.ts";
+import { executeRun, maskSecrets, type Inbox, type InboxMail, type RunStep, type StepUpdate } from "./runner.ts";
 import type { Writer } from "./writer.ts";
 
-export type Run = { id: string; workspace_id: string; environment_id: string | null; base_url: string; lock: string; attempts: number; test_name?: string };
-type Options = { workerId: string; chromiumPath?: string; allowPrivate?: boolean; log?: (...a: unknown[]) => void; heartbeatMs?: number; writer?: Writer; frameMs?: number };
+export type Run = { id: string; workspace_id: string; project_id?: string; environment_id: string | null; base_url: string; lock: string; attempts: number; test_name?: string };
+type Options = {
+  workerId: string;
+  chromiumPath?: string;
+  allowPrivate?: boolean;
+  log?: (...a: unknown[]) => void;
+  heartbeatMs?: number;
+  writer?: Writer;
+  frameMs?: number;
+  /** The domain test inboxes receive mail on. */
+  inboxDomain?: string;
+  inboxTimeoutMs?: number;
+};
+
+/** A run's inbox addresses look like <project inbox id>-<name>-<run code>@inbox.tryclaritia.com. */
+export function inboxAddress(inboxId: string, tag: string, runId: string, domain: string) {
+  return `${inboxId}-${tag}-${runId.replace(/-/g, "").slice(0, 6)}@${domain}`.toLowerCase();
+}
+
+/** The project's test inbox, read from the inbox_messages table. */
+async function inboxFor(sb: SupabaseClient, run: Run, domain: string): Promise<Inbox | undefined> {
+  if (!run.project_id) return undefined;
+  const { data, error } = await sb.from("projects").select("inbox_id").eq("id", run.project_id);
+  if (error) throw new Error(error.message);
+  const inboxId = (data as { inbox_id: string }[] | null)?.[0]?.inbox_id;
+  if (!inboxId) return undefined;
+  return {
+    address: (tag) => inboxAddress(inboxId, tag, run.id, domain),
+    read: async (address, since) => {
+      const { data: rows, error: readErr } = await sb
+        .from("inbox_messages")
+        .select("subject, text_body, html_body, received_at")
+        .eq("project_id", run.project_id!)
+        .eq("to_address", address)
+        .gte("received_at", since.toISOString())
+        .order("received_at", { ascending: false })
+        .limit(10);
+      if (readErr) throw new Error(readErr.message);
+      return ((rows ?? []) as { subject: string | null; text_body: string | null; html_body: string | null; received_at: string }[]).map(
+        (r): InboxMail => ({ subject: r.subject ?? "", text: r.text_body ?? "", html: r.html_body ?? "", receivedAt: r.received_at }),
+      );
+    },
+  };
+}
+
+/** AI credits left this period. Null means no limit. A failed lookup never blocks a run. */
+async function creditsLeft(sb: SupabaseClient, workspaceId: string): Promise<number | null> {
+  const { data, error } = await sb.rpc("workspace_usage", { p_workspace: workspaceId });
+  const u = (data as { credits_used: number; credits_limit: number | null }[] | null)?.[0];
+  if (error || !u || u.credits_limit == null) return null;
+  return Math.max(0, u.credits_limit - u.credits_used);
+}
+
+/** Stops the writer once the plan's AI credits are used up. */
+function limitWriter(writer: Writer, left: number | null): Writer {
+  if (left === null) return writer;
+  let remaining = left;
+  return async (r) => {
+    if (remaining <= 0) throw new Error("This month's AI credits are used up. Upgrade in Settings to write more steps.");
+    remaining--;
+    return writer(r);
+  };
+}
 
 /** How a step's comment reads in the lock: the step's words, "check: ..." or "use: Block name". */
 export function lockLabel(kind: string, label: string) {
@@ -70,6 +131,8 @@ export async function handleRun(sb: SupabaseClient, run: Run, opts: Options) {
       intent: r.intent || r.label,
     }));
     const parsed = parseLock(run.lock);
+    const inbox = await inboxFor(sb, run, opts.inboxDomain ?? "inbox.tryclaritia.com");
+    const writer = opts.writer ? limitWriter(opts.writer, await creditsLeft(sb, run.workspace_id)) : undefined;
     if (!opts.writer && (!parsed.ok || !parsed.actionCount) && !run.lock.trim()) throw new Error("it can't write code yet. Add ANTHROPIC_API_KEY to the runner service.");
     // The writer may use any of the environment's secrets, so it gets all their names. Code that's already written only gets what it uses.
     let names = parsed.ok ? parsed.secrets : [];
@@ -110,7 +173,9 @@ export async function handleRun(sb: SupabaseClient, run: Run, opts: Options) {
         dir,
         chromiumPath: opts.chromiumPath,
         allowPrivate: opts.allowPrivate,
-        writer: opts.writer,
+        writer,
+        inbox,
+        inboxTimeoutMs: opts.inboxTimeoutMs,
         testName: run.test_name,
         steps,
         frameMs: opts.frameMs,
@@ -136,6 +201,7 @@ export async function handleRun(sb: SupabaseClient, run: Run, opts: Options) {
       if (p) trace_paths.push(p);
     }
     const console_path = result.consoleFile ? await upload(result.consoleFile, "console.json", "application/json").catch(() => null) : null;
+    const network_path = result.networkFile ? await upload(result.networkFile, "network.json", "application/json").catch(() => null) : null;
     await finish({
       status: result.status,
       error: result.error && maskSecrets(result.error, secrets),
@@ -143,11 +209,14 @@ export async function handleRun(sb: SupabaseClient, run: Run, opts: Options) {
       video_path,
       trace_paths,
       console_path,
+      network_path,
       live_path: null,
       ai_calls: result.ai.calls,
       ai_input_tokens: result.ai.input,
       ai_output_tokens: result.ai.output,
     });
+    // The workspace's first passing run, to track how long sign-up to a passing test takes.
+    if (result.status === "passed") await sb.from("workspaces").update({ first_pass_at: new Date().toISOString() }).eq("id", run.workspace_id).is("first_pass_at", null);
     log(`Run ${run.id}: ${result.status} in ${result.durationMs}ms${result.ai.calls ? `, ${result.ai.calls} AI calls` : ""}.`);
   } catch (e) {
     const message = maskSecrets(e instanceof Error ? e.message : String(e), secrets);

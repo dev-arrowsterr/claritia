@@ -14,6 +14,9 @@
 //   });
 //
 // Secrets come in as process.env.NAME and are filled in at run time from the environment's secrets.
+// Test inboxes: inbox.address('signup') is a fresh email address for this run. inbox.code('signup') and
+// inbox.link('signup', /verify/) wait for mail to that address and read a code or a link from it.
+// await inbox.waitFor('signup', /Welcome/) waits for an email whose subject matches.
 
 import ts from "typescript";
 
@@ -24,19 +27,21 @@ export type Arg =
   | { kind: "regex"; source: string; flags: string }
   | { kind: "secret"; name: string }
   | { kind: "object"; entries: Record<string, Arg> }
-  | { kind: "array"; items: Arg[] };
+  | { kind: "array"; items: Arg[] }
+  | { kind: "inbox"; fn: "address" | "code" | "link"; tag: string; pattern?: { source: string; flags: string } };
 
 export type Call = { fn: string; args: Arg[] };
 
 export type Action =
   | { type: "page"; method: string; args: Arg[]; line: number }
   | { type: "keyboard"; method: string; args: Arg[]; line: number }
+  | { type: "inbox"; method: "waitFor"; tag: string; pattern?: { source: string; flags: string }; line: number }
   | { type: "locator"; chain: Call[]; method: string; args: Arg[]; line: number }
   | { type: "expect"; subject: "page" | Call[]; not: boolean; matcher: string; args: Arg[]; line: number };
 
 export type LockStep = { number: number; label: string; actions: Action[] };
 export type LockError = { line: number; message: string };
-export type ParsedLock = { ok: true; name: string; steps: LockStep[]; secrets: string[]; actionCount: number } | { ok: false; errors: LockError[] };
+export type ParsedLock = { ok: true; name: string; steps: LockStep[]; secrets: string[]; actionCount: number; usesInbox: boolean } | { ok: false; errors: LockError[] };
 
 // What a locator can be built from, and what it can do.
 const LOCATOR_BUILDERS = new Set(["getByRole", "getByText", "getByLabel", "getByPlaceholder", "getByAltText", "getByTitle", "getByTestId", "locator"]);
@@ -87,6 +92,7 @@ const MAX_WAIT_MS = 10_000;
 const MAX_ACTIONS = 1000;
 
 const STEP_COMMENT = /^\/\/\s*step\s+(\d+)\s*:?\s*(.*)$/i;
+const INBOX_TAG = /^[a-z0-9]{1,20}$/;
 
 class ReadError extends Error {
   node: ts.Node;
@@ -163,6 +169,7 @@ export function parseLock(code: string): ParsedLock {
 
   const steps: LockStep[] = marks.map((m) => ({ number: m.number, label: m.label, actions: [] }));
   const secrets = new Set<string>();
+  const INBOX = "\u0000inbox";
   let count = 0;
 
   for (const st of body.statements) {
@@ -183,7 +190,8 @@ export function parseLock(code: string): ParsedLock {
   }
 
   if (errors.length) return { ok: false, errors: errors.sort((a, b) => a.line - b.line) };
-  return { ok: true, name: name!, steps, secrets: [...secrets].sort(), actionCount: count };
+  const usesInbox = secrets.delete(INBOX);
+  return { ok: true, name: name!, steps, secrets: [...secrets].sort(), actionCount: count, usesInbox };
 }
 
 function readStatement(st: ts.Statement, sf: ts.SourceFile, secrets: Set<string>): Action {
@@ -217,6 +225,18 @@ function readStatement(st: ts.Statement, sf: ts.SourceFile, secrets: Set<string>
     if (method === "waitForTimeout" && (a[0]?.kind !== "number" || a[0].value < 0 || a[0].value > MAX_WAIT_MS)) throw new ReadError(call, `waitForTimeout takes a number of milliseconds up to ${MAX_WAIT_MS}.`);
     if (method === "goto" && a[0]?.kind === "string" && !/^(\/|https?:\/\/)/i.test(a[0].value)) throw new ReadError(call, "goto takes a path like '/pricing' or a full http(s) address.");
     return { type: "page", method, args: a, line };
+  }
+
+  // await inbox.waitFor('tag', /subject/)
+  if (ts.isIdentifier(target) && target.text === "inbox") {
+    if (method !== "waitFor") throw new ReadError(call, `${method} isn't an inbox action. Use inbox.waitFor('name').`);
+    const [tagNode, patternNode, ...extra] = call.arguments;
+    if (!tagNode || extra.length) throw new ReadError(call, "inbox.waitFor takes an inbox name and an optional /pattern/ for the subject.");
+    const tag = readInboxTag(tagNode);
+    const pattern = patternNode ? readArg(patternNode, secrets) : undefined;
+    if (pattern && pattern.kind !== "regex") throw new ReadError(patternNode!, "The subject should be a /pattern/.");
+    secrets.add("\u0000inbox");
+    return { type: "inbox", method: "waitFor", tag, pattern: pattern ? { source: pattern.source, flags: pattern.flags } : undefined, line };
   }
 
   // await page.keyboard.method(...)
@@ -273,6 +293,11 @@ function readLocatorChain(node: ts.Expression, secrets: Set<string>): Call[] {
   return calls;
 }
 
+function readInboxTag(node: ts.Expression) {
+  if (!(ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) || !INBOX_TAG.test(node.text)) throw new ReadError(node, "Inbox names use lowercase letters and numbers, like 'signup'.");
+  return node.text;
+}
+
 function readArg(node: ts.Expression, secrets: Set<string>): Arg {
   if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) return { kind: "string", value: node.text };
   if (ts.isNumericLiteral(node)) return { kind: "number", value: Number(node.text) };
@@ -306,6 +331,18 @@ function readArg(node: ts.Expression, secrets: Set<string>): Arg {
     return { kind: "object", entries };
   }
   if (ts.isArrayLiteralExpression(node)) return { kind: "array", items: node.elements.map((e) => readArg(e, secrets)) };
+  // inbox.address('signup'), inbox.code('signup'), inbox.link('signup', /verify/)
+  if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression) && ts.isIdentifier(node.expression.expression) && node.expression.expression.text === "inbox") {
+    const fn = node.expression.name.text;
+    if (fn !== "address" && fn !== "code" && fn !== "link") throw new ReadError(node, `inbox.${fn} isn't something Claritia knows. Use inbox.address, inbox.code or inbox.link.`);
+    const [tagNode, patternNode, ...extra] = node.arguments;
+    if (!tagNode || extra.length || (patternNode && fn !== "link")) throw new ReadError(node, fn === "link" ? "inbox.link takes an inbox name and an optional /pattern/." : `inbox.${fn} takes an inbox name.`);
+    const tag = readInboxTag(tagNode);
+    const pattern = patternNode ? readArg(patternNode, secrets) : undefined;
+    if (pattern && pattern.kind !== "regex") throw new ReadError(patternNode!, "The link should match a /pattern/.");
+    secrets.add("\u0000inbox");
+    return { kind: "inbox", fn, tag, pattern: pattern ? { source: pattern.source, flags: pattern.flags } : undefined };
+  }
   throw new ReadError(node, "Use plain text in quotes, a number, a /pattern/ or process.env.NAME here.");
 }
 

@@ -38,6 +38,10 @@ insert into tests (id, project_id, workspace_id, name, steps) values
 insert into runs (id, workspace_id, project_id, test_id, test_name, test_version, environment_id, environment_name, base_url, lock, status) values
   ('c6000000-0000-0000-0000-000000000000', '22222222-0000-0000-0000-000000000000', 'c1000000-0000-0000-0000-000000000000', 'c5000000-0000-0000-0000-000000000000', 'cat-test', 1, 'c2000000-0000-0000-0000-000000000000', 'staging', 'https://staging.other.com', 'x', 'passed');
 insert into run_steps (run_id, workspace_id, position, kind, label) values ('c6000000-0000-0000-0000-000000000000', '22222222-0000-0000-0000-000000000000', 1, 'do', 'cat-step');
+insert into workspace_billing (workspace_id, plan, stripe_customer_id) values ('11111111-0000-0000-0000-000000000000', 'starter', 'cus_acme');
+insert into inbox_messages (workspace_id, project_id, to_address, subject, text_body) values
+  ('11111111-0000-0000-0000-000000000000', 'a1000000-0000-0000-0000-000000000000', 'x-signup@inbox.tryclaritia.com', 'Acme code', 'Your code is 123456'),
+  ('22222222-0000-0000-0000-000000000000', 'c1000000-0000-0000-0000-000000000000', 'y-signup@inbox.tryclaritia.com', 'Cat code', 'Your code is 654321');
 insert into storage.objects (bucket_id, name) values
   ('runs', '11111111-0000-0000-0000-000000000000/r1/video.webm'),
   ('runs', '22222222-0000-0000-0000-000000000000/r2/video.webm');
@@ -70,6 +74,15 @@ begin
 exception when insufficient_privilege then
   return 0;
 end $$;
+-- Fails with a message that matches, so a different error doesn't pass for the right one.
+create function pg_temp.fails_with(sql text, pattern text, what text) returns void language plpgsql as $$
+begin
+  execute sql;
+  raise exception 'LEAK TEST FAILED: % (it worked)', what;
+exception when others then
+  if sqlerrm like 'LEAK TEST FAILED%' then raise; end if;
+  if sqlerrm not like pattern then raise exception 'LEAK TEST FAILED: % (wrong error: %)', what, sqlerrm; end if;
+end $$;
 create function pg_temp.as_user(uid text) returns void language plpgsql as $$
 begin
   perform set_config('request.jwt.claim.sub', uid, false);
@@ -98,6 +111,20 @@ select pg_temp.fails($$select set_secret('a2000000-0000-0000-0000-000000000000',
 select pg_temp.fails($$select set_secret('a2000000-0000-0000-0000-000000000000', 'bad name', 'v1:x')$$, 'Ben saves a secret with a bad name');
 select pg_temp.check(set_secret('a2000000-0000-0000-0000-000000000000', 'LOGIN_EMAIL', 'v1:ok') is not null, 'Ben can''t save a secret in his own environment');
 select pg_temp.check(pg_temp.touched($$insert into projects (workspace_id, name) values ('11111111-0000-0000-0000-000000000000', 'ben-app')$$) = 1, 'Ben can''t add a project to Acme');
+-- Plans: Acme is on Starter (3 projects). Ben can't change the plan, and the limit holds.
+select pg_temp.check(pg_temp.touched($$insert into projects (workspace_id, name, inbox_id) values ('11111111-0000-0000-0000-000000000000', 'third', 'zzzz')$$) = 1, 'Ben can''t add a third project on Starter');
+select pg_temp.fails_with($$insert into projects (workspace_id, name) values ('11111111-0000-0000-0000-000000000000', 'fourth')$$, '%plan includes 3 projects%', 'Ben adds a fourth project on Starter');
+select pg_temp.check((select inbox_id from projects where name = 'third') <> 'zzzz', 'Ben picks his own inbox id');
+select pg_temp.check(pg_temp.touched($$update projects set inbox_id = (select inbox_id from projects where name = 'acme-app') where name = 'third'$$) <= 1 and (select count(distinct inbox_id) from projects) = 3, 'Ben points a project at another project''s inbox');
+select pg_temp.fails($$update workspace_billing set plan = 'team'$$, 'Ben upgrades his own plan');
+select pg_temp.fails($$insert into workspace_billing (workspace_id, plan) values ('11111111-0000-0000-0000-000000000000', 'team')$$, 'Ben writes a plan');
+select pg_temp.fails($$update workspaces set first_pass_at = now()$$, 'Ben fakes the first passing run time');
+select pg_temp.check((select plan from workspace_billing) = 'starter' and (select count(*) from workspace_billing) = 1, 'Ben can''t read only his own plan');
+select pg_temp.check((select plan from workspace_usage('11111111-0000-0000-0000-000000000000')) = 'starter' and (select minutes_limit from workspace_usage('11111111-0000-0000-0000-000000000000')) = 2000, 'Ben can''t see his usage');
+select pg_temp.fails($$select * from workspace_usage('22222222-0000-0000-0000-000000000000')$$, 'Ben reads Cat''s usage');
+-- Inboxes
+select pg_temp.check((select count(*) from inbox_messages) = 1 and (select subject from inbox_messages) = 'Acme code', 'Ben can''t read only his own inbox');
+select pg_temp.fails($$insert into inbox_messages (workspace_id, project_id, to_address) values ('11111111-0000-0000-0000-000000000000', 'a1000000-0000-0000-0000-000000000000', 'fake')$$, 'Ben plants an email');
 select pg_temp.check(ensure_workspace() = '11111111-0000-0000-0000-000000000000', 'Ben gets a new workspace instead of Acme');
 -- Tests, blocks and versions
 select pg_temp.check((select count(*) from tests) = 1 and (select count(*) from blocks) = 1, 'Ben sees another workspace''s tests or blocks');
@@ -156,6 +183,9 @@ set role authenticated;
 select pg_temp.check(not exists (select 1 from projects where workspace_id = '11111111-0000-0000-0000-000000000000'), 'Cat sees Acme''s projects');
 select pg_temp.check(not exists (select 1 from env_secrets where name = 'LOGIN_EMAIL'), 'Cat sees Acme''s secret names');
 select pg_temp.check(not exists (select 1 from tests where name like 'acme%') and not exists (select 1 from test_versions where name like 'acme%'), 'Cat sees Acme''s tests or their history');
+select pg_temp.check((select count(*) from inbox_messages) = 1 and (select subject from inbox_messages) = 'Cat code', 'Cat reads Acme''s inbox');
+select pg_temp.check(not exists (select 1 from workspace_billing), 'Cat sees Acme''s plan');
+select pg_temp.fails_with($$insert into projects (workspace_id, name) values ('22222222-0000-0000-0000-000000000000', 'second')$$, '%plan includes 1 project%', 'Cat adds a second project on Free');
 select pg_temp.check((select count(*) from runs) = 1 and (select count(*) from run_steps) = 1, 'Cat sees Acme''s runs');
 select pg_temp.check((select count(*) from storage.objects) = 1 and (select name from storage.objects) like '22222222-%', 'Cat reads Acme''s run files');
 select pg_temp.check((select count(*) from workspace_members) = 1, 'Cat sees Acme''s members');
@@ -199,6 +229,15 @@ select pg_temp.check((select lock from tests where id = 'a5000000-0000-0000-0000
 select pg_temp.check((select count(*) from env_secret_values) = 3, 'Sealed values went missing');
 delete from env_secrets where id = 'a3000000-0000-0000-0000-000000000000';
 select pg_temp.check(not exists (select 1 from env_secret_values where secret_id = 'a3000000-0000-0000-0000-000000000000'), 'Deleting a secret leaves its value behind');
+
+-- Cloud minutes: once Acme has used its 2,000, nobody there can start a run.
+insert into runs (workspace_id, project_id, test_name, test_version, environment_name, base_url, lock, status, duration_ms)
+values ('11111111-0000-0000-0000-000000000000', 'a1000000-0000-0000-0000-000000000000', 'long', 1, 'staging', 'https://x.com', '', 'passed', 2000 * 60000);
+select pg_temp.as_user('b0000000-0000-0000-0000-000000000000');
+set role authenticated;
+select pg_temp.fails_with($$select start_run('a5000000-0000-0000-0000-000000000000', 'a2000000-0000-0000-0000-000000000000')$$, '%cloud minutes are used up%', 'Ben starts a run past the plan''s cloud minutes');
+reset role;
+select pg_temp.check((select minutes_used from workspace_usage('11111111-0000-0000-0000-000000000000')) >= 2000, 'The server can''t read a workspace''s usage');
 
 \o
 select 'All leak tests passed' as result;

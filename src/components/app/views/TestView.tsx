@@ -6,11 +6,12 @@ import { Copy, ListIcon, Play, Trash } from "../../Icons";
 import { askConfirm, askText } from "../Dialogs";
 import { Select } from "../Select";
 import { StepsEditor } from "../StepsEditor";
+import { TestPreview, TestRunLog } from "./TestRuns";
 import { Badge, Button, ErrorNote, errorText, Field, Loading, Page, Panel, postJson, PriorityBars, Segmented, setLeaveGuard, Tabs, timeAgo, type Environment, type ViewProps } from "../ui";
 
 export type TestRow = TestDoc & { id: string; project_id: string; lock: string | null; version: number; created_at: string; updated_at: string };
 type Version = TestDoc & { id: string; version: number; lock: string | null; author_email: string | null; created_at: string };
-type Tab = "steps" | "yaml" | "code" | "history";
+type Tab = "steps" | "yaml" | "code" | "preview" | "runs" | "history";
 type LockCheck = { ok: true; steps: number; actions: number; secrets: string[] } | { ok: false; errors: { line: number; message: string }[] };
 
 const NEW_USE_CASE = "__new";
@@ -260,6 +261,8 @@ export function TestView({ sb, session, project, id, navigate }: ViewProps) {
           { value: "steps", label: "Steps", count: doc.steps.length },
           { value: "yaml", label: "YAML" },
           { value: "code", label: "Code" },
+          { value: "preview", label: "Preview" },
+          { value: "runs", label: "Run log" },
           { value: "history", label: "History", count: saved.version },
         ]}
       />
@@ -367,6 +370,9 @@ export function TestView({ sb, session, project, id, navigate }: ViewProps) {
               ) : null}
             </>
           ) : null}
+
+          {tab === "preview" ? <TestPreview sb={sb} testId={saved.id} navigate={navigate} /> : null}
+          {tab === "runs" ? <TestRunLog sb={sb} testId={saved.id} navigate={navigate} /> : null}
 
           {tab === "history" ? (
             !versions ? (

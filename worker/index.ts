@@ -3,6 +3,7 @@
 //   node worker/index.ts
 // Needs SUPABASE_URL, SUPABASE_SECRET_KEY and SECRETS_KEY. Answers health checks on PORT.
 // With ANTHROPIC_API_KEY it writes code for steps that have none (CLAUDE_MODEL and CLAUDE_EFFORT are optional).
+// Test inboxes read mail on INBOX_DOMAIN (default inbox.tryclaritia.com).
 
 import { randomUUID } from "node:crypto";
 import { createServer } from "node:http";
@@ -64,7 +65,7 @@ async function slot(sb: SupabaseClient, n: number, writer: Writer | undefined) {
       }
       busy.add(run.id);
       try {
-        await handleRun(sb, run, { workerId: WORKER_ID, chromiumPath: env("CHROMIUM_PATH") || undefined, log, writer });
+        await handleRun(sb, run, { workerId: WORKER_ID, chromiumPath: env("CHROMIUM_PATH") || undefined, log, writer, inboxDomain: env("INBOX_DOMAIN") || undefined });
       } finally {
         busy.delete(run.id);
       }

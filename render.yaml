@@ -17,3 +17,13 @@ services:
         sync: false
       - key: SECRETS_KEY
         generateValue: true
+      - key: MAILGUN_SIGNING_KEY
+        sync: false
+      - key: STRIPE_SECRET_KEY
+        sync: false
+      - key: STRIPE_PRICE_STARTER
+        sync: false
+      - key: STRIPE_PRICE_TEAM
+        sync: false
+      - key: STRIPE_WEBHOOK_SECRET
+        sync: false

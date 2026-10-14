@@ -10,6 +10,51 @@ import { TestView, type TestRow } from "./TestView";
 
 type ListRow = Pick<TestRow, "id" | "name" | "use_case" | "priority" | "steps" | "updated_at">;
 
+const DEMO_SITE = "https://demo.playwright.dev/todomvc";
+
+/** Tests to start from. Each becomes a real test with these steps, ready to run. */
+const TRY: { name: string; useCase: string; steps: [kind: "do" | "check", text: string][]; demoOnly?: boolean }[] = [
+  {
+    name: "Add and finish a todo",
+    useCase: "Todos",
+    demoOnly: true,
+    steps: [
+      ["do", "Add a todo called Buy milk"],
+      ["do", "Add a todo called Walk the dog"],
+      ["do", "Mark Buy milk as done"],
+      ["check", "1 item is left"],
+    ],
+  },
+  {
+    name: "Sign up with a test inbox",
+    useCase: "Sign up",
+    steps: [
+      ["do", "Open the sign-up page"],
+      ["do", "Sign up with a new test inbox email"],
+      ["do", "Enter the code from the email, or open the link in it"],
+      ["check", "The account is created"],
+    ],
+  },
+  {
+    name: "Log in",
+    useCase: "Sign in",
+    steps: [
+      ["do", "Log in with the test account"],
+      ["check", "The dashboard shows"],
+    ],
+  },
+  {
+    name: "Contact form",
+    useCase: "Lead capture",
+    steps: [
+      ["do", "Open the contact page"],
+      ["do", "Fill in the contact form"],
+      ["do", "Submit it"],
+      ["check", "It says thanks"],
+    ],
+  },
+];
+
 /** The first screen: a site address and a test login. Makes the project and its staging environment. */
 function StartScreen({ sb, session, ws, project, projectsChanged }: ViewProps) {
   const [name, setName] = useState(project?.name ?? "");
@@ -70,6 +115,19 @@ function StartScreen({ sb, session, ws, project, projectsChanged }: ViewProps) {
             <Field label="Site address">
               <Input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="staging.acme.com" required autoFocus inputMode="url" />
             </Field>
+            <p className="mt-2 flex flex-wrap items-center gap-2 text-[12.5px] text-muted">
+              Try
+              <button
+                type="button"
+                onClick={() => {
+                  setUrl(DEMO_SITE);
+                  if (!project && !name) setName("Demo todo app");
+                }}
+                className="rounded-md border border-line px-2 py-0.5 font-mono text-[12px] text-ink hover:border-line-strong"
+              >
+                demo.playwright.dev/todomvc
+              </button>
+            </p>
           </div>
           <Field label="Test login email">
             <Input value={loginEmail} onChange={(e) => setLoginEmail(e.target.value)} placeholder="qa@acme.com" autoComplete="off" />
@@ -125,6 +183,16 @@ function TestList(props: ViewProps & { env: Environment }) {
     }
   };
 
+  const startFrom = async (t: (typeof TRY)[number]) => {
+    try {
+      const steps = t.steps.map(([kind, text]) => ({ id: stepId(), kind, text }));
+      const row = must(await sb.from("tests").insert({ project_id: project!.id, name: t.name, use_case: t.useCase, steps }).select("id").single()) as { id: string };
+      navigate("tests", row.id);
+    } catch (e) {
+      setError(errorText(e));
+    }
+  };
+
   const groups = new Map<string, ListRow[]>();
   for (const t of list.data ?? []) groups.set(t.use_case, [...(groups.get(t.use_case) ?? []), t]);
 
@@ -149,12 +217,30 @@ function TestList(props: ViewProps & { env: Environment }) {
       {!list.data ? (
         <Loading />
       ) : !list.data.length ? (
-        <Empty icon={<ListIcon size={16} />} title="Your tests will show up here.">
-          <span className="inline-flex items-center gap-1.5">
-            <Globe size={13} />
-            {env.name} · {hostOf(env.base_url)}
-          </span>
-        </Empty>
+        <div className="mx-auto flex max-w-3xl flex-col gap-4 px-4 py-10">
+          <Empty icon={<ListIcon size={16} />} title="Your tests will show up here.">
+            <span className="inline-flex items-center gap-1.5">
+              <Globe size={13} />
+              {env.name} · {hostOf(env.base_url)}
+            </span>
+          </Empty>
+          <p className="section-head">Try</p>
+          <div className="grid gap-3 sm:grid-cols-2">
+            {TRY.filter((t) => !t.demoOnly || env.base_url.startsWith(DEMO_SITE)).map((t) => (
+              <button key={t.name} type="button" onClick={() => startFrom(t)} className="flex flex-col gap-2 border border-line bg-panel p-4 text-left hover:border-line-strong">
+                <span className="text-[14px] font-medium">{t.name}</span>
+                <ol className="space-y-1 text-[12.5px] text-muted">
+                  {t.steps.map(([kind, text], i) => (
+                    <li key={i} className="flex gap-2">
+                      <span className="w-4 shrink-0 font-mono text-faint">{i + 1}</span>
+                      <span className="truncate">{kind === "check" ? `Check: ${text}` : text}</span>
+                    </li>
+                  ))}
+                </ol>
+              </button>
+            ))}
+          </div>
+        </div>
       ) : (
         <table className="w-full border-collapse">
           <thead>

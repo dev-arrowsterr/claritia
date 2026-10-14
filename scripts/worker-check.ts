@@ -22,6 +22,7 @@ const base = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
 type Row = Record<string, unknown>;
 const db: Record<string, Row[]> = {
   runs: [{ id: "run1", workspace_id: "ws1", locked_by: "w1", status: "running" }],
+  workspaces: [{ id: "ws1", first_pass_at: null }],
   run_steps: [
     { run_id: "run1", position: 1, kind: "do", label: "Open the login page", intent: "Open the login page", status: "pending" },
     { run_id: "run1", position: 2, kind: "do", label: "Sign in", intent: "Sign in", status: "pending" },
@@ -32,6 +33,7 @@ const db: Record<string, Row[]> = {
 const uploads = new Map<string, number>();
 const removed: string[] = [];
 const rpcs: { fn: string; args: Record<string, unknown> }[] = [];
+const usage = { credits_used: 0, credits_limit: 200 as number | null };
 function query(table: string) {
   const filters: ((r: Row) => boolean)[] = [];
   let patch: Row | null = null;
@@ -41,6 +43,9 @@ function query(table: string) {
     update: (fields: Row) => ((patch = fields), q),
     eq: (k: string, v: unknown) => (filters.push((r) => r[k] === v), q),
     in: (k: string, vs: unknown[]) => (filters.push((r) => vs.includes(r[k])), q),
+    is: (k: string, v: unknown) => (filters.push((r) => (r[k] ?? null) === v), q),
+    gte: (k: string, v: string) => (filters.push((r) => String(r[k]) >= v), q),
+    limit: () => q,
     then: (ok: (v: { data: Row[]; error: null }) => unknown) => {
       const rows = (db[table] ?? []).filter((r) => filters.every((f) => f(r)));
       if (patch) for (const r of rows) Object.assign(r, patch);
@@ -51,7 +56,7 @@ function query(table: string) {
 }
 const sb = {
   from: query,
-  rpc: async (fn: string, args: Record<string, unknown>) => (rpcs.push({ fn, args }), { data: true, error: null }),
+  rpc: async (fn: string, args: Record<string, unknown>) => (rpcs.push({ fn, args }), { data: fn === "workspace_usage" ? [usage] : true, error: null }),
   storage: {
     from: () => ({
       upload: async (path: string, body: Buffer) => (uploads.set(path, body.length), { error: null }),
@@ -92,6 +97,7 @@ check(steps.every((s) => String(s.screenshot_path).startsWith("ws1/run1/step-"))
 check(run.video_path === "ws1/run1/video.webm" && (uploads.get("ws1/run1/video.webm") ?? 0) > 1000, "the video is uploaded");
 check(JSON.stringify(run.trace_paths) === '["ws1/run1/trace.zip"]', "the trace is uploaded");
 check(run.console_path === "ws1/run1/console.json", "the console is uploaded");
+check(run.network_path === "ws1/run1/network.json" && (uploads.get("ws1/run1/network.json") ?? 0) > 10, "the network log is uploaded");
 check(typeof run.duration_ms === "number" && !!run.finished_at && run.locked_at === null, "the run gets its length and finish time and lets go of its claim");
 
 // A run whose secret is missing ends as an error without starting a browser.
@@ -131,11 +137,23 @@ const frames = [...uploads.keys()].filter((k) => k.startsWith("ws1/run4/live-"))
 check(frames.length > 0 && frames.every((f) => removed.includes(f)) && run4.live_path === null, `live frames go up during the run and are removed after (${frames.length})`);
 check(!rpcs.some((r) => r.fn === "save_written_lock" && r.args.p_run === "run1"), "a run that wrote nothing saves nothing");
 
+check(typeof db.workspaces[0]!.first_pass_at === "string", "the workspace's first passing run is recorded");
+
+// With the plan's AI credits used up, the writer isn't called and the step says why.
+usage.credits_used = 200;
+let called = false;
+db.runs.push({ id: "run6", workspace_id: "ws1", locked_by: "w1", status: "running" });
+db.run_steps.push({ run_id: "run6", position: 1, kind: "do", label: "Open the login page", intent: "Open the login page", status: "pending" });
+await handleRun(sb as never, { id: "run6", workspace_id: "ws1", environment_id: "env1", base_url: base, lock: "", attempts: 1 }, { workerId: "w1", chromiumPath: process.env.CHROMIUM_PATH, allowPrivate: true, writer: async (r) => ((called = true), writer(r)) });
+const step6 = db.run_steps.find((s) => s.run_id === "run6")!;
+check(!called && db.runs.find((r) => r.id === "run6")!.status === "failed" && /AI credits are used up/.test(String(step6.error)), `a run past the plan's AI credits doesn't call the writer (${step6.error})`);
+
 // With no writer, a test with no code ends with a plain error.
 db.runs.push({ id: "run5", workspace_id: "ws1", locked_by: "w1", status: "running" });
 db.run_steps.push({ run_id: "run5", position: 1, kind: "do", label: "Open", status: "pending" });
 await handleRun(sb as never, { id: "run5", workspace_id: "ws1", environment_id: "env1", base_url: base, lock: "", attempts: 1 }, { workerId: "w1", chromiumPath: process.env.CHROMIUM_PATH, allowPrivate: true });
-check(db.runs[4]!.status === "error" && /ANTHROPIC_API_KEY/.test(String(db.runs[4]!.error)), `without a writer, a test with no code says what's missing (${db.runs[4]!.error})`);
+const run5 = db.runs.find((r) => r.id === "run5")!;
+check(run5.status === "error" && /ANTHROPIC_API_KEY/.test(String(run5.error)), `without a writer, a test with no code says what's missing (${run5.error})`);
 
 server.close();
 console.log(failures ? `${failures} failed` : "All worker checks passed");

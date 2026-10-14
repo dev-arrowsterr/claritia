@@ -130,16 +130,18 @@ Four cards with the shield icon:
 
 ## 9. Pricing
 
-Eyebrow `// Pricing`. Heading: "Start free. Pay for what runs." Lead: "Every plan includes the AI. Steps that replay from cache cost less."
+Eyebrow `// Pricing`. Heading: "Start free. Pay for what runs." Lead: "Unlimited users on every plan. The AI writes each step once. Replays from saved code use no AI credits."
+
+The cards are built from `src/lib/plans.ts`, the same list Settings and the database limits use.
 
 | Plan | Price | Note | Items | Button |
 |---|---|---|---|---|
-| Free | $0 | for side projects | 1 project, 500 steps a month, video for every run | Start free |
-| Starter | $49 | per month | 5,000 steps, GitHub Action, Slack alerts, schedules | Start free |
-| Team (featured) | $199 | per month | 25,000 steps, self-healing, failure sorting, 5 seats, MCP server | Start a free trial |
-| Business | Custom | yearly | Higher limits, SSO, private runners, managed test writing | Talk to us |
+| Free | $0 | for side projects | 1 project, 300 cloud minutes, 200 AI credits, video, trace and network log for every run, test inboxes | Start free |
+| Starter | $49 | per month | 3 projects, 2,000 cloud minutes, 2,000 AI credits, GitHub App, schedules | Start free |
+| Team (featured) | $199 | per month | Unlimited projects, 10,000 cloud minutes, 10,000 AI credits, MCP server, PR-aware runs, Slack alerts | Start free |
+| Business | Custom | billed yearly | Higher limits, SSO, private runners, data region, managed test writing | Talk to us |
 
-Small line under it: "Extra steps: $5 per 1,000. Managed service: we write and keep your top flows green."
+Small line under it: "A cloud minute is a minute of browser time. An AI credit is one call to write a step. Managed service: we write and keep your top flows green."
 Prices are a draft. Check them against the cost model before launch (see `docs/plan.md`).
 
 ## 10. Final call (dark)

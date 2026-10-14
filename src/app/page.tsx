@@ -2,6 +2,7 @@ import Link from "next/link";
 import { HeroMock } from "@/components/marketing/HeroMock";
 import { Tag } from "@/components/marketing/Tag";
 import { SiteFooter, SiteHeader } from "@/components/Site";
+import { amount, PLANS } from "@/lib/plans";
 import { APP_URL, CONTACT_EMAIL } from "@/lib/site";
 
 const INTEGRATIONS = ["GitHub", "GitLab", "Vercel", "Netlify", "Slack", "Playwright", "Claude Code", "Cursor"];
@@ -20,19 +21,19 @@ const STATS = [
   { value: "None", label: "lock-in" },
 ];
 
-const PLANS = [
-  { name: "Free", price: "$0", note: "for side projects", items: ["1 project", "500 steps a month", "Video for every run"], cta: "Start free" },
-  { name: "Starter", price: "$49", note: "per month", items: ["5,000 steps a month", "GitHub Action", "Slack alerts", "Schedules"], cta: "Start free" },
-  {
-    name: "Team",
-    price: "$199",
-    note: "per month",
-    items: ["25,000 steps a month", "Self-healing tests", "Failure sorting", "5 seats", "MCP server"],
-    cta: "Start a free trial",
-    featured: true,
-  },
-  { name: "Business", price: "Custom", note: "billed yearly", items: ["Higher limits", "SSO", "Private runners", "Managed test writing"], cta: "Talk to us", contact: true },
-];
+// The pricing cards, built from the shared plan list in src/lib/plans.ts.
+const CARDS = PLANS.map((p) => ({
+  name: p.name,
+  price: p.price === null ? "Custom" : `$${p.price}`,
+  note: p.id === "free" ? "for side projects" : p.price === null ? "billed yearly" : "per month",
+  items: [
+    ...(p.id === "business" ? ["Higher limits"] : [`${p.projects === null ? "Unlimited" : p.projects} ${p.projects === 1 ? "project" : "projects"}`, `${amount(p.minutes)} cloud minutes a month`, `${amount(p.credits)} AI credits a month`]),
+    ...p.features,
+  ],
+  cta: p.id === "business" ? "Talk to us" : "Start free",
+  featured: p.id === "team",
+  contact: p.id === "business",
+}));
 
 function Eyebrow({ children, dark = false }: { children: React.ReactNode; dark?: boolean }) {
   return <p className={`fig ${dark ? "!text-white/45" : ""}`}>{"// "}{children}</p>;
@@ -401,10 +402,10 @@ export default function Home() {
             <div className="mx-auto max-w-2xl text-center">
               <Eyebrow>Pricing</Eyebrow>
               <h2 className="mt-4 text-[34px] leading-[1.08] font-medium tracking-[-0.03em] md:text-[48px]">Start free. Pay for what runs.</h2>
-              <p className="mt-5 text-[17px] leading-relaxed text-muted">Every plan includes the AI. Steps that replay from cache cost less.</p>
+              <p className="mt-5 text-[17px] leading-relaxed text-muted">Unlimited users on every plan. The AI writes each step once. Replays from saved code use no AI credits.</p>
             </div>
             <div className="mt-14 grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-              {PLANS.map((p) => (
+              {CARDS.map((p) => (
                 <div key={p.name} className={`flex flex-col p-6 ${p.featured ? "frame border border-ink bg-ink text-white" : "border border-line bg-white"}`}>
                   <div className="flex items-center justify-between">
                     <p className="text-[15px] font-medium">{p.name}</p>
@@ -431,7 +432,7 @@ export default function Home() {
                 </div>
               ))}
             </div>
-            <p className="mt-6 text-center text-[13px] text-faint">Extra steps: $5 per 1,000. Managed service: we write and keep your top flows green.</p>
+            <p className="mt-6 text-center text-[13px] text-faint">A cloud minute is a minute of browser time. An AI credit is one call to write a step. Managed service: we write and keep your top flows green.</p>
           </div>
         </section>
 
