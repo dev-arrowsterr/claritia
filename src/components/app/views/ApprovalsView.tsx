@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { lineDiff } from "@/lib/diff";
 import { Check, X } from "../../Icons";
 import { announceChange, Badge, Button, Empty, ErrorNote, errorText, Loading, must, Page, Panel, postJson, timeAgo, useLoad, type ViewProps } from "../ui";
@@ -70,7 +70,19 @@ function HealCard({ heal, session, navigate, onDone }: { heal: Heal; onDone: () 
 }
 
 /** Fixes from the Healer, waiting for a yes. Approving saves the new code to the test. */
-export function ApprovalsView({ sb, session, project, navigate }: ViewProps) {
+export function ApprovalsView({ sb, session, project, navigate, projectsChanged, id }: ViewProps) {
+  // A link to one fix (from a Slack or email alert) opens its project and puts it first.
+  useEffect(() => {
+    if (!id) return;
+    void sb
+      .from("heals")
+      .select("project_id")
+      .eq("id", id)
+      .maybeSingle<{ project_id: string }>()
+      .then(({ data }) => {
+        if (data && data.project_id !== project?.id) projectsChanged(data.project_id);
+      });
+  }, [id, sb, project?.id, projectsChanged]);
   const list = useLoad(
     async () =>
       project
@@ -96,7 +108,7 @@ export function ApprovalsView({ sb, session, project, navigate }: ViewProps) {
             When a step&apos;s code breaks because your app changed, Claritia tries a fix and puts it here for your yes.
           </Empty>
         ) : (
-          list.data.map((h) => <HealCard key={h.id} heal={h} session={session} navigate={navigate} onDone={list.reload} />)
+          [...list.data].sort((a, b) => Number(b.id === id) - Number(a.id === id)).map((h) => <HealCard key={h.id} heal={h} session={session} navigate={navigate} onDone={list.reload} />)
         )}
       </div>
     </Page>

@@ -370,6 +370,64 @@ select pg_temp.fails_with($$select * from github_start_check('ab000000-0000-0000
 update runs set status = 'passed' where id = (select run_ids[1] from preview_check);
 select minute_tick();
 
+-- Alerts: settings stay in their workspace, the Slack address is never readable, and only real failures alert.
+select pg_temp.as_user('b0000000-0000-0000-0000-000000000000');
+set role authenticated;
+select save_alert_settings('a1000000-0000-0000-0000-000000000000', array['qa@acme.com'], true, true, 'v1:sealed', 'abcd');
+select pg_temp.fails($$select slack_sealed from alert_settings$$, 'Ben reads the sealed Slack address');
+select pg_temp.check((select slack_hint from alert_settings where project_id = 'a1000000-0000-0000-0000-000000000000') = 'abcd', 'Ben can''t see his project''s alert settings');
+select pg_temp.fails_with($$select save_alert_settings('a1000000-0000-0000-0000-000000000000', array['not an email'], true, true)$$, '%Not an email%', 'Alerts take something that isn''t an email');
+select pg_temp.fails($$select * from alert_events$$, 'Ben reads the alert queue');
+select pg_temp.fails($$insert into alert_settings (project_id, workspace_id) values ('c1000000-0000-0000-0000-000000000000', '22222222-0000-0000-0000-000000000000')$$, 'Ben writes alert settings without the server');
+reset role;
+select pg_temp.as_user('c0000000-0000-0000-0000-000000000000');
+set role authenticated;
+select pg_temp.fails($$select save_alert_settings('a1000000-0000-0000-0000-000000000000', array['cat@other.com'], true, true)$$, 'Cat changes Acme''s alerts');
+select pg_temp.check((select count(*) from alert_settings) = 0, 'Cat sees Acme''s alert settings');
+reset role;
+select set_config('request.jwt.claim.sub', '', false);
+select pg_temp.check((select slack_sealed from alert_settings where project_id = 'a1000000-0000-0000-0000-000000000000') = 'v1:sealed', 'Saving without a new Slack address lost the old one');
+create temp table alert_runs (name text, trig text, verdict text, retry_of_trig text, alerts boolean);
+insert into alert_runs values
+  ('scheduled app bug', 'schedule', 'app_bug', null, true),
+  ('ci unsorted', 'ci', null, null, true),
+  ('manual app bug', 'manual', 'app_bug', null, false),
+  ('first flaky', 'schedule', 'flaky', null, false),
+  ('setup', 'schedule', 'setup', null, false),
+  ('flaky again on re-run', 'retry', 'flaky', 'schedule', true),
+  ('re-run of a manual run', 'retry', 'app_bug', 'manual', false);
+do $$
+declare r record; parent uuid; rid uuid;
+begin
+  for r in select * from alert_runs loop
+    parent := null;
+    if r.retry_of_trig is not null then
+      insert into runs (workspace_id, project_id, test_name, test_version, environment_name, base_url, lock, status, trigger)
+      values ('11111111-0000-0000-0000-000000000000', 'a1000000-0000-0000-0000-000000000000', r.name || ' (first)', 1, 'staging', 'https://x.com', '', 'failed', r.retry_of_trig)
+      returning id into parent;
+    end if;
+    insert into runs (workspace_id, project_id, test_name, test_version, environment_name, base_url, lock, status, trigger, retry_of)
+    values ('11111111-0000-0000-0000-000000000000', 'a1000000-0000-0000-0000-000000000000', r.name, 1, 'staging', 'https://x.com', '', 'running', r.trig, parent)
+    returning id into rid;
+    update runs set status = 'failed', verdict = r.verdict where id = rid;
+    if (exists (select 1 from alert_events where run_id = rid)) <> r.alerts then
+      raise exception 'LEAK TEST FAILED: alert for "%" should be %', r.name, r.alerts;
+    end if;
+  end loop;
+end $$;
+insert into heals (workspace_id, project_id, test_id, test_version, position, step_label, old_code, new_code, error)
+values ('11111111-0000-0000-0000-000000000000', 'a1000000-0000-0000-0000-000000000000', 'a5000000-0000-0000-0000-000000000000', 1, 3, 'Pay', 'old', 'new', 'broke');
+select pg_temp.check((select count(*) from alert_events where kind = 'heal') = 1, 'A fix waiting for approval didn''t alert');
+select pg_temp.as_user('b0000000-0000-0000-0000-000000000000');
+set role authenticated;
+select save_alert_settings('a1000000-0000-0000-0000-000000000000', '{}', true, true, null, null, true);
+reset role;
+select set_config('request.jwt.claim.sub', '', false);
+insert into heals (workspace_id, project_id, test_id, test_version, position, step_label, old_code, new_code, error)
+values ('11111111-0000-0000-0000-000000000000', 'a1000000-0000-0000-0000-000000000000', 'a5000000-0000-0000-0000-000000000000', 1, 4, 'Ship', 'old', 'new', 'broke');
+select pg_temp.check((select count(*) from alert_events where kind = 'heal') = 1, 'A project with nowhere to send alerts queued one');
+select minute_tick();
+
 -- Cloud minutes: once Acme has used its 2,000, nobody there can start a run.
 insert into runs (workspace_id, project_id, test_name, test_version, environment_name, base_url, lock, status, duration_ms)
 values ('11111111-0000-0000-0000-000000000000', 'a1000000-0000-0000-0000-000000000000', 'long', 1, 'staging', 'https://x.com', '', 'passed', 2000 * 60000);

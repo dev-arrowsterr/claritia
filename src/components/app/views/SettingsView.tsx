@@ -5,6 +5,7 @@ import { Copy, Key, LogOut, Plus, Settings } from "../../Icons";
 import { amount, planById, PLANS, type PlanId } from "@/lib/plans";
 import { INBOX_DOMAIN } from "@/lib/site";
 import { askConfirm, askText } from "../Dialogs";
+import { AlertsPanel } from "./AlertsPanel";
 import { GitHubPanel } from "./GitHubPanel";
 import {
   Avatar,
@@ -275,6 +276,8 @@ export function SettingsView({ sb, session, ws, role, project, projectsChanged, 
 
 
         {project ? <GitHubPanel sb={sb} session={session} ws={ws} project={project} /> : null}
+
+        {project ? <AlertsPanel sb={sb} session={session} project={project} /> : null}
 
         <PlanPanel sb={sb} session={session} ws={ws} role={role} />
 
