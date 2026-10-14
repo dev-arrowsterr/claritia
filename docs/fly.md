@@ -4,7 +4,7 @@ Two Fly apps, both in Tokyo (`nrt`), next to the Supabase database:
 
 | App | Config | Machine | Cost a month (check) |
 |---|---|---|---|
-| `claritia-web` (site and app) | `fly.toml`, `Dockerfile` | shared-cpu-1x, 512 MB, sleeps when idle | about $1 to $3 |
+| `claritia-web` (the app) | `fly.toml`, `Dockerfile` | shared-cpu-1x, 512 MB, sleeps when idle | about $1 to $3 |
 | `claritia-runner` (runs tests) | `fly.runner.toml`, `worker/Dockerfile` | shared-cpu-1x, 2 GB, sleeps when there's nothing to run | about $0.30 stopped, plus about $0.015 per hour of runs |
 | **Total before launch** | | | **about $1 to $2** |
 
@@ -61,21 +61,21 @@ update app_config set value = 'https://claritia-runner.fly.dev/' where key = 'ru
 
  The runner and Render's runner can run side by side safely: each run is taken by one of them only.
 
-## 5. Point the domains at Fly
+## 5. Point the app's domain at Fly
+
+Only the app moves to Fly. The marketing site, `tryclaritia.com` and `www.tryclaritia.com`, moves to Hostinger as a WordPress site (the `claritia-site` theme; its README has the steps). Until that site is live, leave the `tryclaritia.com` and `www` records pointing at Render.
 
 ```bash
-fly certs add tryclaritia.com --app claritia-web
-fly certs add www.tryclaritia.com --app claritia-web
 fly certs add app.tryclaritia.com --app claritia-web
 ```
 
-Each command prints the DNS records to add. In Hostinger → DNS for `tryclaritia.com`, replace the Render records with them (an A and AAAA record for `tryclaritia.com`, and CNAMEs to `claritia-web.fly.dev` for `www` and `app`). Leave the `inbox` records for Resend alone. `fly certs show app.tryclaritia.com --app claritia-web` says when the certificate is ready.
+It prints the DNS record to add. In Hostinger → DNS for `tryclaritia.com`, replace the Render record for `app` with a CNAME to `claritia-web.fly.dev`. Leave the `inbox` records for Resend alone. `fly certs show app.tryclaritia.com --app claritia-web` says when the certificate is ready.
 
 The Stripe and Resend webhooks keep working: they use `app.tryclaritia.com`, which now points at Fly.
 
 ## 6. Delete the Render services
 
-Once the site loads on your domains from Fly, delete `claritia` and `claritia-runner` in Render (the service → Settings → Delete). Billing stops then. `render.yaml` can be deleted from the repo too.
+Once the app loads on `app.tryclaritia.com` from Fly and `tryclaritia.com` shows the WordPress site, delete `claritia` and `claritia-runner` in Render (the service → Settings → Delete). Billing stops then. `render.yaml` can be deleted from the repo too.
 
 ## Deploying after this
 
