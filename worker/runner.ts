@@ -44,6 +44,8 @@ export type RunInput = {
   inbox?: Inbox;
   /** How long to wait for an email, in ms. */
   inboxTimeoutMs?: number;
+  /** When the run passes, save its browser's cookies and storage here, so the Explorer can start signed in. */
+  saveStateTo?: string;
 };
 export type RunResult = {
   status: "passed" | "failed" | "error";
@@ -58,6 +60,8 @@ export type RunResult = {
   /** Steps whose saved code broke and that a new fix got through. Waiting for approval; the test's code is unchanged. */
   heals: { position: number; label: string; oldLines: string[]; newLines: string[]; error: string }[];
   ai: { calls: number; input: number; output: number };
+  /** The saved cookies and storage (saveStateTo), when the run passed. */
+  state: string | null;
 };
 export type Hooks = { step: (u: StepUpdate) => Promise<void>; frame?: (jpeg: Buffer) => Promise<void> };
 
@@ -181,7 +185,7 @@ export async function executeRun(input: RunInput, hooks: Hooks): Promise<RunResu
   const mask = (t: string) => maskSecrets(t, input.secrets);
   const ai = { calls: 0, input: 0, output: 0 };
   const heals: RunResult["heals"] = [];
-  const result = (status: RunResult["status"], error: string | null, extra: Partial<RunResult> = {}): RunResult => ({ status, error: error && mask(error), durationMs: Date.now() - started, video: null, traces: [], consoleFile: null, networkFile: null, lock: null, heals, ai, ...extra });
+  const result = (status: RunResult["status"], error: string | null, extra: Partial<RunResult> = {}): RunResult => ({ status, error: error && mask(error), durationMs: Date.now() - started, video: null, traces: [], consoleFile: null, networkFile: null, lock: null, heals, ai, state: null, ...extra });
 
   const writer = input.writer;
   const parsed = parseLock(input.lock.trim() ? input.lock : "test('x', async ({ page }) => {});");
@@ -691,8 +695,15 @@ export async function executeRun(input: RunInput, hooks: Hooks): Promise<RunResu
 
   // Save what we have, even after an error.
   let video: string | null = null;
+  let state: string | null = null;
   try {
     const ctx = context as BrowserContext | null;
+    if (ctx && outcome.status === "passed" && input.saveStateTo) {
+      state = await ctx
+        .storageState({ path: input.saveStateTo })
+        .then(() => input.saveStateTo!)
+        .catch(() => null);
+    }
     if (ctx) {
       const tracePath = join(input.dir, "trace.zip");
       const saved = await ctx.tracing
@@ -721,5 +732,5 @@ export async function executeRun(input: RunInput, hooks: Hooks): Promise<RunResu
     const next = buildLock(input.testName ?? parsed.name, input.steps.map((s) => ({ label: s.label, lines: writtenLines.get(s.position) ?? (same(sections.size ? (parsed.steps.find((x) => x.number === s.position)?.label ?? "") : "", s.label) ? (sections.get(s.position) ?? []) : []) })));
     if (parseLock(next).ok) lock = next;
   }
-  return result(outcome.status, outcome.error, { video, traces, consoleFile, networkFile, lock });
+  return result(outcome.status, outcome.error, { video, traces, consoleFile, networkFile, lock, state });
 }

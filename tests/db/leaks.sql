@@ -433,6 +433,45 @@ values ('11111111-0000-0000-0000-000000000000', 'a1000000-0000-0000-0000-0000000
 select pg_temp.check((select count(*) from alert_events where kind = 'heal') = 1, 'A project with nowhere to send alerts queued one');
 select minute_tick();
 
+-- Explorer: members start and stop explorations of their own projects; pages and links are written by the server only.
+insert into tests (id, project_id, workspace_id, name, steps) values ('a5100000-0000-0000-0000-000000000000', 'a1000000-0000-0000-0000-000000000000', '11111111-0000-0000-0000-000000000000', 'no-code-yet', '[{"id":"s1","kind":"do","text":"Sign in"}]');
+select pg_temp.as_user('b0000000-0000-0000-0000-000000000000');
+set role authenticated;
+select pg_temp.fails_with($$select start_exploration('a1000000-0000-0000-0000-000000000000', 'a2000000-0000-0000-0000-000000000000', 50, 'a5100000-0000-0000-0000-000000000000')$$, '%needs saved code%', 'A sign-in test with no code was taken');
+create temp table x1 as select start_exploration('a1000000-0000-0000-0000-000000000000', 'a2000000-0000-0000-0000-000000000000', 500) as id;
+select pg_temp.check((select max_pages from explorations where id = (select id from x1)) = 200, 'An exploration went past 200 pages');
+select pg_temp.fails_with($$select start_exploration('a1000000-0000-0000-0000-000000000000', 'a2000000-0000-0000-0000-000000000000')$$, '%already being explored%', 'Two explorations of one project at once');
+select pg_temp.fails($$select start_exploration('c1000000-0000-0000-0000-000000000000', 'c2000000-0000-0000-0000-000000000000')$$, 'Ben explores Cat''s project');
+select pg_temp.fails($$select start_exploration('a1000000-0000-0000-0000-000000000000', 'c2000000-0000-0000-0000-000000000000')$$, 'Ben explores Cat''s environment');
+select pg_temp.fails($$insert into app_pages (workspace_id, project_id, pattern, sample_url) values ('11111111-0000-0000-0000-000000000000', 'a1000000-0000-0000-0000-000000000000', '/x', 'https://x.com/x')$$, 'Ben writes a page to the map');
+select pg_temp.fails($$update explorations set status = 'done'$$, 'Ben marks an exploration done');
+select pg_temp.fails($$select * from claim_exploration('me')$$, 'Ben claims an exploration as the runner');
+reset role;
+select pg_temp.as_user('c0000000-0000-0000-0000-000000000000');
+set role authenticated;
+select pg_temp.check((select count(*) from explorations) = 0, 'Cat sees Acme''s explorations');
+select pg_temp.fails($$select cancel_exploration((select id from x1))$$, 'Cat stops Acme''s exploration');
+reset role;
+select set_config('request.jwt.claim.sub', '', false);
+insert into app_pages (workspace_id, project_id, pattern, sample_url) values ('11111111-0000-0000-0000-000000000000', 'a1000000-0000-0000-0000-000000000000', '/orders/:id', 'https://staging.acme.com/orders/1');
+select pg_temp.as_user('c0000000-0000-0000-0000-000000000000');
+set role authenticated;
+select pg_temp.check((select count(*) from app_pages) = 0, 'Cat sees Acme''s app map');
+delete from app_pages;
+reset role;
+select pg_temp.check((select count(*) from app_pages) = 1, 'Cat deleted a page from Acme''s map');
+select set_config('request.jwt.claim.sub', '', false);
+select pg_temp.check((select count(*) from claim_exploration('runner-1')) = 1, 'The runner can''t take a waiting exploration');
+select pg_temp.check((select status from explorations where id = (select id from x1)) = 'running', 'A taken exploration isn''t running');
+update explorations set duration_ms = 6 * 60000, ai_calls = 7 where id = (select id from x1);
+select pg_temp.as_user('b0000000-0000-0000-0000-000000000000');
+set role authenticated;
+select cancel_exploration((select id from x1));
+reset role;
+select set_config('request.jwt.claim.sub', '', false);
+select pg_temp.check((select status from explorations where id = (select id from x1)) = 'canceled', 'Ben couldn''t stop his exploration');
+select minute_tick();
+
 -- Cloud minutes: once Acme has used its 2,000, nobody there can start a run.
 insert into runs (workspace_id, project_id, test_name, test_version, environment_name, base_url, lock, status, duration_ms)
 values ('11111111-0000-0000-0000-000000000000', 'a1000000-0000-0000-0000-000000000000', 'long', 1, 'staging', 'https://x.com', '', 'passed', 2000 * 60000);

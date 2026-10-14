@@ -153,3 +153,10 @@ export const Branch = (p: P) => (
     <path d="M6 7v10M18 10c0 4-6 3-11.2 7.5" />
   </Svg>
 );
+
+export const MapIcon = (p: P) => (
+  <Svg {...p}>
+    <path d="M9 4L3 6v14l6-2 6 2 6-2V4l-6 2-6-2z" />
+    <path d="M9 4v14M15 6v14" />
+  </Svg>
+);

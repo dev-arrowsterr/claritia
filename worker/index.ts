@@ -11,9 +11,11 @@ import { randomUUID } from "node:crypto";
 import { createServer } from "node:http";
 import { hostname } from "node:os";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import { handleExploration, type Exploration } from "./exploreHandle.ts";
 import { handleRun, type Run } from "./handle.ts";
 import { shouldSleep } from "./idle.ts";
 import { claudeJudge, type Judge } from "./judge.ts";
+import { claudeNamer, type Namer } from "./namer.ts";
 import { claudeWriter, type Writer } from "./writer.ts";
 
 const env = (k: string) => process.env[k]?.trim() ?? "";
@@ -48,8 +50,9 @@ if (missing.length) {
   const judge = env("ANTHROPIC_API_KEY")
     ? claudeJudge({ apiKey: env("ANTHROPIC_API_KEY"), model: env("CLAUDE_MODEL") || undefined, effort: effort === "low" || effort === "high" ? effort : "medium" })
     : undefined;
+  const namer = env("ANTHROPIC_API_KEY") ? claudeNamer({ apiKey: env("ANTHROPIC_API_KEY"), model: env("CLAUDE_NAMER_MODEL") || undefined }) : undefined;
   log(`Runner ${WORKER_ID} started with ${SLOTS} slots${writer ? "" : ". No ANTHROPIC_API_KEY, so steps with no code can't be written"}.`);
-  for (let i = 0; i < SLOTS; i++) void slot(sb, i, writer, judge);
+  for (let i = 0; i < SLOTS; i++) void slot(sb, i, writer, judge, namer);
   void scheduler(sb);
 
   // Go to sleep when there's been nothing to run for IDLE_EXIT_MS. One last look first, so a run queued
@@ -58,8 +61,11 @@ if (missing.length) {
     log(`Sleeps after ${Math.round(IDLE_EXIT_MS / 1000)}s with nothing to run.`);
     setInterval(async () => {
       if (stopping || !shouldSleep({ idleExitMs: IDLE_EXIT_MS, lastWorkAt, now: Date.now(), running: busy.size })) return;
-      const { count } = await sb.from("runs").select("id", { count: "exact", head: true }).eq("status", "queued");
-      if (count) {
+      const [runs, explorations] = await Promise.all([
+        sb.from("runs").select("id", { count: "exact", head: true }).eq("status", "queued"),
+        sb.from("explorations").select("id", { count: "exact", head: true }).eq("status", "queued"),
+      ]);
+      if (runs.count || explorations.count) {
         lastWorkAt = Date.now();
         return;
       }
@@ -74,29 +80,42 @@ if (missing.length) {
     if (stopping) return;
     stopping = true;
     log("Stopping: handing running runs back to the queue.");
-    if (busy.size) await sb.from("runs").update({ status: "queued", locked_by: null, locked_at: null }).in("id", [...busy]).eq("locked_by", WORKER_ID);
+    if (busy.size) {
+      await sb.from("runs").update({ status: "queued", locked_by: null, locked_at: null }).in("id", [...busy]).eq("locked_by", WORKER_ID);
+      await sb.from("explorations").update({ status: "queued", locked_by: null, locked_at: null }).in("id", [...busy]).eq("locked_by", WORKER_ID).eq("status", "running");
+    }
     process.exit(0);
   };
   process.on("SIGTERM", shutdown);
   process.on("SIGINT", shutdown);
 }
 
-async function slot(sb: SupabaseClient, n: number, writer: Writer | undefined, judge: Judge | undefined) {
+async function slot(sb: SupabaseClient, n: number, writer: Writer | undefined, judge: Judge | undefined, namer: Namer | undefined) {
+  const chromiumPath = env("CHROMIUM_PATH") || undefined;
   while (!stopping) {
     try {
+      // Runs first; an exploration only when no run is waiting.
       const { data, error } = await sb.rpc("claim_run", { p_worker: WORKER_ID });
       if (error) throw new Error(error.message);
       const run = (data as Run[] | null)?.[0];
+      let exploration: Exploration | undefined;
       if (!run) {
+        const x = await sb.rpc("claim_exploration", { p_worker: WORKER_ID });
+        if (x.error) throw new Error(x.error.message);
+        exploration = (x.data as Exploration[] | null)?.[0];
+      }
+      const id = run?.id ?? exploration?.id;
+      if (!id) {
         await sleep(IDLE_MS + n * 250);
         continue;
       }
-      busy.add(run.id);
+      busy.add(id);
       lastWorkAt = Date.now();
       try {
-        await handleRun(sb, run, { workerId: WORKER_ID, chromiumPath: env("CHROMIUM_PATH") || undefined, log, writer, judge, inboxDomain: env("INBOX_DOMAIN") || undefined });
+        if (run) await handleRun(sb, run, { workerId: WORKER_ID, chromiumPath, log, writer, judge, inboxDomain: env("INBOX_DOMAIN") || undefined });
+        else await handleExploration(sb, exploration!, { workerId: WORKER_ID, chromiumPath, log, namer });
       } finally {
-        busy.delete(run.id);
+        busy.delete(id);
         lastWorkAt = Date.now();
       }
     } catch (e) {

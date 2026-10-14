@@ -3,7 +3,7 @@
 import type { Session } from "@supabase/supabase-js";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { getSupabase, type SupaConfig } from "@/lib/supa";
-import { BarChart, Box, Check, Clock, Globe, ListIcon, LogOut, Play, Settings } from "../Icons";
+import { BarChart, Box, Check, Clock, Globe, ListIcon, LogOut, MapIcon, Play, Settings } from "../Icons";
 import { Logo } from "../Logo";
 import { AuthScreen } from "./AuthScreen";
 import { askText, DialogHost } from "./Dialogs";
@@ -15,6 +15,7 @@ import { EnvironmentsView } from "./views/EnvironmentsView";
 import { InsightsView } from "./views/InsightsView";
 import { SchedulesView } from "./views/SchedulesView";
 import { RunsView } from "./views/RunsView";
+import { MapView } from "./views/MapView";
 import { SettingsView } from "./views/SettingsView";
 import { TestsView } from "./views/TestsView";
 
@@ -23,6 +24,7 @@ import { TestsView } from "./views/TestsView";
 const NAV: { route: Route; label: string; icon: React.ReactNode; group?: string }[] = [
   { route: "tests", label: "Tests", icon: <ListIcon size={15} />, group: "Authoring" },
   { route: "blocks", label: "Blocks", icon: <Box size={15} /> },
+  { route: "map", label: "Map", icon: <MapIcon size={15} /> },
   { route: "runs", label: "Runs", icon: <Play size={15} />, group: "Execution" },
   { route: "environments", label: "Environments", icon: <Globe size={15} /> },
   { route: "schedules", label: "Schedules", icon: <Clock size={15} />, group: "Management" },
@@ -249,7 +251,7 @@ export function ClientApp({ config }: { config: SupaConfig }) {
             <ErrorNote message={error} />
           </div>
         ) : null}
-        {route === "tests" ? <TestsView {...props} /> : route === "blocks" ? <BlocksView {...props} /> : route === "runs" ? <RunsView {...props} /> : route === "approvals" ? <ApprovalsView {...props} /> : route === "environments" ? <EnvironmentsView {...props} /> : route === "schedules" ? <SchedulesView {...props} /> : route === "insights" ? <InsightsView {...props} /> : <SettingsView {...props} />}
+        {route === "tests" ? <TestsView {...props} /> : route === "blocks" ? <BlocksView {...props} /> : route === "map" ? <MapView {...props} /> : route === "runs" ? <RunsView {...props} /> : route === "approvals" ? <ApprovalsView {...props} /> : route === "environments" ? <EnvironmentsView {...props} /> : route === "schedules" ? <SchedulesView {...props} /> : route === "insights" ? <InsightsView {...props} /> : <SettingsView {...props} />}
       </main>
     </div>
   );
