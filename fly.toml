@@ -1,4 +1,4 @@
-# The Claritia app on Fly.io (app.tryclaritia.com). The site, tryclaritia.com, is WordPress on Hostinger.
+# The Claritia app on Fly.io (app.tryclaritia.com). The site, tryclaritia.com, is a plain HTML site on Hostinger.
 #   fly deploy
 app = "claritia-web"
 primary_region = "nrt" # Tokyo, next to the Supabase database

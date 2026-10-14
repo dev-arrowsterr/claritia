@@ -63,7 +63,7 @@ update app_config set value = 'https://claritia-runner.fly.dev/' where key = 'ru
 
 ## 5. Point the app's domain at Fly
 
-Only the app moves to Fly. The marketing site, `tryclaritia.com` and `www.tryclaritia.com`, moves to Hostinger as a WordPress site (the `claritia-site` theme; its README has the steps). Until that site is live, leave the `tryclaritia.com` and `www` records pointing at Render.
+Only the app moves to Fly. The marketing site, `tryclaritia.com` and `www.tryclaritia.com`, moves to Hostinger as a plain HTML site (the `claritia-site` repo; its README has the steps). Until that site is live, leave the `tryclaritia.com` and `www` records pointing at Render.
 
 ```bash
 fly certs add app.tryclaritia.com --app claritia-web
@@ -75,7 +75,7 @@ The Stripe and Resend webhooks keep working: they use `app.tryclaritia.com`, whi
 
 ## 6. Delete the Render services
 
-Once the app loads on `app.tryclaritia.com` from Fly and `tryclaritia.com` shows the WordPress site, delete `claritia` and `claritia-runner` in Render (the service → Settings → Delete). Billing stops then. `render.yaml` can be deleted from the repo too.
+Once the app loads on `app.tryclaritia.com` from Fly and `tryclaritia.com` shows the Hostinger site, delete `claritia` and `claritia-runner` in Render (the service → Settings → Delete). Billing stops then. `render.yaml` can be deleted from the repo too.
 
 ## Deploying after this
 
