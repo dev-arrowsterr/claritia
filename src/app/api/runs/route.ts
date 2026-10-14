@@ -20,7 +20,7 @@ export async function POST(request: Request) {
   const { data: envs, error: envError } = typeof body.environmentId === "string" ? await sb.from("environments").select("id, name").eq("id", body.environmentId).eq("project_id", test.project_id) : await envQuery;
   if (envError) return Response.json({ error: envError.message }, { status: 500 });
   const env = envs?.[0];
-  if (!env) return Response.json({ error: "Add an environment to this project in Settings first." }, { status: 400 });
+  if (!env) return Response.json({ error: "Add an environment to this project in Environments first." }, { status: 400 });
 
   if (!Array.isArray(test.steps) || !test.steps.length) return Response.json({ error: "Add a step first." }, { status: 400 });
   const parsed = parseLock(test.lock?.trim() ? test.lock : "test('x', async ({ page }) => {});");
@@ -30,7 +30,7 @@ export async function POST(request: Request) {
     const { data: have } = await sb.from("env_secrets").select("name").eq("environment_id", env.id).in("name", parsed.secrets);
     const names = new Set((have ?? []).map((r) => r.name as string));
     const missing = parsed.secrets.filter((s) => !names.has(s));
-    if (missing.length) return Response.json({ error: `Add ${missing.join(", ")} to ${env.name} in Settings.` }, { status: 400 });
+    if (missing.length) return Response.json({ error: `Add ${missing.join(", ")} to ${env.name} in Environments.` }, { status: 400 });
   }
 
   const { data: runId, error: runError } = await sb.rpc("start_run", { p_test: test.id, p_env: env.id });

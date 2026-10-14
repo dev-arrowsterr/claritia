@@ -3,7 +3,7 @@
 import type { Session } from "@supabase/supabase-js";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { getSupabase, type SupaConfig } from "@/lib/supa";
-import { Box, Check, ListIcon, LogOut, Play, Settings } from "../Icons";
+import { BarChart, Box, Check, Clock, Globe, ListIcon, LogOut, Play, Settings } from "../Icons";
 import { Logo } from "../Logo";
 import { AuthScreen } from "./AuthScreen";
 import { askText, DialogHost } from "./Dialogs";
@@ -11,16 +11,24 @@ import { Select } from "./Select";
 import { Avatar, ErrorNote, errorText, mayLeave, must, type Project, type Role, type Route, type ViewProps, type Workspace } from "./ui";
 import { ApprovalsView } from "./views/ApprovalsView";
 import { BlocksView } from "./views/BlocksView";
+import { EnvironmentsView } from "./views/EnvironmentsView";
+import { InsightsView } from "./views/InsightsView";
+import { SchedulesView } from "./views/SchedulesView";
 import { RunsView } from "./views/RunsView";
 import { SettingsView } from "./views/SettingsView";
 import { TestsView } from "./views/TestsView";
 
-const NAV: { route: Route; label: string; icon: React.ReactNode }[] = [
-  { route: "tests", label: "Tests", icon: <ListIcon size={15} /> },
+// The app's four modules, then Settings. AI works inside each: the Writer in Authoring, the Healer in Execution,
+// smart retries in Management and the Judge in Analytics.
+const NAV: { route: Route; label: string; icon: React.ReactNode; group?: string }[] = [
+  { route: "tests", label: "Tests", icon: <ListIcon size={15} />, group: "Authoring" },
   { route: "blocks", label: "Blocks", icon: <Box size={15} /> },
-  { route: "runs", label: "Runs", icon: <Play size={15} /> },
+  { route: "runs", label: "Runs", icon: <Play size={15} />, group: "Execution" },
+  { route: "environments", label: "Environments", icon: <Globe size={15} /> },
+  { route: "schedules", label: "Schedules", icon: <Clock size={15} />, group: "Management" },
   { route: "approvals", label: "Approvals", icon: <Check size={15} /> },
-  { route: "settings", label: "Settings", icon: <Settings size={15} /> },
+  { route: "insights", label: "Insights", icon: <BarChart size={15} />, group: "Analytics" },
+  { route: "settings", label: "Settings", icon: <Settings size={15} />, group: "" },
 ];
 
 const PROJECT_KEY = "claritia:project";
@@ -187,7 +195,12 @@ export function ClientApp({ config }: { config: SupaConfig }) {
     if (loc.id) navigate(loc.route);
   };
 
-  const navLinks = NAV.map((n) => (
+  const navLinks = NAV.map((n) => [
+    n.group !== undefined ? (
+      <p key={`g-${n.route}`} className={`hidden px-2.5 font-mono text-[10px] tracking-[0.12em] text-faint uppercase md:block ${n.group ? "mt-3 mb-1" : "mt-3 border-t border-line pt-3"}`}>
+        {n.group}
+      </p>
+    ) : null,
     <a
       key={n.route}
       href={`/${n.route}`}
@@ -201,8 +214,8 @@ export function ClientApp({ config }: { config: SupaConfig }) {
       <span className={route === n.route ? "text-ink" : "text-muted"}>{n.icon}</span>
       {n.label}
       {n.route === "approvals" && waiting ? <span className="ml-auto bg-brand px-1.5 font-mono text-[10px] leading-4 text-white">{waiting}</span> : null}
-    </a>
-  ));
+    </a>,
+  ]);
 
   return (
     <div className="flex h-screen min-h-0 flex-col bg-canvas md:flex-row">
@@ -221,7 +234,7 @@ export function ClientApp({ config }: { config: SupaConfig }) {
           placeholder="No project yet"
           className="h-9 w-full rounded-md border border-line bg-panel px-2.5 text-[13px] font-medium hover:border-line-strong"
         />
-        <nav className="flex gap-1 md:flex-col">{navLinks}</nav>
+        <nav className="flex gap-1 overflow-x-auto md:flex-col md:overflow-visible">{navLinks}</nav>
         <div className="mt-auto hidden items-center gap-2 border-t border-line px-1 pt-3 md:flex">
           <Avatar label={email} />
           <span className="min-w-0 flex-1 truncate text-[12.5px] text-body">{email}</span>
@@ -236,7 +249,7 @@ export function ClientApp({ config }: { config: SupaConfig }) {
             <ErrorNote message={error} />
           </div>
         ) : null}
-        {route === "tests" ? <TestsView {...props} /> : route === "blocks" ? <BlocksView {...props} /> : route === "runs" ? <RunsView {...props} /> : route === "approvals" ? <ApprovalsView {...props} /> : <SettingsView {...props} />}
+        {route === "tests" ? <TestsView {...props} /> : route === "blocks" ? <BlocksView {...props} /> : route === "runs" ? <RunsView {...props} /> : route === "approvals" ? <ApprovalsView {...props} /> : route === "environments" ? <EnvironmentsView {...props} /> : route === "schedules" ? <SchedulesView {...props} /> : route === "insights" ? <InsightsView {...props} /> : <SettingsView {...props} />}
       </main>
     </div>
   );

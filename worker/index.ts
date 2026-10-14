@@ -45,6 +45,7 @@ if (missing.length) {
     : undefined;
   log(`Runner ${WORKER_ID} started with ${SLOTS} slots${writer ? "" : ". No ANTHROPIC_API_KEY, so steps with no code can't be written"}.`);
   for (let i = 0; i < SLOTS; i++) void slot(sb, i, writer, judge);
+  void scheduler(sb);
 
   // On shutdown, hand running runs back to the queue so another runner picks them up right away.
   const shutdown = async () => {
@@ -81,3 +82,12 @@ async function slot(sb: SupabaseClient, n: number, writer: Writer | undefined, j
   }
 }
 
+// Every minute, queue the tests of schedules that are due. Several runners can do this at once safely.
+async function scheduler(sb: SupabaseClient) {
+  while (!stopping) {
+    const { data, error } = await sb.rpc("fire_due_schedules");
+    if (error) log(`Schedules: ${error.message}`);
+    else if (data) log(`Schedules: fired ${data}.`);
+    await sleep(60_000);
+  }
+}

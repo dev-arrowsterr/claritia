@@ -26,6 +26,9 @@ This repo holds the marketing site (`/` on tryclaritia.com) and the app (app.try
 - Healer: when a step's saved code fails even after its retry, the runner sends Claude the old code, the error and the page as it is now, keeping the lines that already ran. If the new code gets the step through, the step passes with a Healed tag and the fix goes to **Approvals** as a diff. The test's code only changes when someone approves it (saved as a normal version with their name). If what the step needs is gone, or a check is plainly false, Claude says so and the step fails with that reason. A slow page that passes on its retry never calls Claude. Each fix uses AI credits like writing does.
 - Judge: every failed run is sorted into **App bug**, **Flaky** or **Setup**, with a one-line reason, shown on the run page, the runs list and the test's run log. Clear setup problems (a site that doesn't resolve or refuses the connection, a bad certificate, a missing secret, a used-up plan, a private address) are sorted by fixed rules with no AI call. The rest go to Claude with the failed step, its code and error, a screenshot, console errors, failed requests and whether it was retried. A judgment uses one AI credit; with none left, the failure isn't judged.
 - Smart retries: a failure the Judge calls Flaky is run once more on its own, as a new run marked **Re-run** (trigger `retry`). The test shows the re-run's result, and the two runs link to each other. If the first run saved code it wrote, the re-run replays it. App bugs and setup problems are never re-run, and a re-run is never re-run again.
+- The app has four modules in the sidebar, with AI in each: **Authoring** (Tests, Blocks; the Writer), **Execution** (Runs, Environments; the Healer), **Management** (Schedules, Approvals; smart retries) and **Analytics** (Insights; the Judge). Settings keeps the project, plan, workspace and account.
+- Schedules: run every test, one use case or picked tests on one environment, hourly, daily, on weekdays or weekly, in the schedule's own time zone. The runner checks every minute (`fire_due_schedules`), queues the due schedules' tests (up to 50 each) and moves them to their next time. A test still waiting from the last fire isn't queued again, and two runners never fire the same schedule twice. Scheduled runs are tagged on the Runs page. Once the plan's cloud minutes are used up, a schedule skips its fires and says why.
+- Insights: for the last 7 or 30 days, the pass rate, runs and cloud minutes, failures saved by re-runs, AI calls, failures by kind (App bug, Flaky, Setup) and every test ranked worst first.
 - `tryclaritia.com/llms.txt` and `tryclaritia.com/pricing.md` describe Claritia and its pricing for AI agents.
 - Time to a first passing test is tracked: `workspaces.first_pass_at` is set by the first passing run. See "Launch numbers" below.
 
@@ -80,7 +83,9 @@ One Claude call per failed run that the rules don't settle: about 5,000 tokens i
 
 Smart retries add no servers and no writing. A re-run replays saved code, and only uses Claude again if it fails and needs judging: about $10 at Beta and $100 at Growth (check), plus the re-run's cloud minutes, which count toward the plan.
 
-With the Healer and smart retries, Phase 2 so far adds about $140 at Beta and $1,400 at Growth.
+Schedules and Insights add no AI calls of their own. Schedules add runs, which is runner time: a team running 20 tests nightly uses about 10 cloud minutes a day. At Beta (50 teams) the one runner covers that, so $0 added. At Growth (500 teams) that's about 3.5 runner-hours a day, so plan for one more runner, about $25 a month (check). Failed scheduled runs are judged like any other.
+
+With the Healer, smart retries and schedules, Phase 2 so far adds about $140 at Beta and $1,425 at Growth.
 
 ### What Weeks 5 and 6 add to the bill (all prices "check")
 

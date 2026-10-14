@@ -187,7 +187,7 @@ export async function executeRun(input: RunInput, hooks: Hooks): Promise<RunResu
   const parsed = parseLock(input.lock.trim() ? input.lock : "test('x', async ({ page }) => {});");
   if (!parsed.ok) return result("error", `The test's code has a problem on line ${parsed.errors[0]!.line}: ${parsed.errors[0]!.message}`);
   const missing = parsed.secrets.filter((s) => !(s in input.secrets));
-  if (missing.length) return result("error", `Add ${missing.join(", ")} to this environment in Settings.`);
+  if (missing.length) return result("error", `Add ${missing.join(", ")} to this environment in Environments.`);
   if (!parsed.actionCount && !writer) return result("error", "This test has no Playwright code yet.");
   if (parsed.usesInbox && !input.inbox) return result("error", "This test reads email, and test inboxes aren't set up on this runner.");
   const sections = lockSections(input.lock);

@@ -6,7 +6,7 @@ test("clear setup problems are sorted with no AI call", () => {
   assert.equal(judgeByRules("page.goto: net::ERR_NAME_NOT_RESOLVED at https://nope.invalid/")?.verdict, "setup");
   assert.equal(judgeByRules("page.goto: net::ERR_CONNECTION_REFUSED")?.verdict, "setup");
   assert.equal(judgeByRules("Claritia blocked 10.0.0.5 because it points to a private network address.")?.verdict, "setup");
-  assert.equal(judgeByRules("Add LOGIN_PASSWORD to this environment in Settings.")?.verdict, "setup");
+  assert.equal(judgeByRules("Add LOGIN_PASSWORD to this environment in Environments.")?.verdict, "setup");
   assert.equal(judgeByRules("This month's AI credits are used up. Upgrade in Settings to write more steps.")?.verdict, "setup");
   assert.equal(judgeByRules("net::ERR_CERT_DATE_INVALID")?.verdict, "setup");
 });

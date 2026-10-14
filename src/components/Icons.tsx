@@ -131,3 +131,16 @@ export const Copy = (p: P) => (
     <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
   </Svg>
 );
+
+export const Clock = (p: P) => (
+  <Svg {...p}>
+    <circle cx="12" cy="12" r="9" />
+    <path d="M12 7v5l3 2" />
+  </Svg>
+);
+
+export const BarChart = (p: P) => (
+  <Svg {...p}>
+    <path d="M4 20h16M7 16v-5M12 16V7M17 16v-8" />
+  </Svg>
+);

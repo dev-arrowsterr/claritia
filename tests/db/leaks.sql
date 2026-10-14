@@ -46,6 +46,8 @@ insert into heals (id, workspace_id, project_id, test_id, test_version, position
   ('a7000000-0000-0000-0000-000000000000', '11111111-0000-0000-0000-000000000000', 'a1000000-0000-0000-0000-000000000000', 'a5000000-0000-0000-0000-000000000000', 1, 1, 'Pay', 'old', 'new', 'broke'),
   ('a7100000-0000-0000-0000-000000000000', '11111111-0000-0000-0000-000000000000', 'a1000000-0000-0000-0000-000000000000', 'a5000000-0000-0000-0000-000000000000', 1, 2, 'Ship', 'old', 'new', 'broke'),
   ('c7000000-0000-0000-0000-000000000000', '22222222-0000-0000-0000-000000000000', 'c1000000-0000-0000-0000-000000000000', 'c5000000-0000-0000-0000-000000000000', 1, 1, 'Cat', 'old', 'new', 'broke');
+insert into schedules (id, project_id, workspace_id, environment_id, name, every) values
+  ('c9000000-0000-0000-0000-000000000000', 'c1000000-0000-0000-0000-000000000000', '22222222-0000-0000-0000-000000000000', 'c2000000-0000-0000-0000-000000000000', 'cat-nightly', 'day');
 insert into storage.objects (bucket_id, name) values
   ('runs', '11111111-0000-0000-0000-000000000000/r1/video.webm'),
   ('runs', '22222222-0000-0000-0000-000000000000/r2/video.webm');
@@ -136,6 +138,15 @@ select decide_heal('a7000000-0000-0000-0000-000000000000', 'approved');
 select pg_temp.check((select status from heals where id = 'a7000000-0000-0000-0000-000000000000') = 'approved' and (select decided_by from heals where id = 'a7000000-0000-0000-0000-000000000000') = 'b0000000-0000-0000-0000-000000000000', 'Ben''s approval isn''t recorded');
 select pg_temp.fails_with($$select decide_heal('a7000000-0000-0000-0000-000000000000', 'rejected')$$, '%already approved%', 'Ben decides the same fix twice');
 select pg_temp.fails($$select record_heal(id, 1, 'x', 'a', 'b', 'c') from runs limit 1$$, 'Ben records a fix as if he were the runner');
+-- Schedules
+select pg_temp.check(not exists (select 1 from schedules), 'Ben sees Cat''s schedules');
+select pg_temp.fails($$insert into schedules (project_id, environment_id, name, every) values ('a1000000-0000-0000-0000-000000000000', 'c2000000-0000-0000-0000-000000000000', 'x', 'day')$$, 'Ben schedules his tests on Cat''s environment');
+select pg_temp.fails($$insert into schedules (project_id, environment_id, name, every) values ('c1000000-0000-0000-0000-000000000000', 'c2000000-0000-0000-0000-000000000000', 'x', 'day')$$, 'Ben adds a schedule to Cat''s project');
+select pg_temp.fails_with($$insert into schedules (project_id, environment_id, name, every, timezone) values ('a1000000-0000-0000-0000-000000000000', 'a2000000-0000-0000-0000-000000000000', 'x', 'day', 'Mars/Olympus')$$, '%Unknown time zone%', 'Ben saves a made-up time zone');
+select pg_temp.check(pg_temp.touched($$insert into schedules (id, project_id, environment_id, name, every, at_hour, at_minute, timezone, next_run_at) values ('a9000000-0000-0000-0000-000000000000', 'a1000000-0000-0000-0000-000000000000', 'a2000000-0000-0000-0000-000000000000', 'nightly', 'day', 2, 30, 'Asia/Tokyo', now() - interval '1 day')$$) = 1, 'Ben can''t add a schedule');
+select pg_temp.check((select next_run_at from schedules) > now() and (select workspace_id from schedules) = '11111111-0000-0000-0000-000000000000', 'A new schedule didn''t get its own next run time and workspace');
+select pg_temp.check(pg_temp.touched($$update schedules set last_run_at = now() - interval '1 year', last_count = 999 where id = 'a9000000-0000-0000-0000-000000000000'$$) = 1 and (select last_count from schedules) is null, 'Ben fakes when a schedule last ran');
+select pg_temp.fails($$select fire_due_schedules()$$, 'Ben fires schedules like the runner');
 -- Inboxes
 select pg_temp.check((select count(*) from inbox_messages) = 1 and (select subject from inbox_messages) = 'Acme code', 'Ben can''t read only his own inbox');
 select pg_temp.fails($$insert into inbox_messages (workspace_id, project_id, to_address) values ('11111111-0000-0000-0000-000000000000', 'a1000000-0000-0000-0000-000000000000', 'fake')$$, 'Ben plants an email');
@@ -265,6 +276,29 @@ select pg_temp.check((select lock from runs where retry_of = 'a8000000-0000-0000
 select pg_temp.check(retry_run('a8000000-0000-0000-0000-000000000000') is null, 'A run was re-run twice');
 select pg_temp.check(retry_run((select id from runs where retry_of = 'a8000000-0000-0000-0000-000000000000')) is null, 'A re-run was re-run');
 select pg_temp.check(retry_run((select id from runs where status = 'queued' and retry_of is null limit 1)) is null, 'A run that didn''t fail was re-run');
+
+-- Schedule times, in the schedule's own time zone.
+select pg_temp.check(schedule_next('hour', 0, 15, 0, 'UTC', '2026-10-14 10:20:00+00') = '2026-10-14 11:15:00+00', 'Hourly at :15 picked the wrong time');
+select pg_temp.check(schedule_next('hour', 0, 15, 0, 'UTC', '2026-10-14 10:05:00+00') = '2026-10-14 10:15:00+00', 'Hourly at :15 skipped this hour');
+select pg_temp.check(schedule_next('day', 9, 0, 0, 'Asia/Tokyo', '2026-10-14 01:00:00+00') = '2026-10-15 00:00:00+00', 'Daily at 9:00 Tokyo picked the wrong time');
+select pg_temp.check(schedule_next('day', 9, 0, 0, 'Asia/Tokyo', '2026-10-13 23:00:00+00') = '2026-10-14 00:00:00+00', 'Daily at 9:00 Tokyo skipped today');
+select pg_temp.check(schedule_next('weekday', 9, 0, 0, 'UTC', '2026-10-17 10:00:00+00') = '2026-10-19 09:00:00+00', 'Weekdays ran on a weekend');
+select pg_temp.check(schedule_next('week', 9, 0, 3, 'UTC', '2026-10-14 10:00:00+00') = '2026-10-21 09:00:00+00', 'Weekly on Wednesday picked the wrong day');
+select pg_temp.check(schedule_next('day', 2, 30, 0, 'America/New_York', '2026-11-01 05:00:00+00') = '2026-11-01 07:30:00+00', 'Daily missed the clock change');
+
+-- The runner fires due schedules: each queues its tests once, and tests still waiting aren't queued again.
+set session_replication_role = replica;
+update schedules set next_run_at = now() - interval '1 minute' where id = 'a9000000-0000-0000-0000-000000000000';
+set session_replication_role = origin;
+select pg_temp.check(fire_due_schedules() >= 1, 'A due schedule didn''t fire');
+select pg_temp.check((select count(*) from runs where schedule_id = 'a9000000-0000-0000-0000-000000000000' and trigger = 'schedule' and status = 'queued') = (select count(*) from tests where project_id = 'a1000000-0000-0000-0000-000000000000' and jsonb_array_length(steps) > 0), 'A schedule didn''t queue each of its tests');
+select pg_temp.check((select next_run_at from schedules where id = 'a9000000-0000-0000-0000-000000000000') > now() and (select last_count from schedules where id = 'a9000000-0000-0000-0000-000000000000') > 0, 'A fired schedule didn''t move to its next time');
+set session_replication_role = replica;
+update schedules set next_run_at = now() - interval '1 minute' where id = 'a9000000-0000-0000-0000-000000000000';
+set session_replication_role = origin;
+select fire_due_schedules();
+select pg_temp.check((select last_count from schedules where id = 'a9000000-0000-0000-0000-000000000000') = 0 and (select count(*) from runs where schedule_id = 'a9000000-0000-0000-0000-000000000000') = (select count(*) from tests where project_id = 'a1000000-0000-0000-0000-000000000000' and jsonb_array_length(steps) > 0), 'A schedule queued tests that were still waiting');
+select pg_temp.check(fire_due_schedules() = 0, 'A schedule fired before its time');
 
 -- Cloud minutes: once Acme has used its 2,000, nobody there can start a run.
 insert into runs (workspace_id, project_id, test_name, test_version, environment_name, base_url, lock, status, duration_ms)

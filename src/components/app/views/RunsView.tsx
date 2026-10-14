@@ -121,6 +121,7 @@ function RunList({ sb, project, navigate }: ViewProps) {
                     <StatusTag status={r.status} />
                     <VerdictTag verdict={r.verdict} />
                     {r.retry_of ? <Badge>Re-run</Badge> : null}
+                    {r.trigger === "schedule" ? <Badge>Scheduled</Badge> : null}
                   </span>
                 </td>
                 <td className="hidden border-b border-line px-4 text-[12.5px] text-muted md:table-cell">{r.environment_name}</td>
