@@ -1,4 +1,4 @@
-# Deploy to Fly.io on every push to main: the checks first, then the site and the runner.
+# Deploy to Fly.io on every push to main: the checks first, then the runner.
 # Needs one repository secret, FLY_API_TOKEN (from `fly tokens create org`). Without it, the deploy steps are skipped.
 name: Deploy to Fly.io
 
@@ -32,9 +32,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        # The app stays on Render for now, so only the runner deploys to Fly.
+        # To move the app too, add: - app: claritia-web / config: fly.toml
         include:
-          - app: claritia-web
-            config: fly.toml
           - app: claritia-runner
             config: fly.runner.toml
     env:
