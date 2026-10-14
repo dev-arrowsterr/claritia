@@ -43,6 +43,9 @@ jobs:
       - uses: actions/checkout@v4
       - uses: superfly/flyctl-actions/setup-flyctl@master
         if: env.FLY_API_TOKEN != ''
+      - name: Create ${{ matrix.app }} if it doesn't exist yet
+        if: env.FLY_API_TOKEN != ''
+        run: flyctl status --app ${{ matrix.app }} >/dev/null 2>&1 || flyctl apps create ${{ matrix.app }}
       - name: Deploy ${{ matrix.app }}
         if: env.FLY_API_TOKEN != ''
         run: flyctl deploy --remote-only --config ${{ matrix.config }} --app ${{ matrix.app }}
