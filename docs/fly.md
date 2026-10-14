@@ -4,9 +4,9 @@ Two Fly apps, both in Tokyo (`nrt`), next to the Supabase database:
 
 | App | Config | Machine | Cost a month (check) |
 |---|---|---|---|
-| `claritia-web` (the app) | `fly.toml`, `Dockerfile` | shared-cpu-1x, 512 MB, sleeps when idle | about $1 to $3 |
+| `claritia-web` (the app) | `fly.toml`, `Dockerfile` | shared-cpu-1x, 512 MB, always on | about $3.20 |
 | `claritia-runner` (runs tests) | `fly.runner.toml`, `worker/Dockerfile` | shared-cpu-1x, 2 GB, sleeps when there's nothing to run | about $0.30 stopped, plus about $0.015 per hour of runs |
-| **Total before launch** | | | **about $1 to $2** |
+| **Total before launch** | | | **about $3.50 to $5** |
 
 Render today: about $32 (runner $25, web $7). Fly bills by the second; Tokyo can cost a little more than US regions.
 
