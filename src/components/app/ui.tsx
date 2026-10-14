@@ -335,3 +335,16 @@ export function duration(ms: number | null | undefined) {
   const m = Math.floor(ms / 60_000);
   return `${m}m ${String(Math.round((ms % 60_000) / 1000)).padStart(2, "0")}s`;
 }
+
+export type Verdict = "app_bug" | "flaky" | "setup";
+const VERDICT: Record<Verdict, { label: string; tone: Tone }> = {
+  app_bug: { label: "App bug", tone: "red" },
+  flaky: { label: "Flaky", tone: "amber" },
+  setup: { label: "Setup", tone: "gray" },
+};
+
+/** The Judge's call on a failed run. */
+export function VerdictTag({ verdict }: { verdict: Verdict | null | undefined }) {
+  if (!verdict || !VERDICT[verdict]) return null;
+  return <Badge tone={VERDICT[verdict].tone}>{VERDICT[verdict].label}</Badge>;
+}

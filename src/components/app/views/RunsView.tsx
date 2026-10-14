@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Play } from "../../Icons";
-import { Badge, Button, duration, Empty, ErrorNote, errorText, hostOf, Loading, must, Page, Panel, postJson, StatusTag, Tabs, Th, timeAgo, type RunStatus, type StepStatus, type ViewProps } from "../ui";
+import { Badge, Button, duration, Empty, ErrorNote, errorText, hostOf, Loading, must, Page, Panel, postJson, StatusTag, Tabs, Th, timeAgo, type RunStatus, type StepStatus, type ViewProps, type Verdict, VerdictTag } from "../ui";
 
 type RunRow = {
   id: string;
@@ -28,6 +28,8 @@ type RunRow = {
   live_path: string | null;
   ai_calls: number;
   lock_saved: boolean;
+  verdict: Verdict | null;
+  verdict_reason: string | null;
 };
 type StepRow = { id: string; position: number; kind: string; label: string; status: StepStatus; retried: boolean; started_ms: number | null; duration_ms: number | null; error: string | null; screenshot_path: string | null; written: boolean; healed: boolean; code: string | null };
 type ConsoleLine = { ms: number; type: string; text: string };
@@ -38,7 +40,7 @@ type Email = { id: string; to_address: string; from_address: string | null; subj
 const runCode = (runId: string) => runId.replace(/-/g, "").slice(0, 6);
 
 const LIVE = new Set<RunStatus>(["queued", "running"]);
-const RUN_COLUMNS = "id, test_id, test_name, test_version, environment_id, environment_name, base_url, trigger, status, error, created_at, started_at, finished_at, duration_ms, video_path, trace_paths, console_path, network_path, project_id, attempts, live_path, ai_calls, lock_saved";
+const RUN_COLUMNS = "id, test_id, test_name, test_version, environment_id, environment_name, base_url, trigger, status, error, created_at, started_at, finished_at, duration_ms, video_path, trace_paths, console_path, network_path, project_id, attempts, live_path, ai_calls, lock_saved, verdict, verdict_reason";
 
 /** Load again every few seconds while `live` is true. */
 function usePoll(live: boolean, ms: number, tick: () => void) {
@@ -90,7 +92,7 @@ function RunList({ sb, project, navigate }: ViewProps) {
           <thead>
             <tr>
               <Th>Test</Th>
-              <Th className="w-28">Status</Th>
+              <Th className="w-44">Status</Th>
               <Th className="hidden w-32 md:table-cell">Environment</Th>
               <Th className="hidden w-24 sm:table-cell">Length</Th>
               <Th className="w-28">Started</Th>
@@ -113,7 +115,10 @@ function RunList({ sb, project, navigate }: ViewProps) {
                   <span className="ml-2 font-mono text-[11px] text-faint">v{r.test_version}</span>
                 </td>
                 <td className="border-b border-line px-4">
-                  <StatusTag status={r.status} />
+                  <span className="flex gap-1.5">
+                    <StatusTag status={r.status} />
+                    <VerdictTag verdict={r.verdict} />
+                  </span>
                 </td>
                 <td className="hidden border-b border-line px-4 text-[12.5px] text-muted md:table-cell">{r.environment_name}</td>
                 <td className="hidden border-b border-line px-4 font-mono text-[12px] text-muted sm:table-cell">{duration(r.duration_ms)}</td>
@@ -279,6 +284,12 @@ function RunDetail({ sb, session, id, navigate }: ViewProps) {
             {run.lock_saved ? " · code saved to test" : ""}
           </span>
         </Panel>
+        {run.verdict ? (
+          <Panel className="flex items-start gap-3 px-4 py-3">
+            <VerdictTag verdict={run.verdict} />
+            <span className="text-[13px] leading-relaxed text-body">{run.verdict_reason}</span>
+          </Panel>
+        ) : null}
         {run.error ? <ErrorNote message={run.error} /> : null}
         {error ? <ErrorNote message={error} /> : null}
 

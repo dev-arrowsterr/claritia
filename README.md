@@ -24,6 +24,7 @@ This repo holds the marketing site (`/` on tryclaritia.com) and the app (app.try
 - First screens: the start screen can fill in a demo site (`demo.playwright.dev/todomvc`), and an empty test list offers "Try" tests to start from.
 - Plans: Free, Starter ($49) and Team ($199), from `src/lib/plans.ts`. Settings shows the plan, cloud minutes, AI credits and projects used this period, with Upgrade (Stripe Checkout) and Manage billing (Stripe's billing page). Limits hold in the database: a new project past the plan's limit is refused, a run can't start once the cloud minutes are used, and the runner stops writing once the AI credits are used.
 - Healer: when a step's saved code fails even after its retry, the runner sends Claude the old code, the error and the page as it is now, keeping the lines that already ran. If the new code gets the step through, the step passes with a Healed tag and the fix goes to **Approvals** as a diff. The test's code only changes when someone approves it (saved as a normal version with their name). If what the step needs is gone, or a check is plainly false, Claude says so and the step fails with that reason. A slow page that passes on its retry never calls Claude. Each fix uses AI credits like writing does.
+- Judge: every failed run is sorted into **App bug**, **Flaky** or **Setup**, with a one-line reason, shown on the run page, the runs list and the test's run log. Clear setup problems (a site that doesn't resolve or refuses the connection, a bad certificate, a missing secret, a used-up plan, a private address) are sorted by fixed rules with no AI call. The rest go to Claude with the failed step, its code and error, a screenshot, console errors, failed requests and whether it was retried. A judgment uses one AI credit; with none left, the failure isn't judged.
 - `tryclaritia.com/llms.txt` and `tryclaritia.com/pricing.md` describe Claritia and its pricing for AI agents.
 - Time to a first passing test is tracked: `workspaces.first_pass_at` is set by the first passing run. See "Launch numbers" below.
 
@@ -40,6 +41,7 @@ CHROMIUM_PATH=/path/to/chrome node scripts/runner-check.ts   # the runner agains
 CHROMIUM_PATH=/path/to/chrome node scripts/worker-check.ts   # the run handler with a stand-in database
 CHROMIUM_PATH=/path/to/chrome node scripts/writer-check.ts   # the AI writer with a scripted stand-in for Claude
 CHROMIUM_PATH=/path/to/chrome node scripts/inbox-check.ts    # sign-up with an emailed code and link, and the network log
+CHROMIUM_PATH=/path/to/chrome node scripts/judge-check.ts    # the Judge's evidence on a real app bug and a flaky page, and its rules
 CHROMIUM_PATH=/path/to/chrome node scripts/heal-check.ts     # the Healer on a page that changed, a page that lost a button, and a slow page
 ```
 
@@ -64,6 +66,18 @@ A fix takes 1 to 2 Claude calls, about $0.10. Assuming each team gets 10 fixes a
 | Claude tokens (Healer) | about $50 | about $500 |
 | New servers | $0 | $0 |
 | **Added each month** | **about $50** | **about $500** |
+
+### What the Judge adds to the bill (all prices "check")
+
+One Claude call per failed run that the rules don't settle: about 5,000 tokens in (with a screenshot) and 1,000 out, about $0.04. Assuming each team has 40 such failures a month:
+
+| | Beta (50 teams) | Growth (500 teams) |
+|---|---|---|
+| Claude tokens (Judge) | about $80 | about $800 |
+| New servers | $0 | $0 |
+| **Added each month** | **about $80** | **about $800** |
+
+With the Healer, Phase 2 so far adds about $130 at Beta and $1,300 at Growth.
 
 ### What Weeks 5 and 6 add to the bill (all prices "check")
 

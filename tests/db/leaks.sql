@@ -178,6 +178,7 @@ select pg_temp.check((select lock from runs) = '', 'A run of a test with no code
 select pg_temp.fails($$select save_written_lock(id, 'test(''x'', async ({ page }) => {});') from runs$$, 'Ben saves code as if the runner wrote it');
 select pg_temp.check((select created_by from runs) = 'b0000000-0000-0000-0000-000000000000' and (select status from runs) = 'queued', 'A new run has the wrong owner or status');
 select pg_temp.fails($$update runs set status = 'passed'$$, 'Ben marks his own run as passed');
+select pg_temp.fails($$update runs set verdict = 'flaky'$$, 'Ben calls his own failure flaky');
 select pg_temp.fails($$update run_steps set status = 'passed'$$, 'Ben marks a step as passed');
 select pg_temp.fails($$insert into runs (workspace_id, project_id, test_name, test_version, environment_name, base_url, lock, status) values ('11111111-0000-0000-0000-000000000000', 'a1000000-0000-0000-0000-000000000000', 'fake', 1, 'x', 'https://x.com', 'x', 'passed')$$, 'Ben writes a fake passing run');
 select pg_temp.fails($$delete from runs$$, 'Ben deletes run history');

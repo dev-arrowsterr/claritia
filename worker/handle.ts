@@ -10,6 +10,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { parseLock } from "../src/lib/lock.ts";
 import { unseal } from "../src/lib/seal.ts";
 import { executeRun, maskSecrets, type Inbox, type InboxMail, type RunStep, type StepUpdate } from "./runner.ts";
+import { judgeByRules, type Judge, type Verdict } from "./judge.ts";
 import type { Writer } from "./writer.ts";
 
 export type Run = { id: string; workspace_id: string; project_id?: string; environment_id: string | null; base_url: string; lock: string; attempts: number; test_name?: string };
@@ -20,6 +21,7 @@ type Options = {
   log?: (...a: unknown[]) => void;
   heartbeatMs?: number;
   writer?: Writer;
+  judge?: Judge;
   frameMs?: number;
   /** The domain test inboxes receive mail on. */
   inboxDomain?: string;
@@ -65,15 +67,31 @@ async function creditsLeft(sb: SupabaseClient, workspaceId: string): Promise<num
   return Math.max(0, u.credits_limit - u.credits_used);
 }
 
+/** The run's AI credits: the writer and the Judge both draw from it. Null means no limit. */
+type Budget = { left: number | null };
+const spend = (b: Budget) => {
+  if (b.left === null) return true;
+  if (b.left <= 0) return false;
+  b.left--;
+  return true;
+};
+
 /** Stops the writer once the plan's AI credits are used up. */
-function limitWriter(writer: Writer, left: number | null): Writer {
-  if (left === null) return writer;
-  let remaining = left;
+function limitWriter(writer: Writer, budget: Budget): Writer {
   return async (r) => {
-    if (remaining <= 0) throw new Error("This month's AI credits are used up. Upgrade in Settings to write more steps.");
-    remaining--;
+    if (!spend(budget)) throw new Error("This month's AI credits are used up. Upgrade in Settings to write more steps.");
     return writer(r);
   };
+}
+
+/** Read a run file the runner wrote, or nothing. */
+async function readJson<T>(file: string | null): Promise<T[]> {
+  if (!file) return [];
+  try {
+    return JSON.parse(await readFile(file, "utf8")) as T[];
+  } catch {
+    return [];
+  }
 }
 
 /** How a step's comment reads in the lock: the step's words, "check: ..." or "use: Block name". */
@@ -132,7 +150,8 @@ export async function handleRun(sb: SupabaseClient, run: Run, opts: Options) {
     }));
     const parsed = parseLock(run.lock);
     const inbox = await inboxFor(sb, run, opts.inboxDomain ?? "inbox.tryclaritia.com");
-    const writer = opts.writer ? limitWriter(opts.writer, await creditsLeft(sb, run.workspace_id)) : undefined;
+    const budget: Budget = { left: opts.writer || opts.judge ? await creditsLeft(sb, run.workspace_id) : null };
+    const writer = opts.writer ? limitWriter(opts.writer, budget) : undefined;
     if (!opts.writer && (!parsed.ok || !parsed.actionCount) && !run.lock.trim()) throw new Error("it can't write code yet. Add ANTHROPIC_API_KEY to the runner service.");
     // The writer may use any of the environment's secrets, so it gets all their names. Code that's already written only gets what it uses.
     let names = parsed.ok ? parsed.secrets : [];
@@ -142,7 +161,9 @@ export async function handleRun(sb: SupabaseClient, run: Run, opts: Options) {
     }
     secrets = await secretsFor(sb, run.environment_id, names);
 
+    const lastUpdate = new Map<number, StepUpdate>();
     const stepHook = async (u: StepUpdate) => {
+      lastUpdate.set(u.position, { ...lastUpdate.get(u.position), ...u });
       const fields: Record<string, unknown> = { status: u.status };
       if (u.retried !== undefined) fields.retried = u.retried;
       if (u.startedMs !== undefined) fields.started_ms = u.startedMs;
@@ -207,6 +228,47 @@ export async function handleRun(sb: SupabaseClient, run: Run, opts: Options) {
       const p = await upload(t, result.traces.length > 1 ? `trace-${i + 1}.zip` : "trace.zip", "application/zip").catch(() => null);
       if (p) trace_paths.push(p);
     }
+    // The Judge: sort a failure into app bug, flaky test or setup problem. Clear setup problems need no AI call.
+    let verdict: Verdict | null = null;
+    let verdict_reason: string | null = null;
+    const judgeAi = { calls: 0, input: 0, output: 0 };
+    if (result.status === "error" && result.error) {
+      verdict = "setup";
+      verdict_reason = judgeByRules(result.error)?.reason ?? result.error.split(/(?<=\.)\s/)[0]!.slice(0, 300);
+    } else if (result.status === "failed") {
+      const failedStep = [...lastUpdate.values()].find((u) => u.status === "failed");
+      const info = failedStep ? steps.find((x) => x.position === failedStep.position) : undefined;
+      const error = failedStep?.error ?? result.error ?? "";
+      const rule = judgeByRules(error);
+      if (rule) {
+        verdict = rule.verdict;
+        verdict_reason = rule.reason;
+      } else if (opts.judge && failedStep && info && spend(budget)) {
+        const consoleLines = await readJson<{ type: string; text: string }>(result.consoleFile);
+        const network = await readJson<{ method: string; url: string; status: number | null; failure?: string }>(result.networkFile);
+        const shot = failedStep.screenshot ? await readFile(failedStep.screenshot).catch(() => null) : null;
+        const statusOf = (p: number) => lastUpdate.get(p)?.status ?? "skipped";
+        try {
+          const j = await opts.judge({
+            testName: run.test_name ?? "Test",
+            baseUrl: run.base_url,
+            steps: steps.map((x) => ({ position: x.position, kind: x.kind, intent: x.intent, status: statusOf(x.position) })),
+            failed: { position: info.position, kind: info.kind, intent: info.intent, code: failedStep.code ?? "", error: maskSecrets(error, secrets), retried: !!failedStep.retried, healTried: /Claritia tried a fix/.test(error) },
+            screenshot: shot ? shot.toString("base64") : null,
+            consoleErrors: consoleLines.filter((l) => l.type === "error" || l.type === "pageerror").slice(-15).map((l) => l.text.slice(0, 300)),
+            failedRequests: network.filter((n) => n.status === null || n.status >= 400).slice(-20).map((n) => `${n.method} ${n.status ?? n.failure ?? "failed"} ${n.url}`.slice(0, 300)),
+          });
+          verdict = j.verdict;
+          verdict_reason = maskSecrets(j.reason, secrets);
+          judgeAi.calls = 1;
+          judgeAi.input = j.usage.input;
+          judgeAi.output = j.usage.output;
+        } catch (e) {
+          log(`Run ${run.id}: the Judge couldn't decide: ${e instanceof Error ? e.message : e}`);
+        }
+      }
+    }
+
     const console_path = result.consoleFile ? await upload(result.consoleFile, "console.json", "application/json").catch(() => null) : null;
     const network_path = result.networkFile ? await upload(result.networkFile, "network.json", "application/json").catch(() => null) : null;
     await finish({
@@ -218,9 +280,11 @@ export async function handleRun(sb: SupabaseClient, run: Run, opts: Options) {
       console_path,
       network_path,
       live_path: null,
-      ai_calls: result.ai.calls,
-      ai_input_tokens: result.ai.input,
-      ai_output_tokens: result.ai.output,
+      ai_calls: result.ai.calls + judgeAi.calls,
+      ai_input_tokens: result.ai.input + judgeAi.input,
+      ai_output_tokens: result.ai.output + judgeAi.output,
+      verdict,
+      verdict_reason,
     });
     // The workspace's first passing run, to track how long sign-up to a passing test takes.
     if (result.status === "passed") await sb.from("workspaces").update({ first_pass_at: new Date().toISOString() }).eq("id", run.workspace_id).is("first_pass_at", null);

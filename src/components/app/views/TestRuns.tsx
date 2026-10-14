@@ -2,12 +2,12 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Play } from "../../Icons";
-import { Badge, Button, duration, Empty, ErrorNote, Loading, must, Panel, StatusTag, Td, Th, timeAgo, useLoad, type RunStatus, type StepStatus, type ViewProps } from "../ui";
+import { Badge, Button, duration, Empty, ErrorNote, Loading, must, Panel, StatusTag, Td, Th, timeAgo, useLoad, type RunStatus, type StepStatus, type Verdict, type ViewProps, VerdictTag } from "../ui";
 
-type RunRow = { id: string; status: RunStatus; environment_name: string; test_version: number; duration_ms: number | null; ai_calls: number; created_at: string; video_path: string | null };
+type RunRow = { id: string; status: RunStatus; environment_name: string; test_version: number; duration_ms: number | null; ai_calls: number; created_at: string; video_path: string | null; verdict: Verdict | null; verdict_reason: string | null };
 type StepRow = { id: string; position: number; label: string; status: StepStatus; started_ms: number | null; written: boolean };
 
-const COLUMNS = "id, status, environment_name, test_version, duration_ms, ai_calls, created_at, video_path";
+const COLUMNS = "id, status, environment_name, test_version, duration_ms, ai_calls, created_at, video_path, verdict, verdict_reason";
 
 /** Preview: the latest run of this test, its video, and its steps that jump the video. */
 export function TestPreview({ sb, testId, navigate }: Pick<ViewProps, "sb" | "navigate"> & { testId: string }) {
@@ -36,6 +36,7 @@ export function TestPreview({ sb, testId, navigate }: Pick<ViewProps, "sb" | "na
     <div className="flex flex-col gap-4">
       <div className="flex flex-wrap items-center gap-3 text-[13px]">
         <StatusTag status={run.status} />
+        <VerdictTag verdict={run.verdict} />
         <span className="text-muted">
           {run.environment_name} · v{run.test_version} · {duration(run.duration_ms)} · {timeAgo(run.created_at)}
         </span>
@@ -86,7 +87,7 @@ export function TestRunLog({ sb, testId, navigate }: Pick<ViewProps, "sb" | "nav
       <table className="w-full border-collapse">
         <thead>
           <tr>
-            <Th className="w-28">Status</Th>
+            <Th className="w-44">Status</Th>
             <Th>Environment</Th>
             <Th className="hidden w-20 sm:table-cell">Version</Th>
             <Th className="hidden w-24 sm:table-cell">Length</Th>
@@ -98,7 +99,10 @@ export function TestRunLog({ sb, testId, navigate }: Pick<ViewProps, "sb" | "nav
           {runs.data.map((r) => (
             <tr key={r.id} onClick={() => navigate("runs", r.id)} className="cursor-pointer hover:bg-hover">
               <Td>
-                <StatusTag status={r.status} />
+                <span className="flex gap-1.5">
+                  <StatusTag status={r.status} />
+                  <VerdictTag verdict={r.verdict} />
+                </span>
               </Td>
               <Td className="text-muted">{r.environment_name}</Td>
               <Td className="hidden font-mono text-[12px] text-muted sm:table-cell">v{r.test_version}</Td>

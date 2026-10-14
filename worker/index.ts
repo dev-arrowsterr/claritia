@@ -10,6 +10,7 @@ import { createServer } from "node:http";
 import { hostname } from "node:os";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { handleRun, type Run } from "./handle.ts";
+import { claudeJudge, type Judge } from "./judge.ts";
 import { claudeWriter, type Writer } from "./writer.ts";
 
 const env = (k: string) => process.env[k]?.trim() ?? "";
@@ -39,8 +40,11 @@ if (missing.length) {
   const writer = env("ANTHROPIC_API_KEY")
     ? claudeWriter({ apiKey: env("ANTHROPIC_API_KEY"), model: env("CLAUDE_MODEL") || undefined, effort: effort === "low" || effort === "high" ? effort : "medium" })
     : undefined;
+  const judge = env("ANTHROPIC_API_KEY")
+    ? claudeJudge({ apiKey: env("ANTHROPIC_API_KEY"), model: env("CLAUDE_MODEL") || undefined, effort: effort === "low" || effort === "high" ? effort : "medium" })
+    : undefined;
   log(`Runner ${WORKER_ID} started with ${SLOTS} slots${writer ? "" : ". No ANTHROPIC_API_KEY, so steps with no code can't be written"}.`);
-  for (let i = 0; i < SLOTS; i++) void slot(sb, i, writer);
+  for (let i = 0; i < SLOTS; i++) void slot(sb, i, writer, judge);
 
   // On shutdown, hand running runs back to the queue so another runner picks them up right away.
   const shutdown = async () => {
@@ -54,7 +58,7 @@ if (missing.length) {
   process.on("SIGINT", shutdown);
 }
 
-async function slot(sb: SupabaseClient, n: number, writer: Writer | undefined) {
+async function slot(sb: SupabaseClient, n: number, writer: Writer | undefined, judge: Judge | undefined) {
   while (!stopping) {
     try {
       const { data, error } = await sb.rpc("claim_run", { p_worker: WORKER_ID });
@@ -66,7 +70,7 @@ async function slot(sb: SupabaseClient, n: number, writer: Writer | undefined) {
       }
       busy.add(run.id);
       try {
-        await handleRun(sb, run, { workerId: WORKER_ID, chromiumPath: env("CHROMIUM_PATH") || undefined, log, writer, inboxDomain: env("INBOX_DOMAIN") || undefined });
+        await handleRun(sb, run, { workerId: WORKER_ID, chromiumPath: env("CHROMIUM_PATH") || undefined, log, writer, judge, inboxDomain: env("INBOX_DOMAIN") || undefined });
       } finally {
         busy.delete(run.id);
       }
