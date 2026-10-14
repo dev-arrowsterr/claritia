@@ -10,6 +10,7 @@ import { join } from "node:path";
 import pw from "playwright-core";
 import type { Browser, BrowserContext, Page } from "playwright-core";
 import { isPrivateAddress } from "./runner.ts";
+import { isLocalHost, tunnelFetch, type TunnelClient } from "./tunnel.ts";
 
 export type PageElements = {
   headings: string[];
@@ -44,6 +45,8 @@ export type ExploreInput = {
   maxDepth?: number;
   /** Checked between pages; true stops the crawl (someone pressed Stop). */
   shouldStop?: () => Promise<boolean>;
+  /** A tunnel to the developer's machine, for exploring localhost. */
+  tunnel?: TunnelClient;
 };
 export type ExploreResult = { status: "done" | "error" | "canceled"; error: string | null; pages: number; durationMs: number };
 
@@ -249,10 +252,17 @@ export async function explore(input: ExploreInput, onPage: (p: FoundPage) => Pro
     context.setDefaultTimeout(10_000);
     // Pages that open new windows: close them, the crawl follows links in its own tabs.
     context.on("page", (p) => void p.opener().then((o) => (o ? p.close() : undefined)).catch(() => undefined));
-    if (!input.allowPrivate) {
+    if (!input.allowPrivate || input.tunnel) {
+      const tunnel = input.tunnel;
       await context.route("**/*", async (route) => {
         const url = new URL(route.request().url());
-        if ((url.protocol === "http:" || url.protocol === "https:") && (await hostIsPrivate(url.hostname))) return route.abort("blockedbyclient");
+        const web = url.protocol === "http:" || url.protocol === "https:";
+        if (web && tunnel && isLocalHost(url.hostname.replace(/^\[|\]$/g, ""))) {
+          const req = route.request();
+          const res = await tunnelFetch(tunnel, { url: req.url(), method: req.method(), headers: await req.allHeaders(), body: req.postDataBuffer() }).catch(() => null);
+          return res ? route.fulfill({ status: res.status, headers: res.headers, body: res.body }) : route.abort("connectionfailed");
+        }
+        if (!input.allowPrivate && web && (await hostIsPrivate(url.hostname))) return route.abort("blockedbyclient");
         return route.continue();
       });
     }

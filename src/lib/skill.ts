@@ -22,8 +22,8 @@ Make the key in Claritia → Settings → API keys.
 ## Check a change
 
 1. \`list_projects\` to find the project and where it runs (environments).
-2. Get the change live somewhere Claritia can reach: a preview deploy or staging. Claritia can't reach localhost
-   or private addresses.
+2. Get the change live somewhere Claritia can reach: a preview deploy, staging, or localhost while
+   \`npx claritia tunnel <port>\` runs on this machine (in the background) with \`base_url\` http://localhost:<port>.
 3. \`verify_change\` with \`base_url\` (the preview) or \`environment\`. Pick \`use_case\` or \`tests\` that cover the
    change; with neither, every test runs.
 4. Read each failure's kind:

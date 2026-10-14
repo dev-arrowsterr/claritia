@@ -29,10 +29,21 @@ A test the Judge calls flaky is run once more. If the re-run passes, the test pa
 | `claritia run --no-wait` | Starts the runs and exits |
 | `claritia run --json` | Prints the results as JSON |
 | `claritia run --timeout 45` | Stops waiting after 45 minutes (default 30) |
+| `claritia run --base-url https://pr-7.example.com` | Runs on another address, such as a preview deploy or localhost with a tunnel |
+| `claritia tunnel 3000` | Lets Claritia reach localhost:3000 on this machine |
 | `claritia projects` | Lists projects and their environments |
 | `claritia tests --project Shop` | Lists a project's tests |
 
 `--project` is needed when the workspace has more than one project. `--env` defaults to the project's first environment. Up to 50 tests run at once.
+
+## Test localhost
+
+```bash
+npx claritia tunnel 3000      # in one terminal, leave it running
+npx claritia run --base-url http://localhost:3000
+```
+
+The tunnel shares only the ports you name, only on this machine. Needs Node.js 22 or newer.
 
 ## Exit codes
 

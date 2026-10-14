@@ -1,4 +1,4 @@
-# Deploy to Fly.io on every push to main: the checks first, then the app and the runner.
+# Deploy to Fly.io on every push to main: the checks first, then the app, the runner and the tunnel relay.
 # Needs one repository secret, FLY_API_TOKEN (from `fly tokens create org`). Without it, the deploy steps are skipped.
 name: Deploy to Fly.io
 
@@ -37,6 +37,8 @@ jobs:
             config: fly.toml
           - app: claritia-runner
             config: fly.runner.toml
+          - app: claritia-relay
+            config: fly.relay.toml
     env:
       FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
     steps:

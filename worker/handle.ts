@@ -11,6 +11,7 @@ import { parseLock } from "../src/lib/lock.ts";
 import { unseal } from "../src/lib/seal.ts";
 import { executeRun, maskSecrets, type Inbox, type InboxMail, type RunStep, type StepUpdate } from "./runner.ts";
 import { judgeByRules, type Judge, type Verdict } from "./judge.ts";
+import { tunnelFor } from "./tunnel.ts";
 import type { Writer } from "./writer.ts";
 
 export type Run = { id: string; workspace_id: string; project_id?: string; environment_id: string | null; base_url: string; lock: string; attempts: number; test_name?: string };
@@ -25,6 +26,8 @@ type Options = {
   frameMs?: number;
   /** The domain test inboxes receive mail on. */
   inboxDomain?: string;
+  /** The tunnel relay, for runs on localhost. Defaults to RELAY_URL and RELAY_SECRET. */
+  relay?: { url: string; secret: string };
   inboxTimeoutMs?: number;
 };
 
@@ -186,8 +189,12 @@ export async function handleRun(sb: SupabaseClient, run: Run, opts: Options) {
       await sb.from("runs").update({ live_path: path }).eq("id", run.id).eq("locked_by", WORKER_ID);
     };
 
+    // Local testing (allowPrivate) reaches localhost directly; otherwise localhost goes through the workspace's tunnel.
+    const tunnel = opts.allowPrivate ? {} : await tunnelFor(sb, run.workspace_id, run.base_url, opts.relay);
     const result = await executeRun(
       {
+        tunnel: tunnel.client,
+        tunnelError: tunnel.error,
         baseUrl: run.base_url,
         lock: run.lock,
         positions: steps.map((s) => s.position),
@@ -204,7 +211,7 @@ export async function handleRun(sb: SupabaseClient, run: Run, opts: Options) {
         runTimeoutMs: opts.writer ? 15 * 60_000 : undefined,
       },
       { step: stepHook, frame: frameHook },
-    );
+    ).finally(() => tunnel.client?.close());
     if (frames.length) await Promise.resolve(sb.storage.from("runs").remove(frames)).catch(() => undefined);
 
     // Fixes for broken steps wait for a person to approve them.

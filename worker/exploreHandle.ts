@@ -11,6 +11,7 @@ import { creditsLeft, secretsFor } from "./handle.ts";
 import { explore, type FoundPage } from "./explorer.ts";
 import type { Namer } from "./namer.ts";
 import { executeRun } from "./runner.ts";
+import { tunnelFor } from "./tunnel.ts";
 
 export type Exploration = { id: string; workspace_id: string; project_id: string; environment_id: string | null; base_url: string; sign_in_test_id: string | null; max_pages: number; attempts: number };
 type Options = {
@@ -22,6 +23,7 @@ type Options = {
   namer?: Namer;
   concurrency?: number;
   pageTimeoutMs?: number;
+  relay?: { url: string; secret: string };
 };
 
 const NAME_BATCH = 10;
@@ -44,7 +46,12 @@ export async function handleExploration(sb: SupabaseClient, x: Exploration, opts
       .eq("locked_by", opts.workerId)
       .eq("status", "running");
 
+  const tunnel = opts.allowPrivate ? {} : await tunnelFor(sb, x.workspace_id, x.base_url, opts.relay);
   try {
+    if (tunnel.error) {
+      await finish({ status: "error", error: tunnel.error });
+      return;
+    }
     // 1. Sign in with the chosen test's saved code, and keep its cookies for the crawl.
     let statePath: string | null = null;
     if (x.sign_in_test_id) {
@@ -58,7 +65,7 @@ export async function handleExploration(sb: SupabaseClient, x: Exploration, opts
       const secrets = await secretsFor(sb, x.environment_id, parsed.ok ? parsed.secrets : []);
       const positions = Array.from({ length: Array.isArray(t.steps) ? t.steps.length : 0 }, (_, i) => i + 1);
       const signIn = await executeRun(
-        { baseUrl: x.base_url, lock: t.lock, positions, secrets, dir: join(dir, "sign-in"), chromiumPath: opts.chromiumPath, allowPrivate: opts.allowPrivate, heal: false, saveStateTo: join(dir, "state.json") },
+        { baseUrl: x.base_url, lock: t.lock, positions, secrets, dir: join(dir, "sign-in"), chromiumPath: opts.chromiumPath, allowPrivate: opts.allowPrivate, heal: false, saveStateTo: join(dir, "state.json"), tunnel: tunnel.client },
         { step: async () => undefined },
       );
       if (signIn.status !== "passed" || !signIn.state) {
@@ -81,6 +88,7 @@ export async function handleExploration(sb: SupabaseClient, x: Exploration, opts
         chromiumPath: opts.chromiumPath,
         allowPrivate: opts.allowPrivate,
         statePath,
+        tunnel: tunnel.client,
         pageTimeoutMs: opts.pageTimeoutMs,
         shouldStop: async () => {
           if (Date.now() - lastStopCheck < 3000) return false;
@@ -143,6 +151,7 @@ export async function handleExploration(sb: SupabaseClient, x: Exploration, opts
     log(`Exploration ${x.id}: error: ${message}`);
     await finish({ status: "error", error: `The runner hit a problem: ${message}` });
   } finally {
+    tunnel.client?.close();
     clearInterval(heartbeat);
     await rm(dir, { recursive: true, force: true }).catch(() => undefined);
   }

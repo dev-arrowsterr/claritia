@@ -1,0 +1,11 @@
+{
+  "name": "claritia-relay",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "ws": "8.22.0"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

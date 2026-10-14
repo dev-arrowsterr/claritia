@@ -1,6 +1,6 @@
 {
   "name": "claritia",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Run your Claritia end-to-end tests from the terminal or CI.",
   "type": "module",
   "bin": {
@@ -9,6 +9,7 @@
   "files": [
     "claritia.mjs",
     "lib.mjs",
+    "tunnel.mjs",
     "README.md"
   ],
   "engines": {

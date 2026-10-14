@@ -2,8 +2,9 @@
 // No dependencies. Talks to the REST API at /api/v1 with a workspace API key.
 
 import { appendFile } from "node:fs/promises";
+import { runTunnel } from "./tunnel.mjs";
 
-export const VERSION = "0.1.0";
+export const VERSION = "0.2.0";
 
 export const EXIT = { passed: 0, failed: 1, setup: 2, usage: 3, timeout: 4 };
 
@@ -11,6 +12,7 @@ const HELP = `claritia ${VERSION}
 
 Usage
   claritia run [options]       Run tests in the cloud and wait for the results
+  claritia tunnel <port>...    Let cloud runs reach localhost:<port> on this machine
   claritia projects            List projects and their environments
   claritia tests [--project]   List a project's tests
 
@@ -19,6 +21,7 @@ Run options
   --env <name or id>           The environment to run on (default: the project's first)
   --test <name or id>          A test to run. Repeat for more. Default: every test
   --use-case <name>            Run every test in one use case
+  --base-url <url>             Run on this address instead (a preview, or http://localhost:3000 with a tunnel)
   --no-wait                    Start the runs and exit
   --timeout <minutes>          Stop waiting after this long (default 30)
   --json                       Print the results as JSON
@@ -26,6 +29,7 @@ Run options
 Environment
   CLARITIA_API_KEY             Your API key, from Settings → API keys
   CLARITIA_URL                 The app's address (default https://app.tryclaritia.com)
+  CLARITIA_RELAY               The tunnel relay (default wss://claritia-relay.fly.dev)
 
 Exit codes
   0 every test passed   1 a test failed   2 a test couldn't run (setup)
@@ -33,8 +37,8 @@ Exit codes
 
 /** Parse the command line. Throws on anything it doesn't know. */
 export function parseArgs(argv) {
-  const opts = { command: "", tests: [], wait: true, timeoutMin: 30, json: false, help: false, version: false };
-  const takes = new Set(["--project", "--env", "--test", "--use-case", "--timeout"]);
+  const opts = { command: "", args: [], tests: [], wait: true, timeoutMin: 30, json: false, help: false, version: false };
+  const takes = new Set(["--project", "--env", "--test", "--use-case", "--timeout", "--base-url"]);
   for (let i = 0; i < argv.length; i++) {
     let arg = argv[i];
     let value;
@@ -60,6 +64,9 @@ export function parseArgs(argv) {
       case "--use-case":
         opts.useCase = value;
         break;
+      case "--base-url":
+        opts.baseUrl = value;
+        break;
       case "--timeout": {
         const n = Number(value);
         if (!Number.isFinite(n) || n <= 0) throw new Error("--timeout is a number of minutes.");
@@ -81,8 +88,10 @@ export function parseArgs(argv) {
         opts.version = true;
         break;
       default:
-        if (arg.startsWith("-") || opts.command) throw new Error(`Unknown option ${arg}.`);
-        opts.command = arg;
+        if (arg.startsWith("-")) throw new Error(`Unknown option ${arg}.`);
+        if (!opts.command) opts.command = arg;
+        else if (opts.command === "tunnel") opts.args.push(arg);
+        else throw new Error(`Unknown option ${arg}.`);
     }
   }
   if (opts.tests.length && opts.useCase) throw new Error("Pick --test or --use-case, not both.");
@@ -177,6 +186,24 @@ export async function main(argv, env = process.env, io = {}) {
   try {
     const api = client(env, fetchFn);
 
+    if (opts.command === "tunnel") {
+      const ports = opts.args.map(Number);
+      if (!ports.length || ports.some((p) => !Number.isInteger(p) || p < 1 || p > 65535)) {
+        err("Name the ports to share, like: claritia tunnel 3000");
+        return EXIT.usage;
+      }
+      const key = env.CLARITIA_API_KEY?.trim();
+      if (!key) {
+        err("Set CLARITIA_API_KEY. Make a key in Claritia → Settings → API keys.");
+        return EXIT.usage;
+      }
+      const ac = new AbortController();
+      const stop = () => ac.abort();
+      if (!io.signal) process.once("SIGINT", stop);
+      io.signal?.addEventListener("abort", stop, { once: true });
+      return runTunnel({ key, relay: env.CLARITIA_RELAY?.trim() || "wss://claritia-relay.fly.dev", ports, out, err, signal: ac.signal, onOpen: io.onTunnel });
+    }
+
     if (opts.command === "projects") {
       const { projects } = await api("GET", "/projects");
       if (opts.json) return out(JSON.stringify(projects, null, 2)), EXIT.passed;
@@ -204,6 +231,7 @@ export async function main(argv, env = process.env, io = {}) {
     const body = { project: opts.project, environment: opts.env };
     if (opts.tests.length) body.tests = opts.tests;
     if (opts.useCase) body.use_case = opts.useCase;
+    if (opts.baseUrl) body.base_url = opts.baseUrl;
     const start = await api("POST", "/runs", body);
     const ids = start.runs.map((r) => r.id);
     if (!opts.json) out(`Running ${ids.length} ${ids.length === 1 ? "test" : "tests"} of ${start.project.name} on ${start.environment.name}`);

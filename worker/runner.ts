@@ -10,6 +10,7 @@ import { unzipSync, zipSync } from "fflate";
 import pw from "playwright-core";
 import type { Browser, BrowserContext, Locator, Page } from "playwright-core";
 import { buildLock, lockSections, parseLock, type Action, type Arg, type Call } from "../src/lib/lock.ts";
+import { isLocalHost, tunnelFetch, type TunnelClient } from "./tunnel.ts";
 import type { Writer } from "./writer.ts";
 
 export type StepStatus = "running" | "passed" | "failed" | "skipped";
@@ -46,6 +47,10 @@ export type RunInput = {
   inboxTimeoutMs?: number;
   /** When the run passes, save its browser's cookies and storage here, so the Explorer can start signed in. */
   saveStateTo?: string;
+  /** A tunnel to the developer's machine: requests to localhost go through it instead of the runner's network. */
+  tunnel?: TunnelClient;
+  /** Why the run's localhost address can't be reached (no tunnel open). The run stops with it. */
+  tunnelError?: string;
 };
 export type RunResult = {
   status: "passed" | "failed" | "error";
@@ -190,6 +195,7 @@ export async function executeRun(input: RunInput, hooks: Hooks): Promise<RunResu
   const writer = input.writer;
   const parsed = parseLock(input.lock.trim() ? input.lock : "test('x', async ({ page }) => {});");
   if (!parsed.ok) return result("error", `The test's code has a problem on line ${parsed.errors[0]!.line}: ${parsed.errors[0]!.message}`);
+  if (input.tunnelError) return result("error", input.tunnelError);
   const missing = parsed.secrets.filter((s) => !(s in input.secrets));
   if (missing.length) return result("error", `Add ${missing.join(", ")} to this environment in Environments.`);
   if (!parsed.actionCount && !writer) return result("error", "This test has no Playwright code yet.");
@@ -550,10 +556,22 @@ export async function executeRun(input: RunInput, hooks: Hooks): Promise<RunResu
     context = await browser.newContext({ viewport: VIEWPORT, recordVideo: { dir: videoDir, size: VIEWPORT }, acceptDownloads: false, serviceWorkers: "block" });
     context.setDefaultTimeout(actionTimeout);
     context.setDefaultNavigationTimeout(30_000);
-    if (!input.allowPrivate) {
+    if (!input.allowPrivate || input.tunnel) {
       await context.route("**/*", async (route) => {
         const url = new URL(route.request().url());
-        if ((url.protocol === "http:" || url.protocol === "https:") && (await hostIsPrivate(url.hostname))) {
+        const web = url.protocol === "http:" || url.protocol === "https:";
+        // localhost through the developer's tunnel: answered from their machine, never the runner's.
+        if (web && input.tunnel && isLocalHost(url.hostname.replace(/^\[|\]$/g, ""))) {
+          const req = route.request();
+          try {
+            const res = await tunnelFetch(input.tunnel, { url: req.url(), method: req.method(), headers: await req.allHeaders(), body: req.postDataBuffer() });
+            return route.fulfill({ status: res.status, headers: res.headers, body: res.body });
+          } catch (e) {
+            consoleLines.push({ ms: Date.now() - pageStart, type: "error", text: mask(`Tunnel: ${shortError(e)}`).slice(0, 2000) });
+            return route.abort("connectionfailed");
+          }
+        }
+        if (!input.allowPrivate && web && (await hostIsPrivate(url.hostname))) {
           blocked.add(url.hostname);
           return route.abort("blockedbyclient");
         }

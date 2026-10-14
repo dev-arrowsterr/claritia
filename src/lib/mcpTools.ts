@@ -159,7 +159,7 @@ const tools: Tool<Ctx>[] = [
       "Run tests in the cloud and wait for the results: every test in the project, one use case, or picked tests. " +
       "Use it after changing the app, pointed at where the change is live: an environment, or base_url for a preview deploy. " +
       "Each failure comes back sorted: app bug (fix the code), flaky (re-run, likely not your change) or setup (address or secret). " +
-      "Runs can't reach localhost or private addresses. Waits up to 45 seconds; tests still running come back with run ids for get_results.",
+      "localhost works while `npx claritia tunnel <port>` runs on the developer's machine; other private addresses can't be reached. Waits up to 45 seconds; tests still running come back with run ids for get_results.",
     inputSchema: {
       type: "object",
       properties: {

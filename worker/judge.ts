@@ -29,6 +29,7 @@ export function judgeByRules(error: string): { verdict: Verdict; reason: string 
     [/AI credits are used up|cloud minutes are used up/i, "The plan's limit was reached."],
     [/ANTHROPIC_API_KEY|Claude couldn't write this step|Claude declined/i, "Claritia couldn't reach Claude to write the step."],
     [/test inboxes aren't set up/i, "Test inboxes aren't set up for this runner."],
+    [/tunneled to localhost|The tunnel shares localhost|Tunnels aren't set up|connect to the tunnel/i, "The run is on localhost and no matching tunnel is open. Run npx claritia tunnel <port>."],
     [/The test's code has a problem on line/i, "The test's code can't be read."],
   ];
   for (const [re, reason] of rules) if (re.test(error)) return { verdict: "setup", reason };

@@ -1,0 +1,24 @@
+# The tunnel relay on Fly.io: developers' machines connect with `npx claritia tunnel <port>`, and the runner reaches
+# localhost through it. Always on, so a tunnel never waits for it to wake.
+#   fly deploy --config fly.relay.toml
+app = "claritia-relay"
+primary_region = "nrt" # Tokyo, next to the runner
+
+[build]
+  dockerfile = "relay/Dockerfile"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = "off"
+  auto_start_machines = true
+  min_machines_running = 1
+
+  [http_service.concurrency]
+    type = "connections"
+    soft_limit = 500
+    hard_limit = 1000
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "256mb"

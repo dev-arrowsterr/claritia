@@ -520,6 +520,23 @@ update plans set ai_calls = 10 where id = (select id from p1);
 select pg_temp.check((select credits_used from workspace_usage('11111111-0000-0000-0000-000000000000')) >= 10, 'A plan''s AI credits aren''t counted');
 select minute_tick();
 
+-- Tunnels: members see their own workspace's open tunnels; only the relay writes them and only the runner looks them up.
+insert into tunnels (id, workspace_id, ports) values ('ad000000-0000-0000-0000-000000000001', '11111111-0000-0000-0000-000000000000', '{3000}');
+select pg_temp.as_user('c0000000-0000-0000-0000-000000000000');
+set role authenticated;
+select pg_temp.check((select count(*) from tunnels) = 0, 'Cat sees Acme''s tunnels');
+select pg_temp.fails($$insert into tunnels (workspace_id, ports) values ('22222222-0000-0000-0000-000000000000', '{22}')$$, 'Cat opens a tunnel without the relay');
+select pg_temp.fails($$select * from open_tunnel('11111111-0000-0000-0000-000000000000')$$, 'Cat looks up Acme''s tunnel');
+reset role;
+select pg_temp.as_user('b0000000-0000-0000-0000-000000000000');
+set role authenticated;
+select pg_temp.check((select count(*) from tunnels) = 1, 'Ben can''t see his workspace''s tunnel');
+reset role;
+select set_config('request.jwt.claim.sub', '', false);
+select pg_temp.check((select id from open_tunnel('11111111-0000-0000-0000-000000000000')) = 'ad000000-0000-0000-0000-000000000001', 'The runner can''t find an open tunnel');
+update tunnels set last_seen_at = now() - interval '2 minutes' where id = 'ad000000-0000-0000-0000-000000000001';
+select pg_temp.check(not exists (select 1 from open_tunnel('11111111-0000-0000-0000-000000000000')), 'A tunnel not seen for 2 minutes still counts as open');
+
 -- Cloud minutes: once Acme has used its 2,000, nobody there can start a run.
 insert into runs (workspace_id, project_id, test_name, test_version, environment_name, base_url, lock, status, duration_ms)
 values ('11111111-0000-0000-0000-000000000000', 'a1000000-0000-0000-0000-000000000000', 'long', 1, 'staging', 'https://x.com', '', 'passed', 2000 * 60000);
