@@ -66,4 +66,9 @@ Once the site loads on your domains from Fly, delete `claritia` and `claritia-ru
 
 ## Deploying after this
 
-Fly doesn't deploy on every push by itself. Run the two `fly deploy` commands, or ask Claude to add a GitHub Action that runs them on every push to `main` (it needs a `FLY_API_TOKEN` secret from `fly tokens create deploy`).
+Every push to `main` deploys both apps, through `.github/workflows/fly-deploy.yml`. It runs lint, typecheck and the unit tests first, and only deploys when they pass. To turn it on:
+
+1. Make a token: `fly tokens create org` (one token works for both apps).
+2. In GitHub → the `claritia` repo → Settings → Secrets and variables → Actions → New repository secret, name it `FLY_API_TOKEN` and paste the token.
+
+Until the secret is there, the workflow runs the checks and skips the deploy. To deploy by hand, run `fly deploy` and `fly deploy --config fly.runner.toml`. Turn off Render's auto deploy (or delete the Render services) so pushes don't deploy to both.
