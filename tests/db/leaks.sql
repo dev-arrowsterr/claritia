@@ -577,6 +577,67 @@ reset role;
 select set_config('request.jwt.claim.sub', '', false);
 delete from jobs;
 
+-- Website intelligence (021): only owners add or change sites, members read their own workspace's visits, and the
+-- day tables, salts, opt-outs and hop tokens are closed to people.
+select pg_temp.as_user('a0000000-0000-0000-0000-000000000000');
+set role authenticated;
+create temp table s1 as select add_site('11111111-0000-0000-0000-000000000000', 'acme.com') as id;
+select pg_temp.fails_with($$select add_site('11111111-0000-0000-0000-000000000000', 'acme.com')$$, '%already a site%', 'Ann adds the same site twice');
+select pg_temp.fails($$select add_site('11111111-0000-0000-0000-000000000000', 'not a domain')$$, 'Ann adds a site that isn''t a domain');
+select pg_temp.fails($$select add_site('22222222-0000-0000-0000-000000000000', 'evil.com')$$, 'Ann adds a site to Cat''s workspace');
+reset role;
+select set_config('request.jwt.claim.sub', '', false);
+insert into sites (id, workspace_id, domain) values ('cd000000-0000-0000-0000-000000000001', '22222222-0000-0000-0000-000000000000', 'other.com');
+insert into devices (id, workspace_id, site_id) values
+  ('ae000000-0000-0000-0000-000000000001', '11111111-0000-0000-0000-000000000000', (select id from s1)),
+  ('ce000000-0000-0000-0000-000000000001', '22222222-0000-0000-0000-000000000000', 'cd000000-0000-0000-0000-000000000001');
+insert into sessions (id, workspace_id, site_id, device_id, started_at, ended_at, policy) values
+  ('af000000-0000-0000-0000-000000000001', '11111111-0000-0000-0000-000000000000', (select id from s1), 'ae000000-0000-0000-0000-000000000001', now(), now(), 'notice'),
+  ('cf000000-0000-0000-0000-000000000001', '22222222-0000-0000-0000-000000000000', 'cd000000-0000-0000-0000-000000000001', 'ce000000-0000-0000-0000-000000000001', now(), now(), 'notice');
+insert into events (id, workspace_id, session_id, day, kind, path) values
+  (gen_random_uuid(), '11111111-0000-0000-0000-000000000000', 'af000000-0000-0000-0000-000000000001', current_date, 'view', '/pricing'),
+  (gen_random_uuid(), '22222222-0000-0000-0000-000000000000', 'cf000000-0000-0000-0000-000000000001', current_date, 'view', '/secret-plans');
+insert into opt_outs (site_id, device_hash) values ((select id from s1), '\x01');
+select pg_temp.check((select count(*) from salts) = 1, 'The daily salt wasn''t made');
+select pg_temp.as_user('b0000000-0000-0000-0000-000000000000');
+set role authenticated;
+select pg_temp.check((select count(*) from sites) = 1 and (select domain from sites) = 'acme.com', 'Ben can''t see only his own sites');
+select pg_temp.check((select count(*) from sessions) = 1 and (select count(*) from devices) = 1, 'Ben sees another workspace''s visits');
+select pg_temp.check((select count(*) from events) = 1 and (select path from events) = '/pricing', 'Ben sees another workspace''s events');
+select pg_temp.fails(format('select count(*) from %I', 'events_' || to_char(current_date, 'YYYYMMDD')), 'Ben reads a day table directly');
+select pg_temp.fails($$select add_site('11111111-0000-0000-0000-000000000000', 'ben.com')$$, 'Ben, a member, adds a site');
+select pg_temp.fails($$insert into sites (workspace_id, domain) values ('11111111-0000-0000-0000-000000000000', 'planted.com')$$, 'Ben writes a site without the function');
+select pg_temp.fails($$select update_site((select id from s1), p_paused => true)$$, 'Ben, a member, pauses the site');
+select pg_temp.fails($$select remove_site('cd000000-0000-0000-0000-000000000001')$$, 'Ben removes Cat''s site');
+select pg_temp.fails($$insert into events (id, workspace_id, session_id, day, kind) values (gen_random_uuid(), '11111111-0000-0000-0000-000000000000', 'af000000-0000-0000-0000-000000000001', current_date, 'view')$$, 'Ben writes an event');
+select pg_temp.fails($$update sessions set person_id = gen_random_uuid()$$, 'Ben edits a session');
+select pg_temp.check(pg_temp.visible($$select count(*) from salts$$) = 0, 'Ben reads the cookieless salt');
+select pg_temp.check(pg_temp.visible($$select count(*) from opt_outs$$) = 0, 'Ben reads opt-outs');
+select pg_temp.check(pg_temp.visible($$select count(*) from hop_nonces$$) = 0, 'Ben reads hop tokens');
+select pg_temp.fails($$select make_event_partitions(30)$$, 'Ben makes day tables');
+select pg_temp.check(set_page_groups((select id from s1), '[{"pattern":"/pricing","grp":"pricing"},{"pattern":"/vs/*","grp":"compare","competitor":"Warmly"}]') = 2, 'Ben, a member, can''t set page groups');
+select pg_temp.fails($$select set_page_groups('cd000000-0000-0000-0000-000000000001', '[{"pattern":"/x","grp":"pricing"}]')$$, 'Ben sets Cat''s page groups');
+select pg_temp.fails($$select set_page_groups((select id from s1), '[{"pattern":"no-slash","grp":"pricing"}]')$$, 'Ben saves a page group that isn''t a path');
+reset role;
+select pg_temp.as_user('a0000000-0000-0000-0000-000000000000');
+set role authenticated;
+select update_site((select id from s1), p_extra_domains => '{acme.io}', p_event_retention_days => 60);
+select pg_temp.check((select extra_domains from sites where id = (select id from s1)) = '{acme.io}' and (select event_retention_days from sites where id = (select id from s1)) = 60, 'Ann''s site settings didn''t save');
+select pg_temp.fails($$select update_site((select id from s1), p_event_retention_days => 5)$$, 'Ann sets retention below 30 days');
+select pg_temp.check((select count(*) from audit_log where action like 'site.%') >= 2, 'Site changes aren''t in the audit log');
+reset role;
+select set_config('request.jwt.claim.sub', '', false);
+-- The day tables exist ahead, and old ones go.
+select pg_temp.check(to_regclass('public.events_' || to_char(current_date + 7, 'YYYYMMDD')) is not null, 'Next week''s day table wasn''t made');
+create table public.events_20000101 partition of public.events for values from ('2000-01-01') to ('2000-01-02');
+select pg_temp.check(drop_old_event_partitions(180) >= 1 and to_regclass('public.events_20000101') is null, 'An old day table wasn''t dropped');
+select pg_temp.as_user('a0000000-0000-0000-0000-000000000000');
+set role authenticated;
+select remove_site((select id from s1));
+select pg_temp.check((select count(*) from sessions) = 0 and (select count(*) from events) = 0, 'Removing a site left its visits');
+reset role;
+select set_config('request.jwt.claim.sub', '', false);
+
 -- Cloud minutes: once Acme has used its 2,000, nobody there can start a run.
 insert into runs (workspace_id, project_id, test_name, test_version, environment_name, base_url, lock, status, duration_ms)
 values ('11111111-0000-0000-0000-000000000000', 'a1000000-0000-0000-0000-000000000000', 'long', 1, 'staging', 'https://x.com', '', 'passed', 2000 * 60000);
