@@ -318,14 +318,13 @@ export function createApp(deps: Deps) {
     buffer.push(rows);
     await afterEvents(s, rows, b, verdict, t);
 
-    if (full && device) {
-      await identityBits(b, site, device, s.id);
-      const net = x.ip && x.trusted && decision.lookup ? ipNet(x.ip) : null;
-      if (net && (seenNets.get(net) ?? 0) < t - 3600_000) {
-        seenNets.set(net, t);
-        if (seenNets.size > 200_000) seenNets.clear();
-        await store.enqueue(site.workspace_id, "ip_lookup", net, { net, site_id: site.id, session_id: s.id }).catch((e) => log("enqueue failed", { e: String(e) }));
-      }
+    if (full && device) await identityBits(b, site, device, s.id);
+    // Company match by network: full visits, and GPC visits in notice regions (company stats only, no person).
+    const net = x.ip && x.trusted && decision.lookup ? ipNet(x.ip) : null;
+    if (net && (seenNets.get(net) ?? 0) < t - 3600_000) {
+      seenNets.set(net, t);
+      if (seenNets.size > 200_000) seenNets.clear();
+      await store.enqueue(site.workspace_id, "ip_lookup", net, { net, site_id: site.id, session_id: s.id }).catch((e) => log("enqueue failed", { e: String(e) }));
     }
     if ((touched.get(site.id) ?? 0) < t - 60_000) {
       touched.set(site.id, t);
@@ -333,6 +332,12 @@ export function createApp(deps: Deps) {
     }
 
     const out: Record<string, string> = { p: decision.mode };
+    // Consent withdrawn or GPC turned on: the device cookie goes (docs/identity.md 4.5).
+    if (!full && x.mode !== "d" && getCookie(c, "_clr_id")) {
+      const domain = matchDomain(site, x.domain);
+      const dom = deps.devOrigins?.includes(domain) ? "" : `; Domain=${domain}`;
+      c.header("Set-Cookie", `_clr_id=; Max-Age=0; Path=/; SameSite=Lax; HttpOnly${dom}`, { append: true });
+    }
     if (full && device) {
       const signed = signDevice(siteKey(secret, site.id), device);
       if (x.mode === "d") {
@@ -391,8 +396,8 @@ export function createApp(deps: Deps) {
   const identityBits = async (b: Batch, site: Site, device: string, sessionId: string) => {
     const add = async (source: string, level: "asserted" | "inferred", kind: string, value: unknown) => {
       if (typeof value !== "string" || !value || value.length > 512) return;
-      const id = uuid7();
-      await store.addEvidence({ id, workspace_id: site.workspace_id, site_id: site.id, device_id: device, session_id: sessionId, source, level, identifiers: [{ kind, value }], extra: {} });
+      const id = uuid7(now());
+      await store.addEvidence({ id, workspace_id: site.workspace_id, site_id: site.id, device_id: device, session_id: sessionId, source, level, identifiers: [{ kind, value }], extra: {}, server_at: new Date(now()) });
       await store.enqueue(site.workspace_id, "stitch", device, { device_id: device });
     };
     await add("hutk", "asserted", "hubspot", b.hutk);
@@ -421,8 +426,9 @@ export function createApp(deps: Deps) {
     if (page && pathMatches(page.split("?")[0], x.site.private_paths)) return c.json({ p: "full" });
     const token = typeof body.token === "string" ? body.token.slice(0, 200) : null;
     const prior = await store.priorSession(x.site.id, { deviceId: device });
-    const id = uuid7();
+    const id = uuid7(now());
     await store.addEvidence({
+      server_at: new Date(now()),
       id,
       workspace_id: x.site.workspace_id,
       site_id: x.site.id,

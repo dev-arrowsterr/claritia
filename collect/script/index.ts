@@ -85,6 +85,10 @@ function main() {
       return;
     }
     if (j.p) policy = j.p;
+    if (policy === "cookieless" && did()) {
+      ls.del("_clr_id");
+      setCookie("_clr_id", "", 0);
+    }
     if (j.did && cross && identityOk() && j.did !== did()) {
       ls.set("_clr_id", j.did);
       setCookie("_clr_id", j.did, DEVICE_AGE_S);
@@ -313,6 +317,11 @@ function main() {
   api.consent = (v: unknown) => {
     apiConsent = !!v;
     if (!v) held = [];
+    // Consent given after the server said cookieless: ask again with this page, so the visit can start as full.
+    if (v && policy === "cookieless" && !gpc && cur) {
+      policy = "";
+      view(true);
+    }
     flush();
   };
   api.optOut = () => {
@@ -337,14 +346,18 @@ function main() {
     post("/reset", { ...head(), did: old }, false).then(answer, () => {});
   };
 
-  const queued: ArrayLike<unknown>[] = (w.claritia && w.claritia.q) || [];
+  const queued = Array.from<ArrayLike<unknown>>((w.claritia && w.claritia.q) || []).map((a) => Array.from(a));
   w.claritia = api;
-
+  // Consent calls made before the script loaded count for the first batch.
+  for (const a of queued) if (a[0] === "consent") api(...a);
+  const begin = () => {
+    start();
+    for (const a of queued) if (a[0] !== "consent") api(...a);
+  };
   if (!off) {
-    if ((d as any).prerendering) d.addEventListener("prerenderingchange", start, { once: true });
-    else start();
+    if ((d as any).prerendering) d.addEventListener("prerenderingchange", begin, { once: true });
+    else begin();
   }
-  for (const a of Array.from(queued)) api(...Array.from(a));
 }
 
 main();

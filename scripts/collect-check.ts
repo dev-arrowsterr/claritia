@@ -14,9 +14,9 @@ const url = process.env.PG_URL;
 if (!url) throw new Error("PG_URL is not set");
 const store = new PgStore(url, 4);
 const q = async (sql: string, p: unknown[] = []) => (await store.pool.query(sql, p)).rows;
-const WS = "44444444-4444-4444-8444-444444444444";
+const WS = crypto.randomUUID();
 await q(`insert into workspaces (id, name) values ($1, 'collect check') on conflict do nothing`, [WS]);
-const [site] = await q(`insert into sites (workspace_id, domain, private_paths) values ($1, 'localhost.test', '{/account}') returning id, site_key, proxy_secret`, [WS]);
+const [site] = await q(`insert into sites (workspace_id, domain, private_paths) values ($1::uuid, 'localhost-' || substr($1::uuid::text, 1, 8) || '.test', '{/account}') returning id, site_key, proxy_secret`, [WS]);
 
 const code = await readFile(new URL("../collect/dist/s.js", import.meta.url), "utf8");
 const buffer = new WriteBuffer(store, { flushMs: 200 });

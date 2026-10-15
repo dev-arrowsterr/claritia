@@ -2,9 +2,17 @@
 
 import type pg from "pg";
 import { unseal } from "../src/lib/seal.ts";
+import { dnsCheck } from "../src/lib/identity/mx.ts";
 import type { Settings } from "../src/lib/identity/stitch.ts";
 
 const cache = new Map<string, { s: Settings; at: number }>();
+let checkDomain: Settings["checkDomain"] = dnsCheck;
+
+/** Tests swap the DNS check for a fake. */
+export function setDomainCheck(fn: Settings["checkDomain"]) {
+  checkDomain = fn;
+  cache.clear();
+}
 
 export async function settingsFor(pool: pg.Pool, workspaceId: string, now = Date.now()): Promise<Settings> {
   const hit = cache.get(workspaceId);
@@ -18,7 +26,7 @@ export async function settingsFor(pool: pg.Pool, workspaceId: string, now = Date
       secrets = [parsed.current, parsed.next].filter((x): x is string => typeof x === "string" && x.length >= 32);
     } catch {}
   }
-  const s: Settings = { own_domains: row?.own_domains ?? [], partner_domains: row?.partner_domains ?? [], secrets };
+  const s: Settings = { own_domains: row?.own_domains ?? [], partner_domains: row?.partner_domains ?? [], secrets, checkDomain };
   cache.set(workspaceId, { s, at: now });
   return s;
 }

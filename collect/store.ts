@@ -70,6 +70,7 @@ export type EvidenceRow = {
   level: "verified" | "asserted" | "inferred";
   identifiers: { kind: string; value: string }[];
   extra: Record<string, unknown>;
+  server_at?: Date;
 };
 
 export type Prior = { id: string; startedAt: number; endedAt: number; campaign: string | null; pageviews: number };
@@ -228,9 +229,9 @@ export class PgStore implements Store {
 
   async addEvidence(e: EvidenceRow): Promise<void> {
     await this.pool.query(
-      `insert into identity_evidence (id, workspace_id, site_id, device_id, session_id, source, level, identifiers, extra)
-       values ($1, $2, $3, $4, $5, $6, $7, $8, $9) on conflict do nothing`,
-      [e.id, e.workspace_id, e.site_id, e.device_id, e.session_id, e.source, e.level, JSON.stringify(e.identifiers), JSON.stringify(e.extra)],
+      `insert into identity_evidence (id, workspace_id, site_id, device_id, session_id, source, level, identifiers, extra, server_at)
+       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, coalesce($10, now())) on conflict do nothing`,
+      [e.id, e.workspace_id, e.site_id, e.device_id, e.session_id, e.source, e.level, JSON.stringify(e.identifiers), JSON.stringify(e.extra), e.server_at ?? null],
     );
   }
 

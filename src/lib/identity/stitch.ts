@@ -10,7 +10,13 @@ export type Db = { query: (sql: string, params?: unknown[]) => Promise<{ rows: R
 export type Client = Db & { release: () => void };
 export type Pool = { connect: () => Promise<Client> };
 
-export type Settings = { own_domains: string[]; partner_domains: string[]; secrets: string[] };
+export type Settings = {
+  own_domains: string[];
+  partner_domains: string[];
+  secrets: string[];
+  /** Whether an email domain takes mail. Without it every domain passes. */
+  checkDomain?: (domain: string) => Promise<boolean>;
+};
 export type Outcome =
   | { ignored: string }
   | { person: string; device: "linked" | "shared" | "tainted" | "unchanged" | "none"; merged?: string[]; proposed?: boolean; backfilled?: number; split?: string };
@@ -174,7 +180,10 @@ export async function stitchOne(db: Db, e: Evidence, settings: Settings): Promis
   const cleaned: Cleaned[] = [];
   for (const i of raw) {
     const c = cleanIdentifier(i.kind, i.value, settings);
-    if (!isRejected(c)) cleaned.push(c);
+    if (isRejected(c)) continue;
+    // Typed emails only: CRM and signed identities came from a system that already had them.
+    if (c.kind === "email" && c.domain && settings.checkDomain && (source === "form" || source === "identify") && !(await settings.checkDomain(c.domain))) continue;
+    cleaned.push(c);
   }
   if (!cleaned.length) return (await finish(db, e, { ignored: "invalid", level, source }), { ignored: "invalid" });
 
