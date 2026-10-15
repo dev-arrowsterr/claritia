@@ -2,6 +2,8 @@
 
 The plan to match everything Conversion (conversion.ai) sells, on top of what Claritia already has, and to go past it in two places: contacts come in from every tool a team has ever used, and Website Intelligence (M1) shows who is on the site. Conversion is an AI-native B2B marketing automation platform built around Salesforce and the data warehouse, sold as a Marketo replacement.
 
+Two companion docs hold the build detail: `docs/conversion-weeks.md` (tables, code, jobs, screens, tests and cost for each week) and `docs/contact-sources.md` (one spec per import source).
+
 This plan replaces the 14-week version. It keeps week 1 (built, Part 21) and changes the order of `docs/marketing-platform.md`: imports and CRM sync come first, then email and workflows, then pages, scoring, ads, attribution and agents. Rules for identity, consent and sending stay in their specs:
 
 | Spec | What it settles |
