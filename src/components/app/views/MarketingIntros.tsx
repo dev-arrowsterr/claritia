@@ -7,10 +7,12 @@ import { BarChart, Branch, Eye, FileText } from "../../Icons";
 import { SampleBars, SampleRows, SampleStats, SampleTags, ToolIntro } from "../ToolIntro";
 import { Page } from "../ui";
 
-export function VisitorsView() {
+/** Visitors before a site is added. */
+export function VisitorsIntro({ action }: { action?: React.ReactNode }) {
   return (
     <Page icon={<Eye size={14} />} title="Visitors">
       <ToolIntro
+        action={action}
         title="See which companies visit your site"
         lead="Claritia names the companies and people behind your traffic, shows what they read, and tells you when an account heats up. It follows each region's privacy rules on its own."
         features={[

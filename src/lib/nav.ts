@@ -4,6 +4,7 @@
 
 export type Route =
   | "visitors"
+  | "accounts"
   | "journeys"
   | "pages"
   | "reports"
@@ -21,6 +22,7 @@ export type NavItem = { route: Route; label: string; group?: string };
 
 const MARKETING: NavItem[] = [
   { route: "visitors", label: "Visitors", group: "Audience" },
+  { route: "accounts", label: "Accounts" },
   { route: "journeys", label: "Journeys", group: "Engage" },
   { route: "pages", label: "Pages" },
   { route: "reports", label: "Reports", group: "Prove" },

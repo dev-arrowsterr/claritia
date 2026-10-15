@@ -7,6 +7,7 @@ import { APP_URL, INBOX_DOMAIN } from "@/lib/site";
 import { askConfirm, askText, tell } from "../Dialogs";
 import { AlertsPanel } from "./AlertsPanel";
 import { GitHubPanel } from "./GitHubPanel";
+import { IcpPanel, SitesPanel } from "./SitesPanel";
 import { SuitePanel } from "./SuitePanel";
 import {
   announceChange,
@@ -243,6 +244,8 @@ export function SettingsView({ sb, session, ws, role, project, projectsChanged, 
       <div className="mx-auto flex max-w-3xl flex-col gap-5">
         <ErrorNote message={error} />
 
+        {marketing ? <SitesPanel sb={sb} ws={ws} role={role} /> : null}
+        {marketing ? <IcpPanel sb={sb} ws={ws} /> : null}
         {marketing ? <SuitePanel sb={sb} session={session} ws={ws} role={role} /> : null}
 
         {testing && project ? (
