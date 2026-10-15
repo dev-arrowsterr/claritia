@@ -10,7 +10,9 @@
     "typecheck": "next typegen && tsc --noEmit",
     "test": "node --conditions=react-server --test tests/*.test.ts",
     "test:db": "bash scripts/test-db.sh",
-    "pack:extension": "node scripts/pack-extension.ts"
+    "pack:extension": "node scripts/pack-extension.ts",
+    "build:script": "node collect/script/build.mts",
+    "check:script": "node scripts/script-check.ts"
   },
   "engines": {
     "node": ">=22"
@@ -35,6 +37,7 @@
   },
   "devDependencies": {
     "@types/ws": "^8.18.2",
+    "esbuild": "0.28.2",
     "eslint": "^9.39.5",
     "eslint-config-next": "^16.4.0",
     "ws": "^8.22.0"

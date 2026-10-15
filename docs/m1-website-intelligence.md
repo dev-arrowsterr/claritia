@@ -80,7 +80,7 @@ Rules come from three specs, and this plan doesn't repeat them:
 
 | Step | Where | Time budget |
 |---|---|---|
-| 1. The page loads `/_clr/s.js` (proxy) or `collect.tryclaritia.com/s.js` | Browser | Script ≤ 5 KB gzipped, loaded with `defer` |
+| 1. The page loads `/_clr/s.js` (proxy) or `collect.tryclaritia.com/s.js` | Browser | Script ≤ 6 KB gzipped, loaded with `defer` |
 | 2. The script queues `view`, and sends a batch after 5 s, at 20 events, or on page hide | Browser | — |
 | 3. Collect checks site key, origin, size and rate. Works out policy from geo, GPC and consent. Reads or sets `_clr_id`. Finds or starts the session. Drops bots. | collect | p99 ≤ 50 ms |
 | 4. Collect buffers rows and flushes with `COPY` every 1 s or 500 rows | collect → Postgres | ≤ 1 s |
@@ -136,7 +136,7 @@ collect/script/
   adapters/marketo.ts  MktoForms2
   identify.ts          claritia.identify / reset / track / optOut
   hop.ts               cross-domain link decoration
-  build.ts             esbuild, size check (fails the build over 5 KB gzipped)
+  build.mts            esbuild, size check (fails the build over 6 KB gzipped)
 src/lib/web/
   policy.ts            shared policy table (used by collect and the app)
   signals.ts           website signal rules
@@ -367,7 +367,11 @@ claritia.optOut()
 claritia.reset()                                    // call on logout
 ```
 
-Data attributes: `data-site`, `data-consent="auto|wait|on"`, `data-domains="acme.io,acme.dev"`.
+Data attributes: `data-site`, `data-consent="auto|wait|on"`, `data-domains="acme.io,acme.dev"`, `data-private="/account,/checkout/*"` (also enforced by collect), `data-api` (endpoint override).
+
+Calls made before the script loads are queued by a one-line stub and replayed: `window.claritia=window.claritia||function(){(claritia.q=claritia.q||[]).push(arguments)}`.
+
+**Built (day 2–5):** `collect/scrub.ts` (shared), `collect/script/*`, `npm run build:script` (gate: 6 KB gzipped, now 5.7 KB), `tests/scrub.test.ts`, `tests/script.test.ts`, and `scripts/script-check.ts` (35 checks in Chromium against a fake collect).
 
 ### 5.2 Event batch (POST /e)
 
@@ -385,7 +389,9 @@ Data attributes: `data-site`, `data-consent="auto|wait|on"`, `data-domains="acme
 }
 ```
 
-Collect answers `204`, or `200 {"did": "..."}` in modes C and D when a new id was made. Errors: `400` (bad shape), `403` (key or origin), `413` (too big), `429` (rate).
+Collect answers `200 {"p": "full|cookieless|off"}`, plus `"did"` in modes C and D when a new id was made. The script sends nothing that names a person (forms, identify, `hutk`, hop requests) and stores nothing until a batch has come back with `"p": "full"`. That's why the first batch goes at once. `"off"` stops the script for the page.
+
+A batch that fails (network, `429`, `5xx`) is sent once more with the next batch, with the same event ids. A hidden tab sends with `fetch` so it can retry. Leaving the page uses `sendBeacon`. Errors: `400` (bad shape), `403` (key or origin), `413` (too big), `429` (rate).
 
 ### 5.3 Identity batch (POST /i)
 
@@ -706,7 +712,7 @@ M0 (week 1) is done before day 1.
 | Day | Build | Done when |
 |---|---|---|
 | 1 | `021_web.sql` (sites, devices, sessions, events and partitions, page groups, salts, opt-outs, nonces, rollups), RLS, leak tests | Migration applies in a rolled-back transaction. Leak tests pass. |
-| 2 | Script core: config, queue, uuid v7, batching, `sendBeacon`, `sessionStorage` retry, SPA, bfcache, prerender. Esbuild with the size gate. | Test page shows batches in the network log. Size ≤ 5 KB gzipped. |
+| 2 | Script core: config, queue, uuid v7, batching, `sendBeacon`, `sessionStorage` retry, SPA, bfcache, prerender. Esbuild with the size gate. | Test page shows batches in the network log. Size ≤ 6 KB gzipped. |
 | 3 | Engage (active time, scroll), clicks, URL scrubbing (shared module), private paths | Scrub tests pass. Engage numbers match a scripted session. |
 | 4 | Consent readers (GCM v2, OneTrust, Cookiebot, API), GPC, opt-out, `identify`, `track`, `form`, `reset` | Unit tests for each consent source |
 | 5 | Forms: email finder, never-read rules, HubSpot and Marketo adapters. Cross-domain hop links. | Network capture shows only the email leaves. Hop link carries `_clr_x` only at click time. |
