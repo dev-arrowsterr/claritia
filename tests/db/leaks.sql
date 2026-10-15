@@ -598,6 +598,9 @@ insert into events (id, workspace_id, session_id, day, kind, path) values
   (gen_random_uuid(), '11111111-0000-0000-0000-000000000000', 'af000000-0000-0000-0000-000000000001', current_date, 'view', '/pricing'),
   (gen_random_uuid(), '22222222-0000-0000-0000-000000000000', 'cf000000-0000-0000-0000-000000000001', current_date, 'view', '/secret-plans');
 insert into opt_outs (site_id, device_hash) values ((select id from s1), '\x01');
+insert into identity_evidence (id, workspace_id, site_id, device_id, source, level, identifiers) values
+  (gen_random_uuid(), '11111111-0000-0000-0000-000000000000', (select id from s1), 'ae000000-0000-0000-0000-000000000001', 'form', 'asserted', '[{"kind":"email","value":"jane@acme.com"}]'),
+  (gen_random_uuid(), '22222222-0000-0000-0000-000000000000', 'cd000000-0000-0000-0000-000000000001', 'ce000000-0000-0000-0000-000000000001', 'form', 'asserted', '[{"kind":"email","value":"cat@other.com"}]');
 select pg_temp.check((select count(*) from salts) = 1, 'The daily salt wasn''t made');
 select pg_temp.as_user('b0000000-0000-0000-0000-000000000000');
 set role authenticated;
@@ -614,6 +617,9 @@ select pg_temp.fails($$update sessions set person_id = gen_random_uuid()$$, 'Ben
 select pg_temp.check(pg_temp.visible($$select count(*) from salts$$) = 0, 'Ben reads the cookieless salt');
 select pg_temp.check(pg_temp.visible($$select count(*) from opt_outs$$) = 0, 'Ben reads opt-outs');
 select pg_temp.check(pg_temp.visible($$select count(*) from hop_nonces$$) = 0, 'Ben reads hop tokens');
+select pg_temp.check((select count(*) from identity_evidence) = 1 and (select identifiers->0->>'value' from identity_evidence) = 'jane@acme.com', 'Ben sees another workspace''s identity evidence');
+select pg_temp.fails($$insert into identity_evidence (id, workspace_id, source, level, identifiers) values (gen_random_uuid(), '11111111-0000-0000-0000-000000000000', 'form', 'verified', '[{"kind":"email","value":"x@y.com"}]')$$, 'Ben plants identity evidence');
+select pg_temp.fails($$update identity_evidence set level = 'verified'$$, 'Ben raises an evidence level');
 select pg_temp.fails($$select make_event_partitions(30)$$, 'Ben makes day tables');
 select pg_temp.check(set_page_groups((select id from s1), '[{"pattern":"/pricing","grp":"pricing"},{"pattern":"/vs/*","grp":"compare","competitor":"Warmly"}]') = 2, 'Ben, a member, can''t set page groups');
 select pg_temp.fails($$select set_page_groups('cd000000-0000-0000-0000-000000000001', '[{"pattern":"/x","grp":"pricing"}]')$$, 'Ben sets Cat''s page groups');

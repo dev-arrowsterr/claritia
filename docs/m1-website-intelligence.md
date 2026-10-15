@@ -264,7 +264,7 @@ create table public.account_daily (
 );
 ```
 
-### 4.2 `022_intel.sql`: identity, accounts, signals, scores
+### 4.2 `023_intel.sql`: identity, accounts, signals, scores (evidence is in `022_evidence.sql`)
 
 The identity tables are exactly as in `docs/identity.md` Part 11: `persons`, `person_aliases`, `identifiers`, `identity_evidence`, `device_links`, `merge_proposals`, `email_tokens`, `learned_networks`, `ip_cache`, `deletions`.
 
@@ -427,6 +427,20 @@ The kind and source map to evidence levels per `docs/identity.md` 5.10.
 - Sessions use `insert … on conflict (id) do update` to set `ended_at`, `pageviews` and `engaged_s` with `greatest()`.
 - **Backpressure:** if the buffer passes 20,000 rows (the database is slow), collect answers `503` with `Retry-After: 5`, and the script keeps the batch in `sessionStorage` and retries once.
 - **On shutdown** (SIGTERM from Fly), flush and then exit. Fly's kill timeout is set to 30 s.
+
+### 5.5a Built (week 3)
+
+- **Files:** `collect/app.ts` (routes), `server.ts`, `store.ts` (Postgres), `buffer.ts`, `sessions.ts`, `ids.ts`, `geo.ts`, `bots.ts`, `attribution.ts`, `ua.ts`, `limits.ts`, `src/lib/web/policy.ts`, `src/lib/web/proxy.ts` (the Next.js proxy recipe, used by tryclaritia.com at `/_clr/*`), `supabase/migrations/022_evidence.sql`.
+- **Tests:** `tests/collect.test.ts` (routes, the 144-case policy matrix, ids, hop, bots, sessions, buffer), `tests/proxy.test.ts`, `tests/pg/collect.pg.ts` (real Postgres: retries don't double, a killed write rolls back whole, shutdown loses nothing) and `scripts/collect-check.ts` (Chromium → script → proxy → collect → Postgres). `npm run test:db` runs the last two.
+- **Changes from the plan:**
+  - Writes use one `insert … select from unnest(…) on conflict do nothing` statement that also adds the rows it really inserted to the sessions' counts. No COPY and no temp table. Same speed at our sizes, and a retry can't double a count.
+  - An event's day comes from its uuid v7 time, so a batch retried after midnight lands in the same day table.
+  - The script says how it's installed (`m`: `a` proxy, `s` subdomain, `d` direct) and collect sets the HttpOnly cookie for `a` and `s`, or returns `did` for `d`. A request in mode `a` without the proxy secret has the proxy's IP, so its network isn't kept and it gets no company lookup.
+  - Cloud networks are matched by ASN from the geo file. They're marked as bots and unmarked when the visit shows real input (people on cloud desktops are buyers). Only crawler user agents (`isbot`) are dropped.
+  - New sessions and devices are written at once (one transaction), so the second instance finds them. Only events wait in the buffer.
+  - Signed `identify` tokens are checked by the stitch job, which holds the secrets. Collect stores the token with the evidence.
+  - Identity tables beyond evidence move to `023_intel.sql`.
+- **Live:** `claritia-collect` deploys with the others and stays idle (health says what's missing, everything else is 503) until `DATABASE_URL` and `CLR_ID_SECRET` are set. One machine for now; scale to two before customer traffic.
 
 ### 5.6 `fly.collect.toml`
 

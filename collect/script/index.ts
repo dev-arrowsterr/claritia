@@ -31,7 +31,10 @@ function main() {
 
   const list = (s?: string) => (s || "").split(",").map((x) => x.trim().toLowerCase()).filter(Boolean);
   const base = (el.dataset.api || el.src.replace(/\/s(\.\w+)?\.js([?#].*)?$/, "")).replace(/\/$/, "");
-  const cross = new URL(base, location.href).origin !== location.origin;
+  const api_ = new URL(base, location.href);
+  // a: same origin (proxy path), s: same site (subdomain), d: direct to collect.
+  const m = api_.origin === location.origin ? "a" : api_.hostname.endsWith("." + location.hostname.split(".").slice(-2).join(".")) ? "s" : "d";
+  const cross = m !== "a";
   const mode = el.dataset.consent || "auto";
   const domains = list(el.dataset.domains);
   const priv = list(el.dataset.private);
@@ -52,6 +55,7 @@ function main() {
   const identityOk = () => !off && !cookieless() && policy === "full";
   const waiting = () => mode === "wait" && consent().state === "unknown";
   const did = () => cookie("_clr_id") || ls.get("_clr_id");
+  const head = (): Body => ({ v: 1, site, m, consent: consent(), gpc });
 
   // Sending ---------------------------------------------------------------------------------------------
 
@@ -91,7 +95,8 @@ function main() {
   };
 
   const body = (events: Ev[]): Body => {
-    const b: Body = { v: 1, site, consent: consent(), gpc, events };
+    const b: Body = { ...head(), events };
+    if (navigator.webdriver) b.wd = true;
     if (cross && !cookieless() && did()) b.did = did();
     if (landing && !gpc) Object.assign(b, landing);
     landing = null;
@@ -142,7 +147,7 @@ function main() {
   /** Sends identity evidence once the server has said the policy allows it. */
   function ident(b: Body, beacon = false) {
     if (off || cookieless() || curPriv) return;
-    const full: Body = { v: 1, site, page: cur, ...b };
+    const full: Body = { ...head(), page: cur, ...b };
     if (cross && did()) full.did = did();
     if (policy === "full") post("/i", full, beacon).catch(() => {});
     else if (!policy && held.length < 3) held.push([full, beacon]);
@@ -312,7 +317,7 @@ function main() {
   };
   api.optOut = () => {
     if (off) return;
-    post("/opt", { v: 1, site, did: cross ? did() : undefined }, false).catch(() => {});
+    post("/opt", { ...head(), did: cross ? did() : undefined }, false).catch(() => {});
     off = true;
     q = [];
     retry = [];
@@ -329,7 +334,7 @@ function main() {
     ss.del("_clr_h");
     ls.del("_clr_id");
     setCookie("_clr_id", "", 0);
-    post("/reset", { v: 1, site, did: old }, false).then(answer, () => {});
+    post("/reset", { ...head(), did: old }, false).then(answer, () => {});
   };
 
   const queued: ArrayLike<unknown>[] = (w.claritia && w.claritia.q) || [];

@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { APP_URL, COMPANY, CONTACT_EMAIL } from "@/lib/site";
+import { APP_URL, CLR_SITE_KEY, COMPANY, CONTACT_EMAIL } from "@/lib/site";
 import { Logo } from "./Logo";
 
 const NAV = [
@@ -14,6 +14,7 @@ const NAV = [
 export function SiteHeader() {
   return (
     <header className="sticky top-0 z-50 border-b border-line bg-white/90 backdrop-blur">
+      <script defer src="/_clr/s.js" data-site={CLR_SITE_KEY} />
       <div className="mx-auto flex h-16 max-w-6xl items-center justify-between gap-6 px-4 md:px-6">
         <Link href="/" aria-label="Claritia home" className="shrink-0">
           <Logo />
