@@ -817,6 +817,25 @@ Records (custom objects and rich fields from week 8, pulled forward so imports a
 - **Needs set on `claritia-intel`:** `SUPABASE_URL` and `SUPABASE_SECRET_KEY` (it reads uploaded files from storage).
 - **Running cost:** Supabase storage for uploads, deleted after 30 days: under $1 at Beta, about $5 at Growth (check). `claritia-intel` to 1 GB for big Excel files: about $3 at Beta and Growth (check). No Claude calls. **Total: about $4 at Beta, about $8 at Growth.**
 
+## Part 21c. Sources status (weeks 3 to 7): framework and 20 tools built
+
+| Piece | Where |
+|---|---|
+| Sources, sealed credentials, links by the tool's id with the values both sides last agreed, runs, sync log (90 days), mappings, staged webhooks, lists as static segments, the minute tick that runs due pulls and pushes | `supabase/migrations/036_sources.sql` |
+| Connector contract, calls with retries and token refresh, sign-in with signed state and PKCE, mapping, the pipeline (in, out, hooks) and the runner | `src/lib/sources/` (`types.ts`, `ctx.ts`, `oauth.ts`, `map.ts`, `sync.ts`, `run.ts`) |
+| Two-way: HubSpot (search window, app webhooks with v3 signatures, batch writes), Salesforce (queryAll on SystemModstamp with deletes, Composite writes, new contacts as Leads), Omniscient (one-click from its approve page, signed webhooks) | `hubspot.ts`, `salesforce.ts`, `omniscient.ts` |
+| In: Pipedrive, Attio, Close; Mailchimp, Klaviyo, ActiveCampaign, Brevo, Kit, MailerLite; Stripe, Intercom | `crms.ts`, `email.ts`, `product.ts` |
+| Webhooks: Typeform, Tally, Webflow, Calendly, Cal.com (signatures checked) and any tool that posts JSON | `forms.ts`, `src/app/api/hooks/` |
+| Connect, sign-in callback, webhook URL, mapping routes | `src/app/api/sources/` |
+| `source_pull`, `crm_push`, `source_hook` jobs | `worker-intel/jobs/sources.ts` |
+| Settings › Tools (catalog with logos, connect by sign-in or key, source page with sync settings, field mapping and runs) and Settings › Sync log (filters, retry) | `src/components/app/views/SourcesSettings.tsx` |
+| Tests | `tests/sources.test.ts` (every connector against recorded answers), `tests/pg/sources.pg.ts`, sources block in `tests/db/leaks.sql` |
+
+- **Flaky cases tested:** HubSpot two-way through 1,000 random changes on both sides (edits, creates, deletes, merges, email changes) with 20% of webhooks dropped, 10% sent twice, 5% of calls answered 429 and the token expiring twice: both sides end equal, nothing doubled, and a further round writes nothing and logs nothing (passes on 5 seeds). A form webhook sent twice makes one contact; a paused source holds its hooks. Found and fixed on the way: a value that lost to a person's edit was never pushed back; the push cursor re-read the same 200 contacts inside its 30-second window; an update to a record deleted on the other side failed forever; a tool that ignores a field we write, or a record type without a column, caused a write every round.
+- **Needs set:** on Render and `claritia-intel`, `SECRETS_KEY` (credentials are sealed with it) and, for one-click sign-in, `HUBSPOT_`, `SALESFORCE_`, `PIPEDRIVE_`, `ATTIO_`, `MAILCHIMP_` `CLIENT_ID` and `CLIENT_SECRET`; `OMNISCIENT_URL` if it isn't `https://app.tryomniscient.com`. HubSpot's app sends webhooks to `/api/hooks/hubspot`. Without a sign-in app, HubSpot, Pipedrive, Attio and Mailchimp take a pasted key.
+- **Left for later weeks:** Salesforce Change Data Capture (until then it pulls every few minutes) and its 1,000-change test against a Salesforce fake; deals, campaigns and company writes; Marketo, Pardot, Eloqua and the other CRMs and email tools in 4.4; the other form, event and ad lead tools; the import API and Zapier, Make and n8n apps; read-only MCP tools. Each tool's endpoints are rechecked on a real account before launch (check).
+- **Running cost:** no new paid service and no Claude calls; the tools' APIs are free on the customer's plan. Pulls every 15 minutes for CRMs and hourly for the rest add work on `claritia-intel`: within the 1 GB machine at Beta, a second 1 GB machine at Growth, about $6 (check). Sync log and links on Supabase disk: under $1 at Beta, about $5 at Growth (check). **Total: about $1 at Beta, about $11 at Growth.**
+
 ---
 
 ## Part 22. Rollout

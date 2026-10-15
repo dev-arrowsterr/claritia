@@ -326,15 +326,27 @@ test("editing a contact, its page, and removing it", async () => {
   assert.equal(again.created, 1);
 });
 
+// Making or dropping a month locks the events table, so it can deadlock with writes from tests running at the
+// same time; Postgres picks one side to fail, and that side tries again (the daily job does the same next day).
+async function ddl(sql: string) {
+  for (let i = 0; ; i++) {
+    try {
+      return await q(sql);
+    } catch (e) {
+      if ((e as { code?: string }).code !== "40P01" || i >= 4) throw e;
+    }
+  }
+}
+
 test("contact event months: made ahead, kept private, safe to run again", async () => {
-  await q(`select contact_events_roll()`);
-  await q(`select contact_events_roll()`);
+  await ddl(`select contact_events_roll()`);
+  await ddl(`select contact_events_roll()`);
   const parts = await q(`select c.relname, c.relrowsecurity from pg_inherits i join pg_class c on c.oid = i.inhrelid join pg_namespace n on n.oid = c.relnamespace
                          where i.inhparent = 'public.contact_events'::regclass and n.nspname = 'partitions' order by 1`);
   assert.equal(parts.length, 17, "13 months back, this one, 3 ahead");
   assert.ok(parts.every((p) => p.relrowsecurity));
   // An old month past 13 is dropped.
-  await q(`create table partitions.contact_events_2001_01 partition of public.contact_events for values from ('2001-01-01') to ('2001-02-01')`);
-  await q(`select contact_events_roll()`);
+  await ddl(`create table partitions.contact_events_2001_01 partition of public.contact_events for values from ('2001-01-01') to ('2001-02-01')`);
+  await ddl(`select contact_events_roll()`);
   assert.equal((await q(`select to_regclass('partitions.contact_events_2001_01') as r`))[0].r, null);
 });

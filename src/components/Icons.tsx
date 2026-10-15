@@ -203,3 +203,22 @@ export const Target = (p: P) => (
     <circle cx="12" cy="12" r="1" />
   </Svg>
 );
+
+export const Refresh = (p: P) => (
+  <Svg {...p}>
+    <path d="M20 11a8 8 0 0 0-14.9-3.5M4 4v4h4" />
+    <path d="M4 13a8 8 0 0 0 14.9 3.5M20 20v-4h-4" />
+  </Svg>
+);
+
+export const Pause = (p: P) => (
+  <Svg {...p}>
+    <path d="M9 5v14M15 5v14" />
+  </Svg>
+);
+
+export const Plug = (p: P) => (
+  <Svg {...p}>
+    <path d="M9 3v5M15 3v5M6 8h12v3a6 6 0 0 1-12 0V8zM12 17v4" />
+  </Svg>
+);

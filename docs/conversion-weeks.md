@@ -70,7 +70,9 @@ What shipped and what's left: the plan's Part 21b. The build used `035_imports.s
 
 ---
 
-## Week 3. Sources framework, HubSpot two-way, read-only MCP
+## Week 3. Sources framework, HubSpot two-way, read-only MCP (started)
+
+What shipped and what's left: the plan's Part 21c.
 
 **Goal:** one framework every source plugs into; HubSpot syncs both ways.
 
@@ -102,7 +104,9 @@ What shipped and what's left: the plan's Part 21b. The build used `035_imports.s
 
 ---
 
-## Week 4. Salesforce and Omniscient
+## Week 4. Salesforce and Omniscient (started)
+
+What shipped and what's left: the plan's Part 21c.
 
 **Goal:** Salesforce two-way, Omniscient one-click.
 
@@ -127,7 +131,9 @@ What shipped and what's left: the plan's Part 21b. The build used `035_imports.s
 
 ---
 
-## Week 5. Email tool imports
+## Week 5. Email tool imports (started)
+
+What shipped and what's left: the plan's Part 21c.
 
 **Goal:** move contacts, lists, suppressions, consent and history out of 10 email tools.
 
@@ -145,7 +151,9 @@ What shipped and what's left: the plan's Part 21b. The build used `035_imports.s
 
 ---
 
-## Week 6. Marketing automation tools, other CRMs, Airtable, Notion
+## Week 6. Marketing automation tools, other CRMs, Airtable, Notion (started)
+
+What shipped and what's left: the plan's Part 21c.
 
 **Goal:** the big three migration sources, plus every other CRM.
 
@@ -164,7 +172,9 @@ What shipped and what's left: the plan's Part 21b. The build used `035_imports.s
 
 ---
 
-## Week 7. Live sources: forms, scheduling, events, ad lead forms, API
+## Week 7. Live sources: forms, scheduling, events, ad lead forms, API (started)
+
+What shipped and what's left: the plan's Part 21c.
 
 **Goal:** new leads from anywhere land on a contact in under 10 seconds.
 

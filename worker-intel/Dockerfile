@@ -15,6 +15,7 @@ COPY src/lib/web/signals.ts src/lib/web/scores.ts src/lib/web/accountAlerts.ts s
 COPY src/lib/contacts/ ./src/lib/contacts/
 COPY src/lib/records/ ./src/lib/records/
 COPY src/lib/filters.ts ./src/lib/
+COPY src/lib/sources/ ./src/lib/sources/
 USER node
 EXPOSE 8080
 CMD ["node", "worker-intel/index.ts"]

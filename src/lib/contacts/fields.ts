@@ -94,6 +94,8 @@ export type Target =
   | "lifecycle"
   | "lead_status"
   | "basis"
+  /** The record's id in a connected tool; sources only. */
+  | "source_id"
   | `f.${string}`;
 
 export const TARGETS: { value: Target; label: string }[] = [

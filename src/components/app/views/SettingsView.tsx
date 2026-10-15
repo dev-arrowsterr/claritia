@@ -13,6 +13,7 @@ import { IcpPanel, SitesPanel } from "./SitesPanel";
 import { settingsGroups, type SettingsTab } from "@/lib/settingsTabs";
 import { FieldsSettings, ObjectsSettings } from "./FieldsSettings";
 import { ImportsSettings } from "./ImportsSettings";
+import { SourcesSettings, SyncLog } from "./SourcesSettings";
 import {
   announceChange,
   Avatar,
@@ -229,7 +230,7 @@ function KeysPanel({ sb, session, ws }: Pick<ViewProps, "sb" | "session" | "ws">
 
 export function SettingsView({ sb, session, ws, role, project, projectsChanged, navigate, id }: ViewProps) {
   const [error, setError] = useState("");
-  const [tab, setTab] = useState<SettingsTab>(() => (id as SettingsTab) || (typeof window === "undefined" ? "profile" : (window.location.hash.slice(1) as SettingsTab)));
+  const [tab, setTab] = useState<SettingsTab>(() => (id === "suite" ? "sources" : (id as SettingsTab)) || (typeof window === "undefined" ? "profile" : (window.location.hash.slice(1) as SettingsTab)));
   const inbox = useLoad(async () => (project ? ((must(await sb.from("projects").select("inbox_id").eq("id", project.id).single()) as { inbox_id: string }).inbox_id) : ""), project?.id ?? "none");
   const members = useLoad(async () => must(await sb.from("workspace_members").select("user_id, role, created_at").eq("workspace_id", ws.id).order("created_at")) as { user_id: string; role: string }[], ws.id);
 
@@ -245,7 +246,9 @@ export function SettingsView({ sb, session, ws, role, project, projectsChanged, 
   const pages: Record<SettingsTab, React.ReactNode> = {
     fields: <FieldsSettings sb={sb} ws={ws} role={role} />,
     objects: <ObjectsSettings sb={sb} ws={ws} role={role} navigate={navigate} />,
+    sources: <SourcesSettings sb={sb} session={session} ws={ws} role={role} />,
     imports: <ImportsSettings sb={sb} ws={ws} />,
+    sync_log: <SyncLog sb={sb} ws={ws} navigate={navigate} />,
     sites: <SitesPanel sb={sb} ws={ws} role={role} />,
     identity: <IdentityPanel sb={sb} session={session} ws={ws} role={role} />,
     icp: <IcpPanel sb={sb} ws={ws} />,

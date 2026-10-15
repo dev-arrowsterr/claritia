@@ -1,7 +1,8 @@
 // claritia-intel: runs the fast jobs that need no browser (stitch now; lookups, signals and scores next).
 // Several claim loops share one pool. SIGTERM lets running jobs finish (Fly gives 30 seconds).
 //   DATABASE_URL=… SECRETS_KEY=… node worker-intel/index.ts
-// Imports also need SUPABASE_URL and SUPABASE_SECRET_KEY, to read uploaded files from storage.
+// Imports also need SUPABASE_URL and SUPABASE_SECRET_KEY, to read uploaded files from storage. Sources need
+// SECRETS_KEY (credentials are sealed with it) and each tool's <PREFIX>_CLIENT_ID and _CLIENT_SECRET to refresh sign-ins.
 
 import { createServer } from "node:http";
 import { hostname } from "node:os";
@@ -10,6 +11,7 @@ import { jobLoop } from "../src/lib/jobs.ts";
 import { enrichCompany, identityChanged, ipLookup } from "./jobs/company.ts";
 import { accountAlert, scoreAccount, sweepSignals } from "./jobs/signals.ts";
 import { importFile, importUndo, pruneImportFiles } from "./jobs/imports.ts";
+import { crmPush, sourceHook, sourcePull } from "./jobs/sources.ts";
 import { deviceReset, privacy, rebuild, stitch, stitchEvidence } from "./jobs/stitch.ts";
 import { pgRpc } from "./rpc.ts";
 
@@ -40,6 +42,9 @@ const handlers = {
   account_alert: accountAlert(pool),
   import_file: importFile(pool, rpc),
   import_undo: importUndo(rpc),
+  source_pull: sourcePull(pool, rpc),
+  crm_push: crmPush(pool, rpc),
+  source_hook: sourceHook(pool, rpc),
 };
 const stop = new AbortController();
 const worker = `intel-${hostname()}-${process.pid}`;

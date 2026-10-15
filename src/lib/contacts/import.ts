@@ -160,6 +160,7 @@ export function prepareImport(rows: string[][], m: Mapping, ctx: Ctx, firstRow =
       company_name: cut(cell("company"), 200),
       fields,
       basis: stated,
+      source_id: cut(cell("source_id"), 200),
     };
     const prev = byEmail.get(e.clean);
     if (prev) counts.merged++;

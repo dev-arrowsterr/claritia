@@ -847,6 +847,49 @@ select pg_temp.check((select status from imports where id = 'ce000000-0000-0000-
 select set_config('request.jwt.claim.sub', '', false);
 delete from jobs;
 
+-- Sources (036): Ben (a member) sees Acme's sources but can't change them or read credentials; nobody sees Cat's;
+-- the sync machinery is server only.
+insert into sources (id, workspace_id, kind, name, account) values
+  ('5a000000-0000-0000-0000-0000000000a1', '11111111-0000-0000-0000-000000000000', 'hubspot', 'HubSpot', '1'),
+  ('5c000000-0000-0000-0000-0000000000c1', '22222222-0000-0000-0000-000000000000', 'hubspot', 'HubSpot', '2');
+insert into source_secrets (source_id, sealed, hook_sealed) values
+  ('5a000000-0000-0000-0000-0000000000a1', 'v1:acme-token', 'v1:acme-hook'),
+  ('5c000000-0000-0000-0000-0000000000c1', 'v1:cat-token', 'v1:cat-hook');
+insert into sync_log (workspace_id, source_id, direction, object, action) values
+  ('22222222-0000-0000-0000-000000000000', '5c000000-0000-0000-0000-0000000000c1', 'in', 'contact', 'create');
+insert into hook_events (workspace_id, source_id, dedupe, body) values
+  ('22222222-0000-0000-0000-000000000000', '5c000000-0000-0000-0000-0000000000c1', 'd1', '{}');
+select pg_temp.as_user('b0000000-0000-0000-0000-000000000000');
+set role authenticated;
+select pg_temp.check((select count(*) from sources) = 1, 'Ben sees only Acme''s source');
+select pg_temp.fails($$select * from source_secrets$$, 'Ben reads credentials');
+select pg_temp.fails($$select * from hook_events$$, 'Ben reads webhook bodies');
+select pg_temp.check((select count(*) from sync_log) = 0, 'Ben sees Cat''s sync log');
+select pg_temp.fails($$select source_settings_save('5a000000-0000-0000-0000-0000000000a1', 'x', '{}')$$, 'Ben (a member) changes a source');
+select pg_temp.fails($$select source_disconnect('5a000000-0000-0000-0000-0000000000a1')$$, 'Ben disconnects a source');
+select pg_temp.fails($$select source_pause('5c000000-0000-0000-0000-0000000000c1', true)$$, 'Ben pauses Cat''s source');
+select pg_temp.fails($$select source_sync_now('5c000000-0000-0000-0000-0000000000c1')$$, 'Ben syncs Cat''s source');
+select pg_temp.fails($$select mapping_save('5c000000-0000-0000-0000-0000000000c1', 'contact', '[]')$$, 'Ben maps Cat''s source');
+select pg_temp.check((select sync_retry(array(select id from sync_log))) = 0, 'Ben retries Cat''s sync log');
+select pg_temp.fails($$select source_load('5c000000-0000-0000-0000-0000000000c1')$$, 'Ben loads a source with its credentials');
+select pg_temp.fails($$select source_connect('11111111-0000-0000-0000-000000000000', 'b0000000-0000-0000-0000-000000000000', 'hubspot', 'x', 'y', 'v1:z')$$, 'Ben connects a source');
+select pg_temp.fails($$select hook_stage('5c000000-0000-0000-0000-0000000000c1', 'd2', '{}')$$, 'Ben stages a webhook');
+select pg_temp.fails($$select push_candidates('5c000000-0000-0000-0000-0000000000c1', null)$$, 'Ben reads push candidates');
+select pg_temp.fails($$select companies_upsert('22222222-0000-0000-0000-000000000000', 'hubspot', '[]')$$, 'Ben writes Cat''s companies');
+select pg_temp.fails($$select source_links_put('5c000000-0000-0000-0000-0000000000c1', 'contact', '[]')$$, 'Ben writes links');
+select pg_temp.fails($$select sync_log_add('5c000000-0000-0000-0000-0000000000c1', '[]')$$, 'Ben writes the sync log');
+select pg_temp.fails($$insert into sources (workspace_id, kind, name) values ('11111111-0000-0000-0000-000000000000', 'stripe', 'x')$$, 'Ben inserts a source');
+reset role;
+select pg_temp.as_user('a0000000-0000-0000-0000-000000000000');
+set role authenticated;
+select pg_temp.fails($$select source_settings_save('5c000000-0000-0000-0000-0000000000c1', 'x', '{}')$$, 'Ann changes Cat''s source');
+select source_pause('5a000000-0000-0000-0000-0000000000a1', true);
+reset role;
+select pg_temp.check((select status from sources where id = '5a000000-0000-0000-0000-0000000000a1') = 'paused', 'Ann (an owner) can''t pause her own source');
+select pg_temp.check((select count(*) from hook_events where source_id = '5c000000-0000-0000-0000-0000000000c1') = 1, 'Cat''s webhook was touched');
+select set_config('request.jwt.claim.sub', '', false);
+delete from jobs;
+
 -- Cloud minutes: once Acme has used its 2,000, nobody there can start a run.
 insert into runs (workspace_id, project_id, test_name, test_version, environment_name, base_url, lock, status, duration_ms)
 values ('11111111-0000-0000-0000-000000000000', 'a1000000-0000-0000-0000-000000000000', 'long', 1, 'staging', 'https://x.com', '', 'passed', 2000 * 60000);
