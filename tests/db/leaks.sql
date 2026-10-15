@@ -682,6 +682,26 @@ reset role;
 select set_config('request.jwt.claim.sub', '', false);
 delete from jobs;
 
+-- Screens (027): read functions stay inside the member's workspace.
+insert into accounts (id, workspace_id, domain, name) values
+  ('aa000000-0000-0000-0000-0000000000a1', '11111111-0000-0000-0000-000000000000', 'globex.com', 'Globex'),
+  ('cc000000-0000-0000-0000-0000000000c1', '22222222-0000-0000-0000-000000000000', 'secret-co.com', 'Secret Co');
+select pg_temp.as_user('b0000000-0000-0000-0000-000000000000');
+set role authenticated;
+select pg_temp.check(jsonb_array_length(accounts_list('11111111-0000-0000-0000-000000000000')) = 1, 'Ben can''t list his own accounts');
+select pg_temp.fails($$select accounts_list('22222222-0000-0000-0000-000000000000')$$, 'Ben lists Cat''s accounts');
+select pg_temp.fails($$select account_detail('cc000000-0000-0000-0000-0000000000c1')$$, 'Ben opens Cat''s account');
+select pg_temp.fails($$select account_timeline('cc000000-0000-0000-0000-0000000000c1')$$, 'Ben reads Cat''s account timeline');
+select pg_temp.fails($$select visitors_live('22222222-0000-0000-0000-000000000000')$$, 'Ben watches Cat''s visitors');
+select pg_temp.fails($$select site_health('22222222-0000-0000-0000-000000000000')$$, 'Ben reads Cat''s site keys');
+select pg_temp.fails($$select set_icp('22222222-0000-0000-0000-000000000000', '{}')$$, 'Ben sets Cat''s ICP');
+select pg_temp.fails($$select account_feedback_add('cc000000-0000-0000-0000-0000000000c1', 'good')$$, 'Ben leaves feedback on Cat''s account');
+select account_feedback_add('aa000000-0000-0000-0000-0000000000a1', 'good');
+select pg_temp.check((select count(*) from account_feedback) = 1, 'Ben''s feedback wasn''t saved');
+reset role;
+select set_config('request.jwt.claim.sub', '', false);
+delete from jobs;
+
 -- Cloud minutes: once Acme has used its 2,000, nobody there can start a run.
 insert into runs (workspace_id, project_id, test_name, test_version, environment_name, base_url, lock, status, duration_ms)
 values ('11111111-0000-0000-0000-000000000000', 'a1000000-0000-0000-0000-000000000000', 'long', 1, 'staging', 'https://x.com', '', 'passed', 2000 * 60000);
