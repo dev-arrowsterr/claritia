@@ -1,0 +1,10 @@
+{
+  "name": "claritia-intel",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=22.18" },
+  "dependencies": {
+    "free-email-domains": "1.12.14",
+    "pg": "8.23.1"
+  }
+}

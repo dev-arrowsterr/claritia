@@ -1,0 +1,26 @@
+# claritia-intel on Fly.io: stitch now; IP lookups, enrichment, signals and scores next. Always on, no browser.
+# Secrets: DATABASE_URL (Supabase pooler, session mode), SECRETS_KEY (same as claritia-web).
+#   fly deploy --config fly.intel.toml
+app = "claritia-intel"
+primary_region = "nrt" # Tokyo, next to Supabase
+kill_timeout = 30
+
+[build]
+  dockerfile = "worker-intel/Dockerfile"
+
+[http_service]
+  internal_port = 8080
+  auto_stop_machines = "off"
+  auto_start_machines = true
+  min_machines_running = 1
+
+  [[http_service.checks]]
+    method = "GET"
+    path = "/"
+    interval = "30s"
+    timeout = "2s"
+    grace_period = "10s"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"

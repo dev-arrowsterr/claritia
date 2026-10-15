@@ -751,6 +751,8 @@ M0 (week 1) is done before day 1.
 | 14 | Rebuild, undo RPCs (unmerge, unlink, kiosk), merge proposals, erasure and export | Property test (rebuild equals incremental) passes |
 | 15 | `identity-check.ts` (38 cases) and `consent-check.ts` (48 cases). Fix everything they find. | Both suites green in Chromium |
 
+**Built so far (days 11–13):** `023_identity.sql` (settings, persons, aliases, identifiers, device links, merge proposals, `sessions.split_to`, ip cache, learned networks, erasures, email tokens), `src/lib/identity/clean.ts` with the free list (`free-email-domains`, MIT) and the disposable list (`lists/disposable.txt`, CC0), `src/lib/identity/stitch.ts`, and `claritia-intel` (`worker-intel/`, `fly.intel.toml`) running `stitch` and `device_reset`. Tests: `tests/clean.test.ts`, `tests/pg/stitch.pg.ts` (states, backfill, split, taint, signed merge, guards, internal, role, disposable, policy, erasure, an 8-way race, a job killed midway) and `tests/pg/intel.pg.ts`. Still to do: office-network and "this is me" internal triggers, rebuild, undo RPCs, erasure and export (day 14), and the browser suites (day 15). `hutk` waits for the HubSpot connection (M3) and email links for M6; both are kept and marked.
+
 ### Week 5: companies, signals, scores
 
 | Day | Build | Done when |

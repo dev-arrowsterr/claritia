@@ -26,6 +26,7 @@
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "fflate": "0.8.2",
+    "free-email-domains": "1.12.14",
     "hono": "4.13.12",
     "isbot": "5.2.2",
     "maxmind": "5.0.7",

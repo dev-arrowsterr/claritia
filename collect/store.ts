@@ -167,9 +167,14 @@ export class PgStore implements Store {
       rows.map((r) => (r.data ? JSON.stringify(r.data) : null)),
       col("client_at"),
     ];
-    const sql = `with ins as (
-        insert into events (id, workspace_id, session_id, day, kind, path, title, data, client_at)
+    // A session split by the stitch job (split_to) takes the events collect still sends to its old id.
+    const sql = `with v as (
         select * from unnest($1::uuid[], $2::uuid[], $3::uuid[], $4::date[], $5::text[], $6::text[], $7::text[], $8::jsonb[], $9::timestamptz[])
+          as v(id, workspace_id, session_id, day, kind, path, title, data, client_at)
+      ), ins as (
+        insert into events (id, workspace_id, session_id, day, kind, path, title, data, client_at)
+        select v.id, v.workspace_id, coalesce(s.split_to, v.session_id), v.day, v.kind, v.path, v.title, v.data, v.client_at
+        from v left join sessions s on s.id = v.session_id
         on conflict do nothing
         returning session_id, kind, data, server_at
       )
