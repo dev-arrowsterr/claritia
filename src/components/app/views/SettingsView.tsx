@@ -7,6 +7,7 @@ import { APP_URL, INBOX_DOMAIN } from "@/lib/site";
 import { askConfirm, askText, tell } from "../Dialogs";
 import { AlertsPanel } from "./AlertsPanel";
 import { GitHubPanel } from "./GitHubPanel";
+import { AccountAlertsPanel } from "./AccountAlertsPanel";
 import { IcpPanel, SitesPanel } from "./SitesPanel";
 import { SuitePanel } from "./SuitePanel";
 import {
@@ -246,6 +247,7 @@ export function SettingsView({ sb, session, ws, role, project, projectsChanged, 
 
         {marketing ? <SitesPanel sb={sb} ws={ws} role={role} /> : null}
         {marketing ? <IcpPanel sb={sb} ws={ws} /> : null}
+        {marketing ? <AccountAlertsPanel sb={sb} session={session} ws={ws} /> : null}
         {marketing ? <SuitePanel sb={sb} session={session} ws={ws} role={role} /> : null}
 
         {testing && project ? (

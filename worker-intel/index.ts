@@ -7,7 +7,7 @@ import { hostname } from "node:os";
 import pg from "pg";
 import { jobLoop } from "../src/lib/jobs.ts";
 import { enrichCompany, identityChanged, ipLookup } from "./jobs/company.ts";
-import { scoreAccount, sweepSignals } from "./jobs/signals.ts";
+import { accountAlert, scoreAccount, sweepSignals } from "./jobs/signals.ts";
 import { deviceReset, privacy, rebuild, stitch, stitchEvidence } from "./jobs/stitch.ts";
 import { pgRpc } from "./rpc.ts";
 
@@ -35,6 +35,7 @@ const handlers = {
   ip_lookup: ipLookup(pool, company),
   enrich_company: enrichCompany(pool, company),
   score_account: scoreAccount(pool),
+  account_alert: accountAlert(pool),
 };
 const stop = new AbortController();
 const worker = `intel-${hostname()}-${process.pid}`;

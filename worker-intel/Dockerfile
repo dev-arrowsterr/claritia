@@ -6,12 +6,12 @@ WORKDIR /app
 COPY worker-intel/package.json worker-intel/package-lock.json ./
 RUN npm ci --omit=dev --no-audit --no-fund && rm -rf /root/.npm
 COPY worker-intel/ ./worker-intel/
-COPY src/lib/jobs.ts src/lib/seal.ts ./src/lib/
+COPY src/lib/jobs.ts src/lib/seal.ts src/lib/site.ts ./src/lib/
 COPY src/lib/identity/ ./src/lib/identity/
 COPY src/lib/company/ ./src/lib/company/
 COPY src/lib/privateNet.ts ./src/lib/
 COPY collect/ids.ts collect/scrub.ts ./collect/
-COPY src/lib/web/signals.ts src/lib/web/scores.ts ./src/lib/web/
+COPY src/lib/web/signals.ts src/lib/web/scores.ts src/lib/web/accountAlerts.ts ./src/lib/web/
 USER node
 EXPOSE 8080
 CMD ["node", "worker-intel/index.ts"]

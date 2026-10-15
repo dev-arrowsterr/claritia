@@ -107,3 +107,20 @@ test("account signals: return visit, several people, new person", () => {
   assert.deepEqual(s.map((x) => x.kind), ["return_visit", "multi_person", "new_person"]);
   assert.deepEqual(accountSignals("acc", { visitAt: NOW, lastBefore: NOW - 3 * DAY, peopleThisWeek: 1, personId: null, firstSeenPerson: false }), []);
 });
+
+test("account alert rules fire on the change, not after it", async () => {
+  const { parseRule, ruleFires, ruleText } = await import("../src/lib/web/accountAlerts.ts");
+  const snap = (temperature: string | null, stage: string | null, intent: number | null, fit: number | null) => ({ temperature, stage, intent, fit });
+  const hot = parseRule({ when: "hot", fit_min: 60 })!;
+  assert.ok(ruleFires(hot, snap("steady", "researching", 40, 80), snap("hot", "researching", 55, 80)));
+  assert.ok(!ruleFires(hot, snap("hot", "researching", 40, 80), snap("hot", "researching", 60, 80)), "already hot");
+  assert.ok(!ruleFires(hot, snap("steady", null, 40, 40), snap("hot", null, 60, 40)), "below the fit");
+  assert.ok(ruleFires(hot, snap("steady", null, 40, null), snap("hot", null, 60, null)) === false, "unknown fit counts as 50, below 60");
+  const intent = parseRule({ when: "intent", intent: 70 })!;
+  assert.ok(ruleFires(intent, snap(null, null, 69, null), snap(null, null, 70, null)));
+  assert.ok(!ruleFires(intent, snap(null, null, 70, null), snap(null, null, 80, null)));
+  assert.ok(ruleFires(parseRule({ when: "evaluating" })!, snap(null, "researching", 1, 1), snap(null, "evaluating", 1, 1)));
+  assert.equal(parseRule({ when: "intent", intent: 0 }), null);
+  assert.equal(parseRule({ when: "nope" }), null);
+  assert.equal(ruleText(hot), "When an account turns hot with fit 60+");
+});

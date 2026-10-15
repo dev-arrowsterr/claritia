@@ -4,6 +4,9 @@
 
 import type pg from "pg";
 import { JobError, type Handler } from "../../src/lib/jobs.ts";
+import { hostIsPrivate } from "../../src/lib/privateNet.ts";
+import { unseal } from "../../src/lib/seal.ts";
+import { parseRule, ruleFires, slackAccountMessage } from "../../src/lib/web/accountAlerts.ts";
 import { fitV0, intentOf, priorityOf, rawIntent, SCORE_VERSION, stageOf, temperatureOf, whyNow, type Icp, type ScoredSignal, type Stage } from "../../src/lib/web/scores.ts";
 import { accountSignals, DEFAULT_SIGNALS, visitSignals, type PageGroup, type Signal } from "../../src/lib/web/signals.ts";
 
@@ -94,7 +97,7 @@ export async function sweepSignals(pool: pg.Pool, limit = 200): Promise<number> 
 export const scoreAccount = (pool: pg.Pool, now: () => number = Date.now): Handler => async (job) => {
   const id = String(job.payload.account_id ?? job.key ?? "");
   if (!/^[0-9a-f-]{36}$/.test(id)) throw new JobError("score_account needs an account", { retry: false });
-  const a = (await pool.query(`select id, workspace_id, firmo, stage, owner_user_id from accounts where id = $1`, [id])).rows[0];
+  const a = (await pool.query(`select id, workspace_id, firmo, stage, owner_user_id, temperature, intent, fit from accounts where id = $1`, [id])).rows[0];
   if (!a) return;
   const t = await types(pool, a.workspace_id);
   const sigs: ScoredSignal[] = (
@@ -118,4 +121,44 @@ export const scoreAccount = (pool: pg.Pool, now: () => number = Date.now): Handl
     `insert into account_scores (account_id, workspace_id, fit, intent, priority, stage, temperature, why_now, score_version) values ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
     [id, a.workspace_id, fit, intent, priority, stage, temperature, JSON.stringify(why.top), SCORE_VERSION],
   );
+  await checkAlerts(pool, a.workspace_id, id, { temperature: a.temperature, stage: a.stage, intent: a.intent, fit: a.fit }, { temperature, stage, intent, fit });
 };
+
+/** Queue an alert for each rule this change fires, at most once a day per rule and account, within the daily cap. */
+async function checkAlerts(pool: pg.Pool, ws: string, account: string, before: Parameters<typeof ruleFires>[1], after: Parameters<typeof ruleFires>[2]) {
+  const rules = (await pool.query(`select id, rule, daily_cap from account_alert_rules where workspace_id = $1 and enabled`, [ws])).rows;
+  for (const r of rules) {
+    const rule = parseRule(r.rule);
+    if (!rule || !ruleFires(rule, before, after)) continue;
+    const recent = (
+      await pool.query(
+        `select count(*) filter (where account_id = $2 and sent_at > now() - interval '24 hours')::int as same,
+                count(*) filter (where sent_at > now() - interval '24 hours')::int as today
+         from account_alert_log where rule_id = $1`,
+        [r.id, account],
+      )
+    ).rows[0];
+    if (recent.same > 0 || recent.today >= r.daily_cap) continue;
+    await pool.query(`select enqueue_job($1, 'account_alert', $2, $3)`, [ws, `${r.id}:${account}`, JSON.stringify({ rule_id: r.id, account_id: account })]);
+  }
+}
+
+/** account_alert: post the account to the rule's Slack. */
+export const accountAlert = (pool: pg.Pool, fetchFn: typeof fetch = fetch): Handler => async (job) => {
+  const { rule_id, account_id } = job.payload as { rule_id?: string; account_id?: string };
+  const r = (await pool.query(`select id, rule, slack_sealed, enabled from account_alert_rules where id = $1`, [rule_id])).rows[0];
+  const a = (await pool.query(`select id, name, domain, fit, intent, stage, why_now from accounts where id = $1`, [account_id])).rows[0];
+  const rule = r ? parseRule(r.rule) : null;
+  if (!r || !r.enabled || !a || !rule || !r.slack_sealed) return;
+  let url: string;
+  try {
+    url = unseal(r.slack_sealed);
+  } catch (e) {
+    throw new JobError(`Can't read the Slack address: ${(e as Error).message}`, { retry: false });
+  }
+  if (!/^https:\/\/hooks\.slack\.com\//.test(url) || (await hostIsPrivate(new URL(url).hostname))) throw new JobError("Not a Slack webhook", { retry: false });
+  const res = await fetchFn(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(slackAccountMessage(a, rule)), signal: AbortSignal.timeout(10_000) });
+  if (!res.ok) throw new JobError(`Slack answered ${res.status}`, { retry: res.status >= 500 || res.status === 429 });
+  await pool.query(`insert into account_alert_log (rule_id, account_id, workspace_id) values ($1, $2, $3) on conflict do nothing`, [r.id, a.id, job.workspace_id]);
+};
+
