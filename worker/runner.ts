@@ -10,6 +10,7 @@ import { unzipSync, zipSync } from "fflate";
 import pw from "playwright-core";
 import type { Browser, BrowserContext, Locator, Page } from "playwright-core";
 import { buildLock, lockSections, parseLock, type Action, type Arg, type Call } from "../src/lib/lock.ts";
+import { isPrivateAddress, LOCAL_NAMES } from "../src/lib/privateNet.ts";
 import { isLocalHost, tunnelFetch, type TunnelClient } from "./tunnel.ts";
 import type { Writer } from "./writer.ts";
 
@@ -111,24 +112,8 @@ const same = (a: string, b: string) => a.replace(/\s+/g, " ").trim().toLowerCase
 
 const VIEWPORT = { width: 1280, height: 720 };
 
-// Private and local addresses the browser may never reach from our servers.
-export function isPrivateAddress(ip: string): boolean {
-  const v = isIP(ip);
-  if (v === 4) {
-    const [a, b] = ip.split(".").map(Number) as [number, number];
-    return a === 10 || a === 127 || a === 0 || (a === 169 && b === 254) || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || (a === 100 && b >= 64 && b <= 127) || a >= 224;
-  }
-  if (v === 6) {
-    const s = ip.toLowerCase();
-    if (s === "::1" || s === "::") return true;
-    const mapped = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/.exec(s);
-    if (mapped) return isPrivateAddress(mapped[1]!);
-    return /^f[cd]/.test(s) || /^fe[89ab]/.test(s) || s.startsWith("ff");
-  }
-  return false;
-}
-
-const LOCAL_NAMES = /(^|\.)(localhost|local|internal|localdomain|home\.arpa)$/i;
+// Private and local addresses the browser may never reach from our servers (src/lib/privateNet.ts).
+export { isPrivateAddress };
 
 /** Hide every secret value in a piece of text. */
 export function maskSecrets(text: string, secrets: Record<string, string>) {

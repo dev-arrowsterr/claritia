@@ -7,6 +7,7 @@ import { APP_URL, INBOX_DOMAIN } from "@/lib/site";
 import { askConfirm, askText, tell } from "../Dialogs";
 import { AlertsPanel } from "./AlertsPanel";
 import { GitHubPanel } from "./GitHubPanel";
+import { SuitePanel } from "./SuitePanel";
 import {
   announceChange,
   Avatar,
@@ -222,6 +223,8 @@ function KeysPanel({ sb, session, ws }: Pick<ViewProps, "sb" | "session" | "ws">
 }
 
 export function SettingsView({ sb, session, ws, role, project, projectsChanged, navigate }: ViewProps) {
+  const testing = ws.features.includes("testing");
+  const marketing = ws.features.includes("marketing");
   const [error, setError] = useState("");
   const inbox = useLoad(async () => (project ? ((must(await sb.from("projects").select("inbox_id").eq("id", project.id).single()) as { inbox_id: string }).inbox_id) : ""), project?.id ?? "none");
   const members = useLoad(async () => must(await sb.from("workspace_members").select("user_id, role, created_at").eq("workspace_id", ws.id).order("created_at")) as { user_id: string; role: string }[], ws.id);
@@ -240,7 +243,9 @@ export function SettingsView({ sb, session, ws, role, project, projectsChanged, 
       <div className="mx-auto flex max-w-3xl flex-col gap-5">
         <ErrorNote message={error} />
 
-        {project ? (
+        {marketing ? <SuitePanel sb={sb} session={session} ws={ws} role={role} /> : null}
+
+        {testing && project ? (
           <Panel>
             <CardHead label="Project">
               <Button
@@ -324,11 +329,11 @@ export function SettingsView({ sb, session, ws, role, project, projectsChanged, 
         ) : null}
 
 
-        {project ? <GitHubPanel sb={sb} session={session} ws={ws} project={project} /> : null}
+        {testing && project ? <GitHubPanel sb={sb} session={session} ws={ws} project={project} /> : null}
 
-        {project ? <AlertsPanel sb={sb} session={session} project={project} /> : null}
+        {testing && project ? <AlertsPanel sb={sb} session={session} project={project} /> : null}
 
-        <PlanPanel sb={sb} session={session} ws={ws} role={role} />
+        {testing ? <PlanPanel sb={sb} session={session} ws={ws} role={role} /> : null}
 
         <KeysPanel sb={sb} session={session} ws={ws} />
 

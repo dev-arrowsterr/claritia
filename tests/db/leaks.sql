@@ -537,6 +537,46 @@ select pg_temp.check((select id from open_tunnel('11111111-0000-0000-0000-000000
 update tunnels set last_seen_at = now() - interval '2 minutes' where id = 'ad000000-0000-0000-0000-000000000001';
 select pg_temp.check(not exists (select 1 from open_tunnel('11111111-0000-0000-0000-000000000000')), 'A tunnel not seen for 2 minutes still counts as open');
 
+-- Foundation (020): jobs are server-only, features only change on the server, owners read the audit log and privacy
+-- requests, and nobody reads a suite connection's sealed key.
+insert into suite_connections (workspace_id, product, base_url, key_sealed, key_hint, status) values
+  ('11111111-0000-0000-0000-000000000000', 'omniscient', 'https://app.omniscient.example', 'v1:acme-omn', '…a1b2', 'ok'),
+  ('22222222-0000-0000-0000-000000000000', 'omniscient', 'https://app.omniscient.example', 'v1:cat-omn', '…c3d4', 'ok');
+insert into audit_log (workspace_id, actor, action, target) values
+  ('11111111-0000-0000-0000-000000000000', 'a0000000-0000-0000-0000-000000000000', 'suite.connect', 'omniscient'),
+  ('22222222-0000-0000-0000-000000000000', 'c0000000-0000-0000-0000-000000000000', 'suite.connect', 'omniscient');
+insert into privacy_requests (workspace_id, kind, subject_hash, source) values
+  ('11111111-0000-0000-0000-000000000000', 'erase', '\x00', 'app'),
+  ('22222222-0000-0000-0000-000000000000', 'erase', '\x01', 'app');
+select enqueue_job('11111111-0000-0000-0000-000000000000', 'stitch', 'dev-acme', '{}');
+select pg_temp.as_user('b0000000-0000-0000-0000-000000000000');
+set role authenticated;
+select pg_temp.check(pg_temp.visible($$select count(*) from jobs$$) = 0, 'Ben sees the jobs queue');
+select pg_temp.fails($$insert into jobs (kind) values ('stitch')$$, 'Ben adds a job');
+select pg_temp.fails($$select enqueue_job('11111111-0000-0000-0000-000000000000', 'stitch', 'x', '{}')$$, 'Ben queues a job through the function');
+select pg_temp.fails($$select * from claim_job('{stitch}', 'ben', 60, 1)$$, 'Ben claims a job');
+select pg_temp.fails($$update workspaces set features = '{testing,marketing}'$$, 'Ben turns on features for his workspace');
+select pg_temp.check((select count(*) from suite_connections) = 1 and (select key_hint from suite_connections) = '…a1b2', 'Ben can''t see only his own suite connection');
+select pg_temp.fails($$select key_sealed from suite_connections$$, 'Ben reads a sealed suite key');
+select pg_temp.fails($$insert into suite_connections (workspace_id, product, base_url, key_sealed) values ('11111111-0000-0000-0000-000000000000', 'arrowsterr', 'https://x.example', 'v1:x')$$, 'Ben saves a suite connection without the server');
+select pg_temp.fails($$update suite_connections set status = 'ok'$$, 'Ben edits a suite connection');
+select pg_temp.check((select count(*) from audit_log) = 0, 'Ben, a member, reads the audit log');
+select pg_temp.check((select count(*) from privacy_requests) = 0, 'Ben, a member, reads privacy requests');
+select pg_temp.fails($$insert into audit_log (workspace_id, action) values ('11111111-0000-0000-0000-000000000000', 'fake')$$, 'Ben writes the audit log');
+reset role;
+select pg_temp.as_user('a0000000-0000-0000-0000-000000000000');
+set role authenticated;
+select pg_temp.check((select count(*) from audit_log) = 1, 'Ann, the owner, can''t read only her audit log');
+select pg_temp.check((select count(*) from privacy_requests) = 1, 'Ann, the owner, can''t read only her privacy requests');
+select pg_temp.fails($$update privacy_requests set status = 'done'$$, 'Ann marks a privacy request done herself');
+reset role;
+select pg_temp.as_user('c0000000-0000-0000-0000-000000000000');
+set role authenticated;
+select pg_temp.check((select count(*) from suite_connections) = 1 and (select key_hint from suite_connections) = '…c3d4', 'Cat sees Acme''s suite connection');
+reset role;
+select set_config('request.jwt.claim.sub', '', false);
+delete from jobs;
+
 -- Cloud minutes: once Acme has used its 2,000, nobody there can start a run.
 insert into runs (workspace_id, project_id, test_name, test_version, environment_name, base_url, lock, status, duration_ms)
 values ('11111111-0000-0000-0000-000000000000', 'a1000000-0000-0000-0000-000000000000', 'long', 1, 'staging', 'https://x.com', '', 'passed', 2000 * 60000);

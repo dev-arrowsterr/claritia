@@ -160,3 +160,17 @@ export const MapIcon = (p: P) => (
     <path d="M9 4v14M15 6v14" />
   </Svg>
 );
+
+export const FileText = (p: P) => (
+  <Svg {...p}>
+    <path d="M14 3H6v18h12V7l-4-4z" />
+    <path d="M14 3v4h4M9 12h6M9 16h6" />
+  </Svg>
+);
+
+export const Link = (p: P) => (
+  <Svg {...p}>
+    <path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1" />
+    <path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1" />
+  </Svg>
+);

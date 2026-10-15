@@ -3,8 +3,9 @@
 import type { Session, SupabaseClient } from "@supabase/supabase-js";
 import { useCallback, useEffect, useRef, useState } from "react";
 
-export type Route = "tests" | "blocks" | "map" | "runs" | "environments" | "schedules" | "approvals" | "insights" | "settings";
-export type Workspace = { id: string; name: string };
+import type { Route } from "@/lib/nav";
+export type { Route };
+export type Workspace = { id: string; name: string; features: string[] };
 export type Project = { id: string; name: string; workspace_id: string; created_at: string };
 export type Environment = { id: string; project_id: string; name: string; base_url: string; created_at: string };
 export type Secret = { id: string; environment_id: string; name: string; updated_at: string };

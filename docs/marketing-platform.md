@@ -144,23 +144,27 @@ supabase/migrations/   020 onward
 
 ## Part 4. Modules in detail
 
-### M0. Foundation and suite (weeks 1–2)
+### M0. Foundation and suite (weeks 1–2) · built
 
-**Build:**
-- Migration `020_foundation.sql`: the `jobs` table with `claim_job(kinds[])` using `for update skip locked`, leases and retries. Old run, plan and exploration claims move onto it.
-- New nav (Part 1.2). Testing screens move to Settings › Testing.
-- Plans and limits in Stripe (Part 10), metered on contacts, emails and pages through `workspace_usage`.
-- **Suite connections.** Settings › Suite:
-  - Connect Omniscient (API key, from the Omniscient work in Part 5.1).
-  - Connect Arrowsterr (API key and brand).
-- `audit_log` and `privacy_requests` tables (`docs/account-intelligence.md` 3.5).
-- `ToolIntro` first screens for Visitors, Journeys, Pages and Reports.
+**Shipped:**
+- **Jobs queue** (migration `020_foundation.sql`, `src/lib/jobs.ts`):
+  - `enqueue_job`, `claim_job`, `extend_job`, `finish_job`, `prune_jobs`.
+  - Jobs that share a key run one at a time, and only one waits per key, so bursts collapse.
+  - Leases that run out go back in line, retries back off (1, 5, 30 minutes, then 2 and 6 hours), and finished jobs are pruned hourly.
+  - Server-only. Tests: `tests/db/jobs.sql` and `tests/jobs.test.ts`.
+  - Runs, plans and explorations keep their own claim functions, which already work and have their own tests. New work (M1 onward) uses the queue.
+- **Features flag:** `workspaces.features` (`testing`, `marketing`). Only the server changes it.
+  - Existing and new workspaces start with `testing`, so nothing changes for them.
+  - Turning on `marketing` shows the new screens. With both, the testing screens sit under one Testing group.
+  - Logic in `src/lib/nav.ts`, tested in `tests/nav.test.ts`.
+- **First screens** (`ToolIntro`) for Visitors, Journeys, Pages and Reports (`src/components/app/views/MarketingIntros.tsx`).
+- **Settings › Suite:** connect Omniscient and Arrowsterr with an address and an API key.
+  - The key is sealed. Private addresses are refused, and redirects aren't followed.
+  - Each product is checked with `GET /api/v1/me`, which Omniscient and Arrowsterr must answer (Part 5).
+  - Owners connect and disconnect, members check again. Every change goes to the audit log.
+- **Tables:** `audit_log` and `privacy_requests` (owners read, server writes), plus leak tests for every new table.
 
-**Done when:**
-- Old jobs pass their tests on the new queue.
-- A workspace can connect Omniscient and Arrowsterr, and see a green check for each.
-
----
+**Moved later:** Stripe plans for the platform (Part 10) move to week 18, before the Beta. There's nothing to meter until contacts and emails exist.
 
 ### M1. Website Intelligence (weeks 2–5)
 

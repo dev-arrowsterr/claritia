@@ -12,3 +12,4 @@ URL="${ADMIN%/*}/$DB"
 psql "$URL" -qX -v ON_ERROR_STOP=1 -f tests/db/supabase_stub.sql
 for f in supabase/migrations/*.sql; do psql "$URL" -qX -v ON_ERROR_STOP=1 -f "$f" >/dev/null 2>&1 || { echo "FAILED: $f"; psql "$URL" -qX -v ON_ERROR_STOP=1 -f "$f"; exit 1; }; done
 psql "$URL" -qX -v ON_ERROR_STOP=1 -f tests/db/leaks.sql
+psql "$URL" -qX -v ON_ERROR_STOP=1 -f tests/db/jobs.sql
