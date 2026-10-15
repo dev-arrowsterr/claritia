@@ -10,7 +10,7 @@ import { GitHubPanel } from "./GitHubPanel";
 import { AccountAlertsPanel } from "./AccountAlertsPanel";
 import { IdentityPanel } from "./IdentityPanel";
 import { IcpPanel, SitesPanel } from "./SitesPanel";
-import { SuitePanel } from "./SuitePanel";
+import { settingsGroups, type SettingsTab } from "@/lib/settingsTabs";
 import {
   announceChange,
   Avatar,
@@ -226,9 +226,8 @@ function KeysPanel({ sb, session, ws }: Pick<ViewProps, "sb" | "session" | "ws">
 }
 
 export function SettingsView({ sb, session, ws, role, project, projectsChanged, navigate }: ViewProps) {
-  const testing = ws.features.includes("testing");
-  const marketing = ws.features.includes("marketing");
   const [error, setError] = useState("");
+  const [tab, setTab] = useState<SettingsTab>(() => (typeof window === "undefined" ? "profile" : (window.location.hash.slice(1) as SettingsTab)));
   const inbox = useLoad(async () => (project ? ((must(await sb.from("projects").select("inbox_id").eq("id", project.id).single()) as { inbox_id: string }).inbox_id) : ""), project?.id ?? "none");
   const members = useLoad(async () => must(await sb.from("workspace_members").select("user_id, role, created_at").eq("workspace_id", ws.id).order("created_at")) as { user_id: string; role: string }[], ws.id);
 
@@ -241,18 +240,12 @@ export function SettingsView({ sb, session, ws, role, project, projectsChanged, 
     }
   };
 
-  return (
-    <Page icon={<Settings size={14} />} title="Settings">
-      <div className="mx-auto flex max-w-3xl flex-col gap-5">
-        <ErrorNote message={error} />
-
-        {marketing ? <SitesPanel sb={sb} ws={ws} role={role} /> : null}
-        {marketing ? <IcpPanel sb={sb} ws={ws} /> : null}
-        {marketing ? <IdentityPanel sb={sb} session={session} ws={ws} role={role} /> : null}
-        {marketing ? <AccountAlertsPanel sb={sb} session={session} ws={ws} /> : null}
-        {marketing ? <SuitePanel sb={sb} session={session} ws={ws} role={role} /> : null}
-
-        {testing && project ? (
+  const pages: Record<SettingsTab, React.ReactNode> = {
+    sites: <SitesPanel sb={sb} ws={ws} role={role} />,
+    identity: <IdentityPanel sb={sb} session={session} ws={ws} role={role} />,
+    icp: <IcpPanel sb={sb} ws={ws} />,
+    account_alerts: <AccountAlertsPanel sb={sb} session={session} ws={ws} />,
+    project: project ? (
           <Panel>
             <CardHead label="Project">
               <Button
@@ -333,17 +326,10 @@ export function SettingsView({ sb, session, ws, role, project, projectsChanged, 
               </div>
             ) : null}
           </Panel>
-        ) : null}
-
-
-        {testing && project ? <GitHubPanel sb={sb} session={session} ws={ws} project={project} /> : null}
-
-        {testing && project ? <AlertsPanel sb={sb} session={session} project={project} /> : null}
-
-        {testing ? <PlanPanel sb={sb} session={session} ws={ws} role={role} /> : null}
-
-        <KeysPanel sb={sb} session={session} ws={ws} />
-
+    ) : null,
+    github: project ? <GitHubPanel sb={sb} session={session} ws={ws} project={project} /> : null,
+    test_alerts: project ? <AlertsPanel sb={sb} session={session} project={project} /> : null,
+    workspace: (
         <Panel>
           <CardHead label="Workspace" count={members.data ? `${members.data.length} ${members.data.length === 1 ? "member" : "members"}` : undefined}>
             {role === "owner" ? (
@@ -368,7 +354,10 @@ export function SettingsView({ sb, session, ws, role, project, projectsChanged, 
             <Badge>{role}</Badge>
           </div>
         </Panel>
-
+    ),
+    keys: <KeysPanel sb={sb} session={session} ws={ws} />,
+    plan: <PlanPanel sb={sb} session={session} ws={ws} role={role} />,
+    profile: (
         <Panel>
           <CardHead label="Account" />
           <div className="flex items-center gap-3 px-4 py-4">
@@ -380,6 +369,43 @@ export function SettingsView({ sb, session, ws, role, project, projectsChanged, 
             </Button>
           </div>
         </Panel>
+    ),
+  };
+  const groups = settingsGroups(ws.features, !!project);
+  const tabs = groups.flatMap((g) => g.tabs);
+  const current = tabs.find((t) => t.id === tab) ?? tabs[0];
+  const pick = (t: SettingsTab) => {
+    setTab(t);
+    try {
+      history.replaceState(null, "", `#${t}`);
+    } catch {}
+  };
+
+  return (
+    <Page icon={<Settings size={14} />} title="Settings">
+      <div className="mx-auto flex max-w-5xl flex-col gap-6 md:flex-row md:gap-10">
+        <nav className="flex shrink-0 flex-col gap-4 md:sticky md:top-0 md:w-48 md:self-start" aria-label="Settings">
+          {groups.map((g) => (
+            <div key={g.label} className="flex flex-col gap-0.5">
+              <span className="label-mono px-2 pb-1">{g.label}</span>
+              {g.tabs.map((t) => (
+                <button
+                  key={t.id}
+                  type="button"
+                  aria-current={current.id === t.id ? "page" : undefined}
+                  onClick={() => pick(t.id)}
+                  className={`flex h-8 items-center rounded-md px-2.5 text-left text-[13px] font-medium ${current.id === t.id ? "bg-panel text-ink ring-1 ring-line" : "text-body hover:bg-hover hover:text-ink"}`}
+                >
+                  {t.label}
+                </button>
+              ))}
+            </div>
+          ))}
+        </nav>
+        <div className="flex min-w-0 flex-1 flex-col gap-5">
+          <ErrorNote message={error} />
+          {pages[current.id]}
+        </div>
       </div>
     </Page>
   );
