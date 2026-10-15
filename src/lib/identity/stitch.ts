@@ -67,6 +67,11 @@ export function verifyIdentify(secrets: string[], siteId: string, userId: string
 
 // Locks ------------------------------------------------------------------------------------------------------
 
+/** Every stitch holds the workspace lock shared; a rebuild holds it alone. */
+export async function workspaceLock(db: Db, ws: string, exclusive = false) {
+  await db.query(`select ${exclusive ? "pg_advisory_xact_lock" : "pg_advisory_xact_lock_shared"}(hashtextextended($1, 0))`, [`ws:${ws}`]);
+}
+
 async function lock(db: Db, ws: string, keys: string[]) {
   for (const k of [...new Set(keys)].sort()) await db.query(`select pg_advisory_xact_lock(hashtextextended($1, 0))`, [`${ws}:${k}`]);
 }
@@ -92,6 +97,7 @@ export async function stitchDevice(pool: Pool, workspaceId: string, deviceId: st
     const c = await pool.connect();
     try {
       await c.query("begin");
+      await workspaceLock(c, workspaceId);
       await lock(c, workspaceId, [`dev:${deviceId}`]);
       const r = await c.query(
         `select id, workspace_id, site_id, device_id, session_id, source, level, identifiers, hard_edge, extra, server_at
@@ -131,14 +137,16 @@ export async function stitchOne(db: Db, e: Evidence, settings: Settings): Promis
   const t = new Date(e.server_at).getTime();
   const ignore = async (why: string) => (await finish(db, e, { ignored: why }), { ignored: why });
 
-  if (!e.device_id) return ignore("no_device");
-  const dev = (await db.query(`select id, state, tainted_until, no_backfill from devices where id = $1 for update`, [e.device_id])).rows[0];
-  if (!dev) return ignore("no_device");
+  // Manual merges and CRM rows have no device: they only shape people.
+  const deviceless = !e.device_id && (e.source === "manual_merge" || e.source === "crm" || e.source === "crm_merge");
+  if (!e.device_id && !deviceless) return ignore("no_device");
+  const dev = e.device_id ? (await db.query(`select id, state, tainted_until, no_backfill from devices where id = $1 for update`, [e.device_id])).rows[0] : null;
+  if (!deviceless && !dev) return ignore("no_device");
   if (e.session_id) {
     const s = (await db.query(`select policy from sessions where id = $1`, [e.session_id])).rows[0];
     if (s && !IDENTITY_POLICIES.includes(s.policy)) return ignore("policy");
   }
-  if (dev.state === "internal" || dev.state === "opted_out") return ignore(dev.state);
+  if (dev && (dev.state === "internal" || dev.state === "opted_out")) return ignore(dev.state);
   if (e.source === "hutk") return ignore("no_crm"); // needs the HubSpot connection (M3)
   if (e.level === "inferred") return ignore("not_built"); // email links come with M6
 
@@ -147,6 +155,11 @@ export async function stitchOne(db: Db, e: Evidence, settings: Settings): Promis
   let source = e.source;
   let hard = e.hard_edge;
   const raw = e.identifiers;
+  // Checked before (a rebuild replays it after the token is gone).
+  if (e.source === "identify_signed" || deviceless) {
+    level = "verified";
+    hard = raw.length > 1;
+  }
   if (e.source === "identify") {
     const user = raw.find((i) => i.kind === "user")?.value ?? "";
     const email = raw.find((i) => i.kind === "email")?.value ?? "";
@@ -157,21 +170,16 @@ export async function stitchOne(db: Db, e: Evidence, settings: Settings): Promis
     }
   }
 
-  // Clean, and drop anything invalid, disposable or erased.
+  // Clean, and drop anything invalid or disposable. An erased email that comes back later starts fresh (15.1).
   const cleaned: Cleaned[] = [];
   for (const i of raw) {
     const c = cleanIdentifier(i.kind, i.value, settings);
     if (!isRejected(c)) cleaned.push(c);
   }
-  if (cleaned.length) {
-    const erased = await db.query(`select value_hash from erasures where workspace_id = $1 and value_hash = any($2)`, [ws, cleaned.map((c) => c.hash)]);
-    const gone = new Set(erased.rows.map((r) => Buffer.from(r.value_hash).toString("hex")));
-    for (let k = cleaned.length - 1; k >= 0; k--) if (gone.has(cleaned[k].hash.toString("hex"))) cleaned.splice(k, 1);
-  }
   if (!cleaned.length) return (await finish(db, e, { ignored: "invalid", level, source }), { ignored: "invalid" });
 
   // Own domain: the device is internal from now on (Part 9).
-  if (cleaned.some((c) => c.class === "own")) {
+  if (e.device_id && cleaned.some((c) => c.class === "own")) {
     await db.query(`update device_links set to_at = $2 where device_id = $1 and to_at is null`, [e.device_id, new Date(t)]);
     await db.query(`update devices set state = 'internal', state_since = $2 where id = $1`, [e.device_id, new Date(t)]);
     await db.query(`update sessions set internal = true, person_id = null, person_level = null, person_source = null where device_id = $1`, [e.device_id]);
@@ -215,7 +223,8 @@ export async function stitchOne(db: Db, e: Evidence, settings: Settings): Promis
     person = await newPerson(db, ws, t, ids);
   } else if (hard && owners.length > 1) {
     const all = await identifiersOf(db, ws, owners);
-    const why = guardFails([...all, ...unattached(ids, rows)], source === "crm_merge");
+    // A person approving a proposal decides past the guards.
+    const why = source === "manual_merge" ? null : guardFails([...all, ...unattached(ids, rows)], source === "crm_merge");
     if (!why) {
       ({ survivor: person, merged } = await merge(db, ws, owners));
     } else {
@@ -244,6 +253,10 @@ export async function stitchOne(db: Db, e: Evidence, settings: Settings): Promis
   const email = ids.find((c) => c.kind === "email");
   if (email) await db.query(`update persons set primary_email = coalesce(primary_email, $2), partner = partner or $3 where id = $1`, [person, email.clean, email.class === "partner"]);
 
+  if (!e.device_id || !dev) {
+    await finish(db, e, { level, source, hard_edge: hard });
+    return { person, merged, proposed, device: "none" };
+  }
   const linkLevel = level === "verified" ? "verified" : "asserted";
   const result = await linkDevice(db, e, person, linkLevel, t, dev as Dev, source);
   await finish(db, e, { ignored: result.device === "tainted" ? "taint" : null, level, source, hard_edge: hard });
@@ -368,7 +381,8 @@ async function linkDevice(db: Db, e: Evidence, person: string, level: "verified"
   await db.query(`update device_links set to_at = $2 where id = $1`, [open.id, at]);
   await openLink();
   await setState("shared", true);
-  const split = session ? await splitSession(db, session, t, person, level) : undefined;
+  const split = session && +new Date(session.started_at) < t ? await splitSession(db, session, t, person, level) : undefined;
+  if (session && !split) await liveSession(db, session, person, level);
   return { device: "shared", split };
 }
 
@@ -385,7 +399,12 @@ async function currentSession(db: Db, e: Evidence, device: string, t: number): P
 
 async function liveSession(db: Db, s: Sess | null, person: string, level: string): Promise<number> {
   if (!s) return 0;
-  await db.query(`update sessions set person_id = $2, person_level = $3, person_source = 'live' where id = $1 and policy = any($4) and not internal`, [s.id, person, level, IDENTITY_POLICIES]);
+  // The second part of a split visit keeps saying so (a rebuild lands here instead of splitting again).
+  await db.query(
+    `update sessions set person_id = $2, person_level = $3, person_source = case when split_from is not null then 'split' else 'live' end
+     where id = $1 and policy = any($4) and not internal`,
+    [s.id, person, level, IDENTITY_POLICIES],
+  );
   return 0;
 }
 

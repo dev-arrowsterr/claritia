@@ -203,15 +203,6 @@ test("own domain marks the device internal; role, disposable and policy are igno
   assert.equal(await personOf("email", "y@kappa.io"), null);
 });
 
-test("erased identifiers are never stitched again", async () => {
-  const d = await device();
-  const { hashOf } = await import("../../src/lib/identity/clean.ts");
-  await q(`insert into erasures (workspace_id, value_hash) values ($1, $2)`, [WS, hashOf("gone@lambda.io")]);
-  await form(d, await session(d, base), base + 1000, "gone@lambda.io");
-  assert.deepEqual(await run(d), [{ ignored: "invalid" }]);
-  assert.equal(await personOf("email", "gone@lambda.io"), null);
-});
-
 test("8 devices with the same new email at once: one person", async () => {
   const devs = await Promise.all(Array.from({ length: 8 }, () => device()));
   for (const d of devs) await form(d, await session(d, base), base + 1000, "race@mu.io");

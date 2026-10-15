@@ -644,6 +644,44 @@ select pg_temp.check((select count(*) from sessions) = 0 and (select count(*) fr
 reset role;
 select set_config('request.jwt.claim.sub', '', false);
 
+-- Identity (023, 024): members read their own people; nobody writes them directly; undo stays in the workspace;
+-- only owners ask for erasure or export, and only owners read exports; identify secrets are never readable.
+insert into persons (id, workspace_id, primary_email) values
+  ('ab000000-0000-0000-0000-000000000001', '11111111-0000-0000-0000-000000000000', 'jane@acme.com'),
+  ('cb000000-0000-0000-0000-000000000001', '22222222-0000-0000-0000-000000000000', 'cat@other.com');
+insert into identifiers (id, workspace_id, person_id, kind, value_clean, value_hash) values
+  (gen_random_uuid(), '11111111-0000-0000-0000-000000000000', 'ab000000-0000-0000-0000-000000000001', 'email', 'jane@acme.com', '\x01'),
+  (gen_random_uuid(), '22222222-0000-0000-0000-000000000000', 'cb000000-0000-0000-0000-000000000001', 'email', 'cat@other.com', '\x02');
+insert into identity_settings (workspace_id, own_domains, identify_secrets_sealed) values ('11111111-0000-0000-0000-000000000000', '{acme.com}', 'v1:sealed');
+select pg_temp.as_user('b0000000-0000-0000-0000-000000000000');
+set role authenticated;
+select pg_temp.check((select count(*) from persons) = 1 and (select count(*) from identifiers) = 1, 'Ben sees another workspace''s people');
+select pg_temp.fails($$insert into persons (id, workspace_id) values (gen_random_uuid(), '11111111-0000-0000-0000-000000000000')$$, 'Ben plants a person');
+select pg_temp.fails($$update identifiers set person_id = null$$, 'Ben edits identifiers');
+select pg_temp.fails($$select identify_secrets_sealed from identity_settings$$, 'Ben reads the identify secrets');
+select pg_temp.check((select own_domains from identity_settings) = '{acme.com}', 'Ben can''t read his own identity settings');
+select pg_temp.fails($$select unmerge_person('cb000000-0000-0000-0000-000000000001', '{}')$$, 'Ben unmerges Cat''s person');
+select pg_temp.fails($$select privacy_request('ab000000-0000-0000-0000-000000000001', 'erase')$$, 'Ben, a member, erases a person');
+select pg_temp.check(pg_temp.visible($$select count(*) from ip_cache$$) = 0 and pg_temp.visible($$select count(*) from erasures$$) = 0, 'Ben reads server-only identity tables');
+reset role;
+select pg_temp.as_user('a0000000-0000-0000-0000-000000000000');
+set role authenticated;
+create temp table pr as select privacy_request('ab000000-0000-0000-0000-000000000001', 'export') as id;
+reset role;
+select set_config('request.jwt.claim.sub', '', false);
+insert into privacy_exports (request_id, workspace_id, data) values ((select id from pr), '11111111-0000-0000-0000-000000000000', '{"person":"jane"}');
+select pg_temp.check((select count(*) from jobs where kind = 'privacy') = 1, 'The export wasn''t queued');
+select pg_temp.as_user('b0000000-0000-0000-0000-000000000000');
+set role authenticated;
+select pg_temp.check((select count(*) from privacy_exports) = 0, 'Ben, a member, reads a privacy export');
+reset role;
+select pg_temp.as_user('a0000000-0000-0000-0000-000000000000');
+set role authenticated;
+select pg_temp.check((select count(*) from privacy_exports) = 1, 'Ann, the owner, can''t read her export');
+reset role;
+select set_config('request.jwt.claim.sub', '', false);
+delete from jobs;
+
 -- Cloud minutes: once Acme has used its 2,000, nobody there can start a run.
 insert into runs (workspace_id, project_id, test_name, test_version, environment_name, base_url, lock, status, duration_ms)
 values ('11111111-0000-0000-0000-000000000000', 'a1000000-0000-0000-0000-000000000000', 'long', 1, 'staging', 'https://x.com', '', 'passed', 2000 * 60000);

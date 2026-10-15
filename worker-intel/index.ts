@@ -6,7 +6,7 @@ import { createServer } from "node:http";
 import { hostname } from "node:os";
 import pg from "pg";
 import { jobLoop } from "../src/lib/jobs.ts";
-import { deviceReset, stitch } from "./jobs/stitch.ts";
+import { deviceReset, privacy, rebuild, stitch, stitchEvidence } from "./jobs/stitch.ts";
 import { pgRpc } from "./rpc.ts";
 
 const log = (msg: string, extra: Record<string, unknown> = {}) => console.log(JSON.stringify({ at: new Date().toISOString(), msg, ...extra }));
@@ -22,7 +22,7 @@ if (!process.env.DATABASE_URL) {
 const loops = Math.max(1, Number(process.env.CONCURRENCY || 4));
 const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL, max: loops + 2, statement_timeout: 30_000 });
 const rpc = pgRpc(pool);
-const handlers = { stitch: stitch(pool), device_reset: deviceReset(pool) };
+const handlers = { stitch: stitch(pool), device_reset: deviceReset(pool), stitch_evidence: stitchEvidence(pool), rebuild: rebuild(pool), privacy: privacy(pool) };
 const stop = new AbortController();
 const worker = `intel-${hostname()}-${process.pid}`;
 
