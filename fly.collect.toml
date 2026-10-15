@@ -1,5 +1,5 @@
 # claritia-collect on Fly.io: takes events from claritia.js. Public and always on.
-# Secrets: DATABASE_URL (Supabase pooler, session mode), CLR_ID_SECRET (32+ chars). Optional: GEO_DB_PATH.
+# Secrets: DATABASE_URL (Supabase pooler, session mode), CLR_ID_SECRET (32+ chars), IPINFO_TOKEN (country file).
 #   fly deploy --config fly.collect.toml
 app = "claritia-collect"
 primary_region = "nrt" # Tokyo, next to Supabase
@@ -25,8 +25,8 @@ kill_timeout = 30
     path = "/health"
     interval = "15s"
     timeout = "2s"
-    grace_period = "10s"
+    grace_period = "30s"
 
 [[vm]]
   size = "shared-cpu-1x"
-  memory = "256mb"
+  memory = "512mb"

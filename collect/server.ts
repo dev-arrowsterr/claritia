@@ -6,7 +6,7 @@ import { readFileSync } from "node:fs";
 import { serve } from "@hono/node-server";
 import { createApp } from "./app.ts";
 import { WriteBuffer } from "./buffer.ts";
-import { openGeo } from "./geo.ts";
+import { ipinfoGeo, openGeo } from "./geo.ts";
 import { PgStore } from "./store.ts";
 
 const log = (msg: string, extra: Record<string, unknown> = {}) => console.log(JSON.stringify({ at: new Date().toISOString(), msg, ...extra }));
@@ -31,7 +31,9 @@ if (missing.length) {
 
 const store = new PgStore(process.env.DATABASE_URL!, Number(process.env.DB_POOL || 10));
 const secret = process.env.CLR_ID_SECRET!;
-const geo = await openGeo(process.env.GEO_DB_PATH);
+const geo = process.env.IPINFO_TOKEN
+  ? await ipinfoGeo({ token: process.env.IPINFO_TOKEN, path: process.env.GEO_DB_PATH || "/tmp/ipinfo_lite.mmdb", log })
+  : await openGeo(process.env.GEO_DB_PATH);
 let script: { code: string; tag: string } | undefined;
 try {
   const dist = new URL("./dist/", import.meta.url);
@@ -46,7 +48,7 @@ const devOrigins = process.env.DEV_ORIGINS ? process.env.DEV_ORIGINS.split(",") 
 const { app } = createApp({ store, secret, geo, script, buffer, log, devOrigins });
 buffer.start();
 
-const server = serve({ fetch: app.fetch, port, hostname: "0.0.0.0" }, () => log("collect listening", { port, geo: !!process.env.GEO_DB_PATH, script: script?.tag }));
+const server = serve({ fetch: app.fetch, port, hostname: "0.0.0.0" }, () => log("collect listening", { port, geo: !!(process.env.IPINFO_TOKEN || process.env.GEO_DB_PATH), script: script?.tag }));
 
 let stopping = false;
 const stop = async (sig: string) => {

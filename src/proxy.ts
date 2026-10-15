@@ -19,7 +19,7 @@ export function proxy(request: NextRequest) {
   return NextResponse.next();
 }
 
-// Next.js files and icons answer on any host.
+// Next.js files, icons and the tracking path (/_clr) answer on any host.
 export const config = {
-  matcher: ["/((?!api/|_next/|favicon\\.ico|icon|apple-icon|.*\\.[a-zA-Z0-9]+$).*)"],
+  matcher: ["/((?!api/|_clr/|_next/|favicon\\.ico|icon|apple-icon|.*\\.[a-zA-Z0-9]+$).*)"],
 };

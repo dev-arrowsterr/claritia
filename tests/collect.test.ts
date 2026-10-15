@@ -123,6 +123,16 @@ test("geo records from MaxMind and IPinfo files", () => {
   assert.deepEqual(readRecord({ country: { iso_code: "CA" }, subdivisions: [{ iso_code: "QC" }], city: { names: { en: "Montreal" } } }), { country: "CA", subdivision: "QC", city: "Montreal", asn: null } satisfies Geo);
   assert.deepEqual(readRecord({ country: "US", asn: "AS16509", as_name: "Amazon" }), { country: "US", subdivision: "", city: "", asn: 16509 });
   assert.deepEqual(readRecord(null), { country: "", subdivision: "", city: "", asn: null });
+  // IPinfo Lite: country is the name, country_code the code.
+  assert.deepEqual(readRecord({ country: "United States", country_code: "US", continent: "North America", asn: "AS7922", as_name: "Comcast", as_domain: "comcast.net" }), { country: "US", subdivision: "", city: "", asn: 7922 });
+});
+
+test("a failed geo download leaves lookups empty, never broken", async () => {
+  const { ipinfoGeo } = await import("../collect/geo.ts");
+  const logs: string[] = [];
+  const geo = await ipinfoGeo({ token: "t", path: `/tmp/geo-test-${process.pid}.mmdb`, fetcher: (async () => new Response("no", { status: 403 })) as unknown as typeof fetch, log: (m) => logs.push(m), refreshMs: 3600_000 });
+  assert.deepEqual(geo("8.8.8.8"), { country: "", subdivision: "", city: "", asn: null });
+  assert.ok(logs.includes("geo load failed"));
 });
 
 test("agents", () => {

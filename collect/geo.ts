@@ -2,7 +2,8 @@
 // visitor is on. The full IP stays in memory for this request only.
 
 import { isIP } from "node:net";
-import { existsSync } from "node:fs";
+import { existsSync, renameSync, statSync } from "node:fs";
+import { writeFile } from "node:fs/promises";
 import maxmind, { type Reader } from "maxmind";
 
 export type Geo = { country: string; subdivision: string; city: string; asn: number | null };
@@ -32,7 +33,8 @@ export function ipNet(ip: string): string | null {
 /** Works with MaxMind GeoLite2/GeoIP2 files and IPinfo's mmdb files. */
 export function readRecord(r: any): Geo {
   if (!r) return NO_GEO;
-  const country = typeof r.country === "string" ? r.country : (r.country?.iso_code ?? r.country_code ?? "");
+  // MaxMind: country.iso_code. IPinfo Lite: country_code (country is the name). Older IPinfo files: country is the code.
+  const country = r.country_code ?? r.country?.iso_code ?? (typeof r.country === "string" && r.country.length === 2 ? r.country : "");
   const subdivision = r.subdivisions?.[0]?.iso_code ?? r.region_code ?? "";
   const city = r.city?.names?.en ?? (typeof r.city === "string" ? r.city : "");
   const asnRaw = r.autonomous_system_number ?? r.asn;
@@ -53,4 +55,34 @@ export async function openGeo(path?: string): Promise<GeoLookup> {
       return NO_GEO;
     }
   };
+}
+
+/**
+ * IPinfo Lite (country and network, CC BY-SA 4.0, credit IPinfo), downloaded with the account token and refreshed
+ * daily. Lookups use the newest file; until the first download lands, they're empty (strict).
+ */
+export async function ipinfoGeo(opts: { token: string; path: string; refreshMs?: number; log?: (msg: string, extra?: Record<string, unknown>) => void; fetcher?: typeof fetch }): Promise<GeoLookup> {
+  const log = opts.log ?? (() => {});
+  let current: GeoLookup = () => NO_GEO;
+  const load = async () => {
+    try {
+      const fresh = existsSync(opts.path) && Date.now() - statSync(opts.path).mtimeMs < (opts.refreshMs ?? 86400_000);
+      if (!fresh) {
+        const res = await (opts.fetcher ?? fetch)(`https://ipinfo.io/data/ipinfo_lite.mmdb?token=${encodeURIComponent(opts.token)}`, { signal: AbortSignal.timeout(120_000) });
+        if (!res.ok) throw new Error(`download failed: ${res.status}`);
+        const tmp = `${opts.path}.part`;
+        await writeFile(tmp, Buffer.from(await res.arrayBuffer()));
+        renameSync(tmp, opts.path);
+      }
+      current = await openGeo(opts.path);
+      log("geo loaded", { bytes: statSync(opts.path).size });
+    } catch (e) {
+      // Keep the last good file. A bad download never empties the lookup.
+      log("geo load failed", { error: String((e as Error).message ?? e) });
+    }
+  };
+  // Don't hold up startup for long: until the file is in, visitors count as strict.
+  await Promise.race([load(), new Promise((r) => setTimeout(r, 15_000))]);
+  setInterval(() => void load(), opts.refreshMs ?? 86400_000).unref();
+  return (ip) => current(ip);
 }
