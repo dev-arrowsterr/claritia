@@ -823,6 +823,30 @@ select pg_temp.check((select title from contacts where email_clean = 'spy@secret
 select set_config('request.jwt.claim.sub', '', false);
 delete from jobs;
 
+-- Imports (035): files stay in their workspace's folder; undo stays in the workspace; the import machinery is
+-- server only.
+insert into storage.buckets (id, name) values ('imports', 'imports') on conflict do nothing;
+insert into storage.objects (bucket_id, name) values ('imports', '22222222-0000-0000-0000-000000000000/u1/cat.csv');
+insert into imports (id, workspace_id, file_name, status, undo_until) values
+  ('ce000000-0000-0000-0000-0000000000a1', '22222222-0000-0000-0000-000000000000', 'cat.csv', 'done', now() + interval '1 day');
+select pg_temp.as_user('b0000000-0000-0000-0000-000000000000');
+set role authenticated;
+select pg_temp.check((select count(*) from storage.objects where bucket_id = 'imports') = 0, 'Ben sees Cat''s import files');
+select pg_temp.fails($$insert into storage.objects (bucket_id, name) values ('imports', '22222222-0000-0000-0000-000000000000/u2/x.csv')$$, 'Ben uploads into Cat''s folder');
+insert into storage.objects (bucket_id, name) values ('imports', '11111111-0000-0000-0000-000000000000/u3/ben.csv');
+select pg_temp.check((select count(*) from imports where id = 'ce000000-0000-0000-0000-0000000000a1') = 0, 'Ben sees Cat''s import');
+select pg_temp.fails($$select import_undo('ce000000-0000-0000-0000-0000000000a1')$$, 'Ben undoes Cat''s import');
+select pg_temp.fails($$select import_undo_run('ce000000-0000-0000-0000-0000000000a1')$$, 'Ben runs an undo');
+select pg_temp.fails($$select suppress('11111111-0000-0000-0000-000000000000', 'csv', '[]')$$, 'Ben writes suppressions');
+select pg_temp.fails($$select import_lookup('22222222-0000-0000-0000-000000000000', array['spy@secret-co.com'])$$, 'Ben looks up Cat''s contacts');
+select pg_temp.fails($$select imports_start('11111111-0000-0000-0000-000000000000', 'b0000000-0000-0000-0000-000000000000', 'x', '{}')$$, 'Ben starts an import record');
+select pg_temp.fails($$select import_claim('ce000000-0000-0000-0000-0000000000a1')$$, 'Ben claims an import');
+select pg_temp.fails($$select imports_files_to_prune()$$, 'Ben lists files to prune');
+reset role;
+select pg_temp.check((select status from imports where id = 'ce000000-0000-0000-0000-0000000000a1') = 'done', 'Cat''s import changed');
+select set_config('request.jwt.claim.sub', '', false);
+delete from jobs;
+
 -- Cloud minutes: once Acme has used its 2,000, nobody there can start a run.
 insert into runs (workspace_id, project_id, test_name, test_version, environment_name, base_url, lock, status, duration_ms)
 values ('11111111-0000-0000-0000-000000000000', 'a1000000-0000-0000-0000-000000000000', 'long', 1, 'staging', 'https://x.com', '', 'passed', 2000 * 60000);

@@ -19,7 +19,9 @@ See the plan's Part 21. Migration `033_contacts.sql`, `src/lib/contacts/`, `src/
 
 ---
 
-## Week 2. Imports at full size
+## Week 2. Imports at full size (built)
+
+What shipped and what's left: the plan's Part 21b. The build used `035_imports.sql` (records took `034`), one import run shared by the web app and the job in place of staged rows, and undo from field history.
 
 **Goal:** any file of any size imports with preview, undo and suppressions first.
 

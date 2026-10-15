@@ -6,6 +6,7 @@
 import { cleanDomain } from "../company/domains.ts";
 import { cleanEmail, isRejected } from "../identity/clean.ts";
 import { basisFor, parseBasis, sourceRefused, type Basis, type ImportSource } from "./consent.ts";
+import { cleanPhone, nameCase, splitName, titleRole } from "./clean.ts";
 import { countryCode, customValue, lifecycleOf, type CustomField, type Target } from "./fields.ts";
 
 /** One contact as contacts_upsert takes it (supabase/migrations/033_contacts.sql). */
@@ -30,9 +31,17 @@ export type ContactInput = {
   source_id?: string;
 };
 
-export type Mapping = { columns: Target[]; source: ImportSource; basis: Basis | null };
+/** list: what the file is. "unsubscribed" and "bounced" files block those addresses from email, and their people still come in. */
+export type Mapping = { columns: Target[]; source: ImportSource; basis: Basis | null; list?: "contacts" | "unsubscribed" | "bounced" };
 export type Skipped = { missing_email: number; invalid_email: number; disposable: number };
-export type Prepared = { contacts: ContactInput[]; counts: { rows: number; merged: number; no_basis: number; skipped: Skipped } };
+export type Suppression = { email_clean: string; reason: "unsubscribed" | "bounced" };
+export type RowError = { row: number; email: string; reason: string };
+export type Prepared = {
+  contacts: ContactInput[];
+  suppress: Suppression[];
+  errors: RowError[];
+  counts: { rows: number; merged: number; no_basis: number; suppressed: number; skipped: Skipped };
+};
 export type Ctx = { custom: CustomField[]; own_domains?: string[]; partner_domains?: string[] };
 
 export { MAX_BYTES, MAX_ROWS } from "./csv.ts";
@@ -47,7 +56,7 @@ export function mappingError(m: Mapping, columns: number, custom: CustomField[])
   if (new Set(used).size !== used.length) return "Each field can take one column.";
   const keys = new Set(custom.map((f) => f.key));
   if (used.some((t) => t.startsWith("f.") && !keys.has(t.slice(2)))) return "A mapped field no longer exists.";
-  if (!m.columns.includes("basis") && !m.basis) return "Choose the email consent for this list.";
+  if (!m.columns.includes("basis") && !m.basis && m.list !== "unsubscribed" && m.list !== "bounced") return "Choose the email consent for this list.";
   return null;
 }
 
@@ -67,14 +76,19 @@ function merge(a: ContactInput, b: ContactInput): ContactInput {
 }
 
 /** Rows (without the header) to contacts, with counts of what was merged or skipped. */
-export function prepareImport(rows: string[][], m: Mapping, ctx: Ctx): Prepared {
-  const counts = { rows: rows.length, merged: 0, no_basis: 0, skipped: { missing_email: 0, invalid_email: 0, disposable: 0 } };
+export function prepareImport(rows: string[][], m: Mapping, ctx: Ctx, firstRow = 2): Prepared {
+  const counts = { rows: rows.length, merged: 0, no_basis: 0, suppressed: 0, skipped: { missing_email: 0, invalid_email: 0, disposable: 0 } };
+  const errors: RowError[] = [];
+  const suppress = new Map<string, Suppression>();
+  // Seniority and department fill in from the title when the workspace has those pick lists and the file doesn't.
+  const seniorityField = ctx.custom.find((f) => f.key === "seniority" && f.type === "select");
+  const departmentField = ctx.custom.find((f) => f.key === "department" && f.type === "select");
   const at = new Map<Target, number>();
   m.columns.forEach((t, i) => t !== "skip" && at.set(t, i));
   const custom = new Map(ctx.custom.map((f) => [f.key, f]));
   const byEmail = new Map<string, ContactInput>();
 
-  for (const row of rows) {
+  for (const [n, row] of rows.entries()) {
     const cell = (t: Target) => {
       const i = at.get(t);
       return i === undefined ? undefined : (row[i] ?? "").trim() || undefined;
@@ -82,21 +96,23 @@ export function prepareImport(rows: string[][], m: Mapping, ctx: Ctx): Prepared 
     const raw = cell("email");
     if (!raw) {
       counts.skipped.missing_email++;
+      if (errors.length < 50_000) errors.push({ row: firstRow + n, email: "", reason: "No email" });
       continue;
     }
     const e = cleanEmail(raw, ctx);
     if (isRejected(e)) {
       if (e.rejected === "disposable") counts.skipped.disposable++;
       else counts.skipped.invalid_email++;
+      if (errors.length < 50_000) errors.push({ row: firstRow + n, email: raw.slice(0, 320), reason: e.rejected === "disposable" ? "Disposable email" : "Not a valid email" });
       continue;
     }
-    let first = cell("first_name");
-    let last = cell("last_name");
+    let first = nameCase(cell("first_name"));
+    let last = nameCase(cell("last_name"));
     const full = cell("name");
     if (full && !first && !last) {
-      const [f, ...rest] = full.split(/\s+/);
-      first = f;
-      last = rest.join(" ") || undefined;
+      const split = splitName(full);
+      first = nameCase(split.first);
+      last = nameCase(split.last);
     }
     const site = cell("website");
     const domain = (site && cleanDomain(site)?.domain) || (e.class === "work" || e.class === "role" ? cleanDomain(e.domain ?? "")?.domain : undefined);
@@ -109,8 +125,23 @@ export function prepareImport(rows: string[][], m: Mapping, ctx: Ctx): Prepared 
       const v = f ? customValue(f, row[i] ?? "") : undefined;
       if (f && v !== undefined) fields[f.key] = v;
     }
+    const role = titleRole(cell("title"));
+    if (seniorityField && fields.seniority === undefined && role.seniority) {
+      const v = customValue(seniorityField, role.seniority);
+      if (v !== undefined) fields.seniority = v;
+    }
+    if (departmentField && fields.department === undefined && role.department) {
+      const v = customValue(departmentField, role.department);
+      if (v !== undefined) fields.department = v;
+    }
     // Only a basis the row states; the list's basis fills in after merging, so it never overrides a stated one.
-    const stated = parseBasis(cell("basis")) ?? undefined;
+    const basisCell = cell("basis");
+    const stated = parseBasis(basisCell) ?? undefined;
+    // "Unsubscribed" in a consent column, or an unsubscribe or bounce file, blocks the address from email.
+    const said = basisCell?.toLowerCase();
+    if (m.list === "unsubscribed" || m.list === "bounced") suppress.set(e.clean, { email_clean: e.clean, reason: m.list });
+    else if (said && /unsubscribed|opted out|opt out|bounced|cleaned/.test(said))
+      suppress.set(e.clean, { email_clean: e.clean, reason: /bounced|cleaned/.test(said) ? "bounced" : "unsubscribed" });
 
     const input: ContactInput = {
       email: raw.slice(0, 320),
@@ -119,7 +150,7 @@ export function prepareImport(rows: string[][], m: Mapping, ctx: Ctx): Prepared 
       first_name: cut(first, 100),
       last_name: cut(last, 100),
       title: cut(cell("title"), 200),
-      phone: cut(cell("phone"), 50),
+      phone: cleanPhone(cell("phone"), country),
       country,
       region: cut(cell("region"), 100),
       timezone: cut(cell("timezone"), 60),
@@ -136,7 +167,8 @@ export function prepareImport(rows: string[][], m: Mapping, ctx: Ctx): Prepared 
   }
 
   // The basis that stands depends on the final country.
-  const contacts = [...byEmail.values()].map((c) => ({ ...c, basis: basisFor(c.country, c.basis ?? m.basis ?? "none") }));
+  const contacts = [...byEmail.values()].map((c) => ({ ...c, basis: suppress.has(c.email_clean) ? ("none" as const) : basisFor(c.country, c.basis ?? m.basis ?? "none") }));
   counts.no_basis = contacts.filter((c) => c.basis === "none").length;
-  return { contacts, counts };
+  counts.suppressed = suppress.size;
+  return { contacts, suppress: [...suppress.values()], errors, counts };
 }

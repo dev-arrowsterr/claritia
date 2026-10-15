@@ -11,7 +11,10 @@ COPY src/lib/identity/ ./src/lib/identity/
 COPY src/lib/company/ ./src/lib/company/
 COPY src/lib/privateNet.ts ./src/lib/
 COPY collect/ids.ts collect/scrub.ts ./collect/
-COPY src/lib/web/signals.ts src/lib/web/scores.ts src/lib/web/accountAlerts.ts ./src/lib/web/
+COPY src/lib/web/signals.ts src/lib/web/scores.ts src/lib/web/accountAlerts.ts src/lib/web/policy.ts ./src/lib/web/
+COPY src/lib/contacts/ ./src/lib/contacts/
+COPY src/lib/records/ ./src/lib/records/
+COPY src/lib/filters.ts ./src/lib/
 USER node
 EXPOSE 8080
 CMD ["node", "worker-intel/index.ts"]

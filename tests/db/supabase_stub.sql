@@ -18,6 +18,6 @@ create table if not exists storage.objects (id uuid primary key default gen_rand
 alter table storage.objects enable row level security;
 create or replace function storage.foldername(name text) returns text[] language sql immutable as $$ select (string_to_array(name, '/'))[1:array_length(string_to_array(name, '/'), 1) - 1] $$;
 grant usage on schema storage to anon, authenticated;
-grant select on storage.objects to anon, authenticated;
+grant select, insert on storage.objects to anon, authenticated;
 do $$ begin create role service_role; exception when duplicate_object then null; end $$;
 grant usage on schema public, auth to service_role;

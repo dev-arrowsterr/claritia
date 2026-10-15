@@ -9,7 +9,8 @@ import { basisFor, BASES, type Basis } from "./consent.ts";
 import { countryCode, customValue, LIFECYCLES, type CustomField } from "./fields.ts";
 import type { ContactInput } from "./import.ts";
 
-export type Source = "manual" | "import" | "hubspot" | "salesforce" | "omniscient" | "form" | "api";
+/** A source kind from source_kinds (supabase/migrations/034_records.sql), like "csv", "hubspot" or "manual". */
+export type Source = string;
 export type Written = { created: number; updated: number; ids: string[] };
 
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));

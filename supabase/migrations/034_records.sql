@@ -399,6 +399,9 @@ begin
   if not own then
     delete from _rows r where exists (select 1 from erasures e where e.workspace_id = p_ws and e.value_hash = sha256(convert_to(r.email_clean, 'UTF8')));
     get diagnostics erased = row_count;
+    -- A suppressed address gets no basis from a list or a sync; only the person can opt back in.
+    update _rows r set basis = 'none'
+    where r.basis is not null and exists (select 1 from suppressions s where s.workspace_id = p_ws and s.email_clean = r.email_clean);
   end if;
 
   -- Companies: by domain, or by name when there's no domain.

@@ -2,23 +2,24 @@
 
 // Contacts, Leads and the contact page (docs/conversion-parity.md Parts 4 and 17). The lists run on the shared
 // records list (src/components/app/records): views, filters, table or board, columns, inline edits and bulk
-// actions. The import wizard and the add and edit forms live here.
+// actions. The add and edit forms live here.
 
-import { useEffect, useState } from "react";
-import { BASES, BASIS_LABEL, IMPORT_SOURCES, sourceRefused, type Basis, type ImportSource } from "@/lib/contacts/consent";
-import { MAX_ROWS, parseCsv } from "@/lib/contacts/csv";
-import { fullName, guessTarget, LIFECYCLES, TARGETS, type ContactRow, type CustomField, type Target } from "@/lib/contacts/fields";
+import { useState } from "react";
+import { BASES, BASIS_LABEL, type Basis } from "@/lib/contacts/consent";
+import { fullName, LIFECYCLES, type ContactRow, type CustomField } from "@/lib/contacts/fields";
 import type { AnyField } from "@/lib/records/fields";
 import { Contact, Plus, Upload } from "../../Icons";
 import { askConfirm, askText, tell } from "../Dialogs";
 import { Popover } from "../FilterBar";
 import { Select } from "../Select";
 import { SampleRows, SampleStats, SampleTags, ToolIntro } from "../ToolIntro";
-import { Avatar, Badge, Button, CardHead, Empty, ErrorNote, errorText, Field, Input, Loading, must, Page, Panel, postJson, Th, Td, timeAgo, useLoad, type Tone, type ViewProps } from "../ui";
+import { Avatar, Badge, Button, CardHead, Empty, ErrorNote, errorText, Field, Input, Loading, must, Page, Panel, postJson, timeAgo, useLoad, type Tone, type ViewProps } from "../ui";
 import type { Link } from "../records/FieldInput";
 import { useMeta, type Meta } from "../records/meta";
 import { FieldsPanel, HistoryPanel, sourceLabel, type Change } from "../records/RecordParts";
+import { ImportPanel } from "../records/ImportPanel";
 import { RecordsList, type Preset, type ViewState } from "../records/RecordsList";
+import { SidePanel } from "../records/SidePanel";
 import { DEFAULT_WIDTH, type Row } from "../records/RecordTable";
 import { activeTime } from "./VisitorsView";
 
@@ -222,244 +223,6 @@ function ContactsIntro({ action }: { action: React.ReactNode }) {
 }
 
 // Side panels -----------------------------------------------------------------------------------------------------
-
-export function SidePanel({ title, onClose, children, footer, wide = false }: { title: string; onClose: () => void; children: React.ReactNode; footer?: React.ReactNode; wide?: boolean }) {
-  useEffect(() => {
-    const esc = (e: KeyboardEvent) => e.key === "Escape" && !document.querySelector('[role="listbox"]') && onClose();
-    window.addEventListener("keydown", esc);
-    return () => window.removeEventListener("keydown", esc);
-  }, [onClose]);
-  return (
-    <>
-      <div className="fixed inset-0 z-[80] bg-ink/10" onClick={onClose} aria-hidden="true" />
-      <aside role="dialog" aria-modal="true" aria-label={title} className={`fixed inset-y-0 right-0 z-[81] flex w-full flex-col border-l border-line bg-panel ${wide ? "max-w-[760px]" : "max-w-[480px]"}`}>
-        <div className="flex h-12 shrink-0 items-center gap-3 border-b border-line px-5">
-          <h2 className="truncate text-[15px] font-medium">{title}</h2>
-          <Button variant="ghost" className="ml-auto h-7 px-2.5" onClick={onClose}>
-            Close
-          </Button>
-        </div>
-        <div className="min-h-0 flex-1 overflow-auto">{children}</div>
-        {footer ? <div className="flex shrink-0 items-center justify-end gap-2 border-t border-line bg-canvas px-5 py-3">{footer}</div> : null}
-      </aside>
-    </>
-  );
-}
-
-type Counts = { rows: number; created: number; updated: number; merged: number; no_basis: number; skipped: { missing_email: number; invalid_email: number; disposable: number } };
-const NEW_FIELD = "__new" as Target;
-
-function ImportPanel({
-  sb,
-  session,
-  wsId,
-  custom,
-  fieldsChanged,
-  onClose,
-}: {
-  sb: ViewProps["sb"];
-  session: ViewProps["session"];
-  wsId: string;
-  custom: CustomField[];
-  fieldsChanged: () => void;
-  onClose: (changed: boolean) => void;
-}) {
-  const [file, setFile] = useState<{ name: string; text: string; header: string[]; rows: string[][] } | null>(null);
-  const [columns, setColumns] = useState<Target[]>([]);
-  const [source, setSource] = useState<ImportSource | "">("");
-  const [basis, setBasis] = useState<Basis | "">("");
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
-  const [done, setDone] = useState<Counts | null>(null);
-
-  async function pick(f: File | undefined) {
-    if (!f) return;
-    setError("");
-    const text = await f.text();
-    const [header, ...rows] = parseCsv(text);
-    if (!header || !rows.length) return setError("The file has no rows under its header.");
-    if (rows.length > MAX_ROWS) return setError(`Up to ${MAX_ROWS.toLocaleString("en-US")} rows at a time.`);
-    const guessed: Target[] = [];
-    for (const h of header) {
-      const t = guessTarget(h, custom);
-      guessed.push(t !== "skip" && guessed.includes(t) ? "skip" : t);
-    }
-    setFile({ name: f.name, text, header, rows });
-    setColumns(guessed);
-  }
-
-  async function choose(i: number, t: Target) {
-    let target = t;
-    if (t === NEW_FIELD) {
-      const label = await askText("New field", { initial: file?.header[i] ?? "", ok: "Add" });
-      if (!label) return;
-      try {
-        const made = must(await sb.rpc("field_add", { p_ws: wsId, p_object: "contact", p_label: label, p_type: "text" })) as { key: string };
-        fieldsChanged();
-        target = `f.${made.key}`;
-      } catch (e) {
-        return setError(errorText(e));
-      }
-    }
-    setColumns((cols) => cols.map((c, j) => (j === i ? target : target !== "skip" && c === target ? "skip" : c)));
-  }
-
-  const hasBasisColumn = columns.includes("basis");
-  const refused = source !== "" && sourceRefused(source);
-  const ready = !!file && columns.includes("email") && !!source && !refused && (hasBasisColumn || !!basis);
-
-  async function run() {
-    if (!file || !ready) return;
-    setBusy(true);
-    setError("");
-    try {
-      const r = await postJson<{ counts: Counts }>(session, "/api/contacts/import", {
-        workspaceId: wsId,
-        fileName: file.name,
-        text: file.text,
-        mapping: { columns, source, basis: basis || null },
-      });
-      setDone(r.counts);
-    } catch (e) {
-      setError(errorText(e));
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  const targetOptions = [
-    ...TARGETS,
-    ...custom.map((f) => ({ value: `f.${f.key}` as Target, label: f.label })),
-    { value: NEW_FIELD, label: "New field…" },
-  ];
-  const sample = (i: number) =>
-    file!.rows
-      .map((r) => r[i]?.trim())
-      .filter(Boolean)
-      .slice(0, 2)
-      .join(", ");
-
-  if (done) {
-    const skipped = done.skipped.missing_email + done.skipped.invalid_email + done.skipped.disposable;
-    const tiles: [string, number][] = [
-      ["Rows", done.rows],
-      ["Created", done.created],
-      ["Updated", done.updated],
-      ["Merged", done.merged],
-      ["Skipped", skipped],
-      ["No email consent", done.no_basis],
-    ];
-    return (
-      <SidePanel title="Import" onClose={() => onClose(true)} wide footer={<Button onClick={() => onClose(true)}>Done</Button>}>
-        <div className="grid grid-cols-2 border-b border-line sm:grid-cols-3">
-          {tiles.map(([label, v]) => (
-            <div key={label} className="border-r border-b border-line px-5 py-4">
-              <div className="label-mono">{label}</div>
-              <div className="mt-1 text-[22px] font-medium tabular-nums">{v.toLocaleString("en-US")}</div>
-            </div>
-          ))}
-        </div>
-        {skipped ? (
-          <ul className="px-5 py-3 text-[13px] text-body">
-            {done.skipped.missing_email ? <li>No email: {done.skipped.missing_email.toLocaleString("en-US")}</li> : null}
-            {done.skipped.invalid_email ? <li>Not a valid email: {done.skipped.invalid_email.toLocaleString("en-US")}</li> : null}
-            {done.skipped.disposable ? <li>Disposable email: {done.skipped.disposable.toLocaleString("en-US")}</li> : null}
-          </ul>
-        ) : null}
-      </SidePanel>
-    );
-  }
-
-  return (
-    <SidePanel
-      title="Import"
-      onClose={() => onClose(false)}
-      wide
-      footer={
-        file ? (
-          <>
-            <Button variant="plain" onClick={() => setFile(null)} disabled={busy}>
-              Choose another file
-            </Button>
-            <Button onClick={run} disabled={!ready || busy}>
-              {busy ? "Importing…" : `Import ${file.rows.length.toLocaleString("en-US")} rows`}
-            </Button>
-          </>
-        ) : null
-      }
-    >
-      <div className="flex flex-col gap-5 p-5">
-        <ErrorNote message={error} />
-        {!file ? (
-          <label className="frame flex cursor-pointer flex-col items-center gap-3 border border-dashed border-line-strong bg-canvas px-6 py-16 text-center hover:border-ink">
-            <Upload size={18} />
-            <span className="text-[14px] font-medium">Choose a CSV file</span>
-            <input type="file" accept=".csv,text/csv,.tsv,.txt" className="sr-only" onChange={(e) => pick(e.target.files?.[0])} />
-          </label>
-        ) : (
-          <>
-            <div className="flex items-center gap-2 text-[13px]">
-              <span className="font-medium">{file.name}</span>
-              <span className="font-mono text-[11.5px] text-faint">{file.rows.length.toLocaleString("en-US")} rows</span>
-            </div>
-            <Panel>
-              <table className="w-full border-collapse">
-                <thead>
-                  <tr>
-                    <Th>Column</Th>
-                    <Th>Sample</Th>
-                    <Th>Field</Th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {file.header.map((h, i) => (
-                    <tr key={i}>
-                      <Td className="font-medium">{h || `Column ${i + 1}`}</Td>
-                      <Td className="max-w-[220px] truncate text-[12.5px] text-muted">{sample(i)}</Td>
-                      <Td className="w-56">
-                        <Select<Target>
-                          value={columns[i] ?? "skip"}
-                          onChange={(t) => choose(i, t)}
-                          ariaLabel={`Field for ${h}`}
-                          options={targetOptions}
-                          className={`h-8 w-full rounded-md border border-line bg-panel px-2.5 text-[13px] hover:border-line-strong ${columns[i] === "skip" ? "text-faint" : ""}`}
-                        />
-                      </Td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </Panel>
-            {!columns.includes("email") ? <ErrorNote message="Map a column to Email." /> : null}
-            <div className="grid gap-4 sm:grid-cols-2">
-              <Field label="Source">
-                <Select<ImportSource | "">
-                  value={source}
-                  onChange={setSource}
-                  ariaLabel="Source"
-                  placeholder="Choose…"
-                  options={IMPORT_SOURCES}
-                  className="h-9 w-full rounded-md border border-line bg-panel px-2.5 text-[13px] hover:border-line-strong"
-                />
-              </Field>
-              <Field label={hasBasisColumn ? "Email consent when blank" : "Email consent"}>
-                <Select<Basis | "">
-                  value={basis}
-                  onChange={setBasis}
-                  ariaLabel="Email consent"
-                  placeholder="Choose…"
-                  options={BASES}
-                  className="h-9 w-full rounded-md border border-line bg-panel px-2.5 text-[13px] hover:border-line-strong"
-                />
-              </Field>
-            </div>
-            {refused ? <ErrorNote message="Bought or rented lists can't be imported." /> : null}
-          </>
-        )}
-      </div>
-    </SidePanel>
-  );
-}
 
 type FormState = Record<string, string>;
 const FORM_FIELDS: [key: string, label: string][] = [

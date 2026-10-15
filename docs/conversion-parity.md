@@ -798,6 +798,25 @@ At the proposed $299 Starter price, gross margin is about 80% at Beta and 81% at
 - **Flaky cases tested:** a batch whose answer is lost is sent again with no doubles; two imports of the same people at once make no doubles; a contact follows its person through stitching, merges in either order, a rebuild and erasure; 36 filter cases give the same rows in the database and the browser.
 - **Running cost of week 1:** $0 at Beta, about $1 at Growth (Supabase disk, check). No new service, no Claude calls.
 
+## Part 21b. Records and week 2 status: built
+
+Records (custom objects and rich fields from week 8, pulled forward so imports and sources write into them) and week 2 (imports at full size).
+
+| Piece | Where |
+|---|---|
+| Which source wins per field, field history, rich field types, custom objects, links between records, saved views with columns, sort, board and group | `supabase/migrations/034_records.sql`, `src/lib/records/` |
+| Contacts, Leads board, Companies, custom objects, record pages, Settings › Fields and Objects | `src/components/app/records/`, `src/components/app/views/ContactsView.tsx`, `RecordsViews.tsx`, `FieldsSettings.tsx` |
+| Imports bucket, background imports that pick up where they stopped, suppressions first, undo for 30 days, error files | `supabase/migrations/035_imports.sql` |
+| CSV of any size and encoding, Excel (with sheet choice, dates and formulas), vCard, paste; phone, name and title cleaning | `src/lib/contacts/csv.ts`, `files.ts`, `vcard.ts`, `clean.ts` |
+| One import run for the web app and the job; the `import_file` and `import_undo` jobs and file cleanup in `claritia-intel` | `src/lib/contacts/importRun.ts`, `importJob.ts`, `worker-intel/jobs/imports.ts` |
+| Import wizard (upload, map, list type, preview with outcomes, progress, report, errors, undo) and Settings › Imports | `src/components/app/records/ImportPanel.tsx`, `src/components/app/views/ImportsSettings.tsx` |
+| Tests | `tests/imports.test.ts`, `tests/pg/records.pg.ts`, `tests/pg/imports.pg.ts`, records and imports blocks in `tests/db/leaks.sql` |
+
+- **Flaky cases tested:** a 60,000-row file (set `IMPORT_TEST_ROWS=2000000` for the full run) stopped twice mid-import lands every row once with matching counts; undo after an overlapping second import and a person's edit takes back only what the first import did; a file never overwrites a CRM value; an unsubscribed address never gets consent back from a later row.
+- **Left for later weeks:** Google Sheets picker (needs the Google OAuth app), old `.xls` files, Haiku for titles the rules miss, the import's file name on each value's source tag.
+- **Needs set on `claritia-intel`:** `SUPABASE_URL` and `SUPABASE_SECRET_KEY` (it reads uploaded files from storage).
+- **Running cost:** Supabase storage for uploads, deleted after 30 days: under $1 at Beta, about $5 at Growth (check). `claritia-intel` to 1 GB for big Excel files: about $3 at Beta and Growth (check). No Claude calls. **Total: about $4 at Beta, about $8 at Growth.**
+
 ---
 
 ## Part 22. Rollout

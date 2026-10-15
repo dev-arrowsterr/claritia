@@ -11,7 +11,10 @@ export function pgRpc(pool: pg.Pool): Rpc {
     const keys = Object.keys(args).filter((k) => NAME.test(k));
     const sql = `select * from public.${fn}(${keys.map((k, i) => `${k} => $${i + 1}`).join(", ")})`;
     try {
-      const r = await pool.query(sql, keys.map((k) => (args[k] !== null && typeof args[k] === "object" && !Array.isArray(args[k]) ? JSON.stringify(args[k]) : args[k])));
+      // Objects, and arrays of objects, are jsonb; arrays of plain values are Postgres arrays.
+      const value = (v: unknown) =>
+        v !== null && typeof v === "object" && (!Array.isArray(v) || v.some((x) => x !== null && typeof x === "object")) ? JSON.stringify(v) : v;
+      const r = await pool.query(sql, keys.map((k) => value(args[k])));
       // A scalar function comes back as one column named after it; a set of rows as rows.
       const single = r.fields.length === 1 && r.fields[0].name === fn;
       return { data: single ? (r.rows[0]?.[fn] ?? null) : r.rows, error: null };

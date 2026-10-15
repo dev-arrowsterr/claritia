@@ -12,6 +12,7 @@ import { IdentityPanel } from "./IdentityPanel";
 import { IcpPanel, SitesPanel } from "./SitesPanel";
 import { settingsGroups, type SettingsTab } from "@/lib/settingsTabs";
 import { FieldsSettings, ObjectsSettings } from "./FieldsSettings";
+import { ImportsSettings } from "./ImportsSettings";
 import {
   announceChange,
   Avatar,
@@ -244,6 +245,7 @@ export function SettingsView({ sb, session, ws, role, project, projectsChanged, 
   const pages: Record<SettingsTab, React.ReactNode> = {
     fields: <FieldsSettings sb={sb} ws={ws} role={role} />,
     objects: <ObjectsSettings sb={sb} ws={ws} role={role} navigate={navigate} />,
+    imports: <ImportsSettings sb={sb} ws={ws} />,
     sites: <SitesPanel sb={sb} ws={ws} role={role} />,
     identity: <IdentityPanel sb={sb} session={session} ws={ws} role={role} />,
     icp: <IcpPanel sb={sb} ws={ws} />,
