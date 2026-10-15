@@ -1,5 +1,7 @@
 # Claritia: build plan for the buyer enablement platform
 
+> Replaced by `docs/marketing-platform.md` (Oct 2026). Kept for history.
+
 Goal: one platform that sees every buyer, knows every account, shows each account the right content, acts at the right time, and learns what works. One orchestrator agent moves each account from first visit to a booked sales meeting.
 
 Companion docs:
