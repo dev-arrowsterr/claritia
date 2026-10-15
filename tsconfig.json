@@ -39,6 +39,9 @@
   ],
   "exclude": [
     "node_modules",
-    "tests"
+    "tests",
+    "collect",
+    "worker-intel",
+    "scripts"
   ]
 }

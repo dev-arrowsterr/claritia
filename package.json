@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "typecheck": "next typegen && tsc --noEmit",
+    "typecheck": "next typegen && tsc --noEmit -p tsconfig.check.json",
     "test": "node --conditions=react-server --test tests/*.test.ts",
     "test:db": "bash scripts/test-db.sh",
     "pack:extension": "node scripts/pack-extension.ts",

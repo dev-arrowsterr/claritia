@@ -1,0 +1,6 @@
+{
+  // The whole repo: the web app plus collect, intel and the scripts. CI runs this; Next's build uses tsconfig.json,
+  // which leaves out the services so hosts that skip dev packages (Render) can build the site.
+  "extends": "./tsconfig.json",
+  "exclude": ["node_modules", "tests"]
+}
