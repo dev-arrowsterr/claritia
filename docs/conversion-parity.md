@@ -532,6 +532,34 @@ Reliability rule: the sync, the send pipeline and the workflow engine each get a
 
 ---
 
+## Week 1 status: built
+
+| Piece | Where |
+|---|---|
+| Tables, consent, fields, events by month, imports, saved views, and the database functions | `supabase/migrations/033_contacts.sql` |
+| Filters with one meaning in the browser and the database | `src/lib/filters.ts`, `contacts_where` |
+| CSV read and write, column guesses, consent by region, import, add and edit | `src/lib/contacts/` |
+| Server routes (emails are cleaned here, so writes stay server only) | `src/app/api/contacts/route.ts`, `src/app/api/contacts/import/route.ts` |
+| Filter bar with saved views, on Contacts, Visitors and Accounts. The old Accounts tabs are built-in views. | `src/components/app/FilterBar.tsx` |
+| Contacts screen, import wizard, add and edit, contact page | `src/components/app/views/ContactsView.tsx` |
+| Tests | `tests/contacts.test.ts`, `tests/pg/contacts.pg.ts`, contacts block in `tests/db/leaks.sql` |
+
+- **Done when, met:** a 10,000-row CSV imports with dedupe in about 4 seconds on a local database, and a second run creates nothing. Filters work on Contacts, Visitors and Accounts.
+- **Flaky cases tested:** a batch whose answer is lost is sent again with no doubles; two imports of the same people at once make no doubles; a contact follows its person through stitching, merges in either order, a rebuild and erasure; 36 filter cases (SQL-like text, `%`, `_`, `\`, quotes) give the same rows in the database and the browser.
+- **Identity:** a contact links to the person with the same cleaned email, in both orders, and never makes a person. Erasing a person removes their contacts; a person export lists them.
+- **Consent:** imports need a source and a basis (a column or one for the file). Bought lists are refused. Outside opt-in, strict regions and unknown countries get "No basis".
+- **Left for later weeks:** segments, enroll and add-to-segment bulk actions (week 4), scores and reasons (week 11). Custom fields made from the import are text; a fields screen comes with Settings › Connections in week 3.
+
+**Running cost of week 1:** no new service and no Claude calls. Imports run in the web app. Each contact with its consent, field history and events takes about 3 KB.
+
+| Line | Beta (50 teams, 10,000 contacts each) | Growth (500 teams) |
+|---|---|---|
+| Supabase disk: about 1.5 GB at Beta, 15 GB at Growth, inside the plan's 8 GB, then $0.125 per GB (check) | $0 | About $1 |
+| Claude, servers, other services | $0 | $0 |
+| **Added by week 1** | **$0** | **About $1** |
+
+This sits inside the Supabase line in 15.2.
+
 ## Part 15. Monthly cost
 
 ### 15.1 Per team per month

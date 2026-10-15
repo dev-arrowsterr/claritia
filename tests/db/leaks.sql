@@ -734,6 +734,50 @@ select pg_temp.check(jsonb_array_length(privacy_find('11111111-0000-0000-0000-00
 reset role;
 select set_config('request.jwt.claim.sub', '', false);
 
+-- Contacts (033): members read their own workspace's contacts and everything hung on them; writes that take a
+-- cleaned email are server only; member actions stay inside the member's workspace; event months are unreachable.
+select contacts_upsert('11111111-0000-0000-0000-000000000000', 'import', '[{"email":"jane@globex.com","email_clean":"jane@globex.com","email_class":"work","company_domain":"globex.com","fields":{"plan":"pro"},"basis":"opt_in"}]');
+select contacts_upsert('22222222-0000-0000-0000-000000000000', 'import', '[{"email":"spy@secret-co.com","email_clean":"spy@secret-co.com","email_class":"work","company_domain":"secret-co.com","fields":{"plan":"x"},"basis":"opt_in"}]');
+insert into topics (workspace_id, name) values ('22222222-0000-0000-0000-000000000000', 'Cat news');
+insert into fields (workspace_id, object, key, label, type) values ('22222222-0000-0000-0000-000000000000', 'contact', 'secret', 'Secret', 'text');
+insert into saved_views (workspace_id, screen, name, filters, created_by) values ('22222222-0000-0000-0000-000000000000', 'contacts', 'Cat view', '[]', 'c0000000-0000-0000-0000-000000000000');
+create temp table cat_contact as select id from contacts where email_clean = 'spy@secret-co.com';
+create temp table ben_contact as select id from contacts where email_clean = 'jane@globex.com';
+grant select on cat_contact, ben_contact to authenticated;
+select pg_temp.as_user('b0000000-0000-0000-0000-000000000000');
+set role authenticated;
+select pg_temp.check((select count(*) from contacts) = 1 and (select count(*) from companies) = 1, 'Ben sees another workspace''s contacts or companies');
+select pg_temp.check((select count(*) from consents) = 1 and (select count(*) from field_writes) > 0 and (select count(*) from field_writes w join contacts c on c.id = w.contact_id) = (select count(*) from field_writes), 'Ben sees another workspace''s consent or field history');
+select pg_temp.check((select count(*) from contact_events) = 1, 'Ben sees another workspace''s contact events');
+select pg_temp.check((select count(*) from topics) = 0 and (select count(*) from fields) = 0 and (select count(*) from saved_views) = 0, 'Ben sees Cat''s topics, fields or views');
+select pg_temp.check(pg_temp.visible($$select count(*) from partitions.contact_events_$$ || to_char(now(), 'YYYY_MM')) = 0, 'Ben reads an event month directly');
+select pg_temp.fails($$update contacts set title = 'x'$$, 'Ben edits contacts directly');
+select pg_temp.fails($$insert into contacts (workspace_id, email, email_clean) values ('11111111-0000-0000-0000-000000000000', 'a@b.com', 'a@b.com')$$, 'Ben plants a contact');
+select pg_temp.fails($$insert into consents (workspace_id, contact_id, channel, basis, status, source) select '11111111-0000-0000-0000-000000000000', id, 'email', 'opt_in', 'granted', 'app' from ben_contact$$, 'Ben writes consent directly');
+select pg_temp.fails($$select contacts_upsert('11111111-0000-0000-0000-000000000000', 'import', '[{"email":"x@y.com","email_clean":"other@person.com"}]')$$, 'Ben writes contacts with an email the server didn''t clean');
+select pg_temp.fails($$select contact_update((select id from ben_contact), 'manual', '{"email_clean":"z@z.com"}')$$, 'Ben changes a cleaned email directly');
+select pg_temp.fails($$select imports_start('11111111-0000-0000-0000-000000000000', 'b0000000-0000-0000-0000-000000000000', 'x.csv', '{}')$$, 'Ben starts an import record');
+select pg_temp.fails($$select contacts_where('22222222-0000-0000-0000-000000000000', '[]')$$, 'Ben calls the filter builder');
+select pg_temp.fails($$select contact_events_roll()$$, 'Ben makes event months');
+select pg_temp.fails($$select contacts_list('22222222-0000-0000-0000-000000000000')$$, 'Ben lists Cat''s contacts');
+select pg_temp.fails($$select contacts_list('11111111-0000-0000-0000-000000000000', '[{"field":"f.secret","op":"is","values":["x"]}]')$$, 'Ben filters on Cat''s custom field');
+select pg_temp.fails($$select contact_detail((select id from cat_contact))$$, 'Ben opens Cat''s contact');
+select pg_temp.fails($$select contacts_delete('22222222-0000-0000-0000-000000000000', array[(select id from cat_contact)])$$, 'Ben removes Cat''s contacts');
+select pg_temp.check(contacts_delete('11111111-0000-0000-0000-000000000000', array[(select id from cat_contact)]) = 0, 'Ben removes Cat''s contact through his own workspace');
+select pg_temp.fails($$select contacts_export_log('22222222-0000-0000-0000-000000000000', 1)$$, 'Ben logs an export in Cat''s workspace');
+select pg_temp.fails($$select field_add('22222222-0000-0000-0000-000000000000', 'contact', 'Mine', 'text')$$, 'Ben adds a field to Cat''s workspace');
+select pg_temp.fails($$insert into saved_views (workspace_id, screen, name, filters) values ('22222222-0000-0000-0000-000000000000', 'contacts', 'x', '[]')$$, 'Ben saves a view in Cat''s workspace');
+select pg_temp.fails($$insert into saved_views (workspace_id, screen, name, filters, created_by) values ('11111111-0000-0000-0000-000000000000', 'contacts', 'x', '[]', 'a0000000-0000-0000-0000-000000000000')$$, 'Ben saves a view as Ann');
+insert into saved_views (workspace_id, screen, name, filters) values ('11111111-0000-0000-0000-000000000000', 'contacts', 'Ben view', '[{"field":"lifecycle","op":"is","values":["lead"]}]');
+select pg_temp.check(jsonb_array_length(contacts_list('11111111-0000-0000-0000-000000000000')->'rows') = 1, 'Ben can''t list his own contacts');
+select pg_temp.check((contact_detail((select id from ben_contact))->'contact'->>'email') = 'jane@globex.com', 'Ben can''t open his own contact');
+select pg_temp.check((field_add('11111111-0000-0000-0000-000000000000', 'contact', 'Email', 'text')->>'key') = 'email_2', 'A custom field took a built-in key');
+reset role;
+select pg_temp.check((select count(*) from contacts where workspace_id = '22222222-0000-0000-0000-000000000000' and deleted_at is null) = 1, 'Cat''s contact was removed');
+select pg_temp.check((select count(*) from saved_views where workspace_id = '11111111-0000-0000-0000-000000000000') = 1, 'Ben''s view wasn''t saved');
+select set_config('request.jwt.claim.sub', '', false);
+delete from jobs;
+
 -- Cloud minutes: once Acme has used its 2,000, nobody there can start a run.
 insert into runs (workspace_id, project_id, test_name, test_version, environment_name, base_url, lock, status, duration_ms)
 values ('11111111-0000-0000-0000-000000000000', 'a1000000-0000-0000-0000-000000000000', 'long', 1, 'staging', 'https://x.com', '', 'passed', 2000 * 60000);
