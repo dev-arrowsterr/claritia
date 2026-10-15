@@ -9,7 +9,7 @@ import type { SiteHealth } from "./VisitorsView";
 
 const COLLECT = "https://claritia-collect.fly.dev";
 
-function Copy({ text }: { text: string }) {
+export function Copy({ text }: { text: string }) {
   const [done, setDone] = useState(false);
   return (
     <div className="flex items-start gap-2">

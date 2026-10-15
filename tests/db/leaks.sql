@@ -702,6 +702,22 @@ reset role;
 select set_config('request.jwt.claim.sub', '', false);
 delete from jobs;
 
+-- Identity settings (029): only the owner sets the domains, and nobody reads the sealed secrets.
+insert into identity_settings (workspace_id, identify_secrets_sealed) values ('11111111-0000-0000-0000-000000000000', 'sealed')
+  on conflict (workspace_id) do update set identify_secrets_sealed = 'sealed';
+select pg_temp.as_user('b0000000-0000-0000-0000-000000000000');
+set role authenticated;
+select pg_temp.fails($$select set_identity_domains('11111111-0000-0000-0000-000000000000', '{acme.com}', '{}')$$, 'Ben, a member, sets the own domains');
+select pg_temp.fails($$select set_identity_domains('22222222-0000-0000-0000-000000000000', '{acme.com}', '{}')$$, 'Ben sets Cat''s own domains');
+reset role;
+select pg_temp.as_user('a0000000-0000-0000-0000-000000000000');
+set role authenticated;
+select set_identity_domains('11111111-0000-0000-0000-000000000000', '{ann.io}', '{partner.io}');
+select pg_temp.check((select own_domains from identity_settings where workspace_id = '11111111-0000-0000-0000-000000000000') = '{ann.io}', 'Ann, the owner, can''t set her own domains');
+reset role;
+select pg_temp.check((select identify_secrets_sealed from identity_settings where workspace_id = '11111111-0000-0000-0000-000000000000') = 'sealed', 'Setting domains wiped the secrets');
+select set_config('request.jwt.claim.sub', '', false);
+
 -- Cloud minutes: once Acme has used its 2,000, nobody there can start a run.
 insert into runs (workspace_id, project_id, test_name, test_version, environment_name, base_url, lock, status, duration_ms)
 values ('11111111-0000-0000-0000-000000000000', 'a1000000-0000-0000-0000-000000000000', 'long', 1, 'staging', 'https://x.com', '', 'passed', 2000 * 60000);
