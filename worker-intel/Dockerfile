@@ -8,6 +8,8 @@ RUN npm ci --omit=dev --no-audit --no-fund && rm -rf /root/.npm
 COPY worker-intel/ ./worker-intel/
 COPY src/lib/jobs.ts src/lib/seal.ts ./src/lib/
 COPY src/lib/identity/ ./src/lib/identity/
+COPY src/lib/company/ ./src/lib/company/
+COPY src/lib/privateNet.ts ./src/lib/
 COPY collect/ids.ts ./collect/
 USER node
 EXPOSE 8080

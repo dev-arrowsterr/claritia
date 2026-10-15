@@ -269,6 +269,8 @@ export async function stitchOne(db: Db, e: Evidence, settings: Settings): Promis
   const linkLevel = level === "verified" ? "verified" : "asserted";
   const result = await linkDevice(db, e, person, linkLevel, t, dev as Dev, source);
   await finish(db, e, { ignored: result.device === "tainted" ? "taint" : null, level, source, hard_edge: hard });
+  // The person's visits get their account (and the accounts get rescored).
+  if (result.device !== "tainted") await db.query(`select enqueue_job($1, 'identity_changed', $2, $3)`, [ws, person, JSON.stringify({ person_id: person })]);
   return { person, merged, proposed, ...result };
 }
 

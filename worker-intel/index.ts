@@ -6,6 +6,7 @@ import { createServer } from "node:http";
 import { hostname } from "node:os";
 import pg from "pg";
 import { jobLoop } from "../src/lib/jobs.ts";
+import { enrichCompany, identityChanged, ipLookup } from "./jobs/company.ts";
 import { deviceReset, privacy, rebuild, stitch, stitchEvidence } from "./jobs/stitch.ts";
 import { pgRpc } from "./rpc.ts";
 
@@ -22,12 +23,22 @@ if (!process.env.DATABASE_URL) {
 const loops = Math.max(1, Number(process.env.CONCURRENCY || 4));
 const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL, max: loops + 2, statement_timeout: 30_000 });
 const rpc = pgRpc(pool);
-const handlers = { stitch: stitch(pool), device_reset: deviceReset(pool), stitch_evidence: stitchEvidence(pool), rebuild: rebuild(pool), privacy: privacy(pool) };
+const company = { ipinfoToken: process.env.IPINFO_TOKEN, ipinfoCompany: process.env.IPINFO_COMPANY === "1", coresignalKey: process.env.CORESIGNAL_API_KEY };
+const handlers = {
+  stitch: stitch(pool),
+  device_reset: deviceReset(pool),
+  stitch_evidence: stitchEvidence(pool),
+  rebuild: rebuild(pool),
+  privacy: privacy(pool),
+  identity_changed: identityChanged(pool),
+  ip_lookup: ipLookup(pool, company),
+  enrich_company: enrichCompany(pool, company),
+};
 const stop = new AbortController();
 const worker = `intel-${hostname()}-${process.pid}`;
 
 health({ ok: true, worker, kinds: Object.keys(handlers), loops });
-log("intel started", { worker, loops, secrets: !!process.env.SECRETS_KEY });
+log("intel started", { worker, loops, secrets: !!process.env.SECRETS_KEY, ipinfo: !!company.ipinfoToken, coresignal: !!company.coresignalKey });
 const running = Array.from({ length: loops }, (_, i) => jobLoop({ rpc, worker: `${worker}-${i}`, handlers, leaseS: 120, idleMs: 1000, signal: stop.signal, log: (m) => log(m) }));
 
 const shutdown = async (sig: string) => {

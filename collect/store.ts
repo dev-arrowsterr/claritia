@@ -145,6 +145,34 @@ export class PgStore implements Store {
         `insert into sessions (${cols.join(", ")}) values (${cols.map((_, i) => `$${i + 1}`).join(", ")}) on conflict (id) do nothing`,
         cols.map((k) => s[k]),
       );
+      // A visit belongs to the person the device is linked to when it starts (docs/identity.md 7.6), and to their
+      // work email's account; otherwise to its network's account, when one is known.
+      await c.query(
+        `update sessions s set person_id = dl.person_id, person_level = dl.level, person_source = 'live'
+         from device_links dl
+         where s.id = $1 and dl.device_id = s.device_id and dl.to_at is null and s.policy in ('strict', 'notice') and not s.internal`,
+        [s.id],
+      );
+      await c.query(
+        `update sessions s set account_id = coalesce(p.account_id, n.account_id), account_source = case when p.account_id is not null then 'email' else n.source end,
+                network_account_id = n.account_id
+         from (select 1) one
+         left join lateral (
+           select ad.account_id from identifiers i join account_domains ad on ad.workspace_id = i.workspace_id and ad.domain = i.domain
+           where i.workspace_id = $2 and i.person_id = (select person_id from sessions where id = $1) and i.kind = 'email' and i.class = 'work'
+           order by i.created_at limit 1
+         ) p on true
+         left join lateral (
+           select account_id, 'learned_network' as source from learned_networks where workspace_id = $2 and net = (select ip_net from sessions where id = $1) and account_id is not null
+           union all
+           select ad.account_id, 'vendor_network' from ip_cache ic join account_domains ad on ad.workspace_id = $2 and ad.domain = ic.domain
+           where ic.net = (select ip_net from sessions where id = $1) and ic.kind in ('business', 'education', 'government') and ic.confidence >= 70
+             and ic.fetched_at > now() - interval '30 days'
+           limit 1
+         ) n on true
+         where s.id = $1 and not s.internal and (p.account_id is not null or n.account_id is not null)`,
+        [s.id, s.workspace_id],
+      );
       await c.query("commit");
     } catch (e) {
       await c.query("rollback").catch(() => {});
