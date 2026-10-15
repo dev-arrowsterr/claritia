@@ -99,7 +99,8 @@ The testing product's screens (Tests, Runs, Map, Approvals for heals) move under
 |---|---|---|
 | `claritia-web` (Fly nrt) | 512 MB, then 2 × 1 GB | Next.js app, API, hosted pages and forms (by host), webhooks |
 | `claritia-collect` (new) | 2 × 256 MB, then 3 × 512 MB | Public intake for the site script, forms and email clicks |
-| `claritia-agent` (the runner, renamed) | 1 GB, then 3 × 2 GB | Jobs: syncs, lookups, journeys, AI, sends, crawls, Funnel QA runs |
+| `claritia-intel` (new, always on) | 512 MB, then 3 × 1 GB | Fast jobs with no browser: stitch, lookups, scores, syncs, journeys, AI, sends (see `docs/m1-website-intelligence.md`) |
+| `claritia-runner` (exists, sleeps when idle) | 2 GB | Browser jobs: crawls and Funnel QA runs |
 | `claritia-relay` | 256 MB | Kept for localhost tunnels (Funnel QA on staging) |
 | Supabase `claritia` (Tokyo) | Pro + Medium, then Large | Postgres, Auth, Storage, pg_cron, pgvector |
 | Amazon SES | — | Email sending, with bounce and complaint events through SNS |
