@@ -93,7 +93,7 @@ export function formValues(form: ContactForm, custom: CustomField[], ctx: { own_
         continue;
       }
       const v = customValue(f, String(raw));
-      if (v === undefined) return { error: `${f.label}: ${f.type === "number" ? "enter a number" : f.type === "date" ? "enter a date like 2026-03-31" : f.type === "bool" ? "enter yes or no" : "pick one of its values"}.` };
+      if (v === undefined) return { error: `${f.label}: ${f.type === "number" ? "enter a number" : f.type === "date" ? "enter a date like 2026-03-31" : f.type === "checkbox" ? "enter yes or no" : "pick one of its values"}.` };
       fields[key] = v;
     }
     values.fields = fields;

@@ -24,8 +24,10 @@ export type ContactInput = {
   lead_status?: string;
   company_domain?: string;
   company_name?: string;
-  fields: Record<string, string | number | boolean>;
+  fields: Record<string, string | number | boolean | string[]>;
   basis?: Basis;
+  /** The record's id in its source, kept in source_ids. */
+  source_id?: string;
 };
 
 export type Mapping = { columns: Target[]; source: ImportSource; basis: Basis | null };

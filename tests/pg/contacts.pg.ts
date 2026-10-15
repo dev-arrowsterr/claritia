@@ -134,7 +134,7 @@ test("filters mean the same in the database and in the browser", async () => {
   const acc = (await q(`insert into accounts (workspace_id, domain, name, fit) values ($1, 'fitco.com', 'FitCo', 82) returning id`, [ws]))[0].id;
   await q(`insert into account_domains (workspace_id, domain, account_id, source) values ($1, 'fitco.com', $2, 'primary')`, [ws, acc]);
   const custom: CustomField[] = [];
-  for (const [label, type, options] of [["Plan", "enum", ["Free", "Pro"]], ["Seats", "number", []], ["Trial end", "date", []], ["Paying", "bool", []], ["Note", "text", []]] as const)
+  for (const [label, type, options] of [["Plan", "select", ["Free", "Pro"]], ["Seats", "number", []], ["Trial end", "date", []], ["Paying", "checkbox", []], ["Note", "text", []]] as const)
     custom.push(await asUser<CustomField>(user, `select field_add($1, 'contact', $2, $3, $4) as r`, [ws, label, type, JSON.stringify(options)]));
   const titles = ["CEO", "Head of Growth", "VP Sales", null, "Founder & CEO", "100% Marketer", "data_lead", "O'Brien \\ Ops"];
   const contacts: ContactInput[] = Array.from({ length: 48 }, (_, i) => ({

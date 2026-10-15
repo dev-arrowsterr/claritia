@@ -53,7 +53,7 @@ function columnsFor(custom: CustomField[]): Column[] {
     { key: "source", label: "Source", cell: (c) => <Badge>{SOURCE_LABEL[c.source] ?? c.source}</Badge> },
     { key: "created_at", label: "Created", sort: "created_at", cell: (c) => <span className="font-mono text-[12px] text-muted">{timeAgo(c.created_at)}</span> },
     { key: "updated_at", label: "Updated", sort: "updated_at", cell: (c) => <span className="font-mono text-[12px] text-muted">{timeAgo(c.updated_at)}</span> },
-    ...custom.map((f) => ({ key: `f.${f.key}`, label: f.label, cell: (c: ContactRow) => text(f.type === "bool" && c.fields?.[f.key] != null ? (c.fields[f.key] ? "Yes" : "No") : c.fields?.[f.key]) })),
+    ...custom.map((f) => ({ key: `f.${f.key}`, label: f.label, cell: (c: ContactRow) => text(f.type === "checkbox" && c.fields?.[f.key] != null ? (c.fields[f.key] ? "Yes" : "No") : c.fields?.[f.key]) })),
   ];
 }
 
@@ -765,14 +765,14 @@ function ContactPanel({
         ) : null}
         {custom.map((f) => (
           <Field key={f.key} label={f.label}>
-            {f.type === "enum" || f.type === "bool" ? (
+            {f.type === "select" || f.type === "checkbox" ? (
               <Select<string>
                 value={fields[f.key] ?? ""}
                 onChange={(v) => setFields({ ...fields, [f.key]: v })}
                 ariaLabel={f.label}
                 options={[
                   { value: "", label: "None" },
-                  ...(f.type === "bool" ? [{ value: "yes", label: "Yes" }, { value: "no", label: "No" }] : (f.options ?? []).map((o) => (typeof o === "string" ? { value: o, label: o } : o))),
+                  ...(f.type === "checkbox" ? [{ value: "yes", label: "Yes" }, { value: "no", label: "No" }] : (f.options ?? []).map((o) => (typeof o === "string" ? { value: o, label: o } : o))),
                 ]}
                 className="h-9 w-full rounded-md border border-line bg-panel px-2.5 text-[13px] hover:border-line-strong"
               />
@@ -849,7 +849,7 @@ function ContactPage({ sb, ws, session, id, navigate }: ViewProps) {
     ["lead_status", "Lead status", c.lead_status],
     ...d.fields.map((f): [string, string, React.ReactNode] => {
       const v = c.fields?.[f.key];
-      return [`f.${f.key}`, f.label, v == null ? null : f.type === "bool" ? (v ? "Yes" : "No") : String(v)];
+      return [`f.${f.key}`, f.label, v == null ? null : f.type === "checkbox" ? (v ? "Yes" : "No") : String(v)];
     }),
   ];
   const timeline = [
@@ -887,7 +887,7 @@ function ContactPage({ sb, ws, session, id, navigate }: ViewProps) {
       lead_status: c.lead_status ?? "",
       lifecycle: c.lifecycle ?? "",
     },
-    fields: Object.fromEntries(d.fields.map((f) => [f.key, c.fields?.[f.key] == null ? "" : f.type === "bool" ? (c.fields[f.key] ? "yes" : "no") : String(c.fields[f.key])])),
+    fields: Object.fromEntries(d.fields.map((f) => [f.key, c.fields?.[f.key] == null ? "" : f.type === "checkbox" ? (c.fields[f.key] ? "yes" : "no") : String(c.fields[f.key])])),
   };
 
   return (
