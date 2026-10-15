@@ -18,6 +18,8 @@ export type RunOpts = {
   signal?: AbortSignal;
   budgetMs?: number;
   now?: () => number;
+  /** Tests only: reach local databases without TLS. */
+  local?: boolean;
   /** Refresh override, for tests. */
   refresh?: (refresh: string) => Promise<{ access: string; refresh: string | null; expiresAt: number }>;
 };
@@ -38,6 +40,7 @@ export async function deps(o: RunOpts, sourceId: string): Promise<Deps | null> {
     signal: o.signal,
     gapMs: o.sleep ? 0 : connector.gapMs,
     refresh: o.refresh,
+    local: o.local,
     saveCreds: async (c) => void (await call(o.rpc, "source_secret_save", { p_id: sourceId, p_sealed: seal(JSON.stringify(c)) })),
   });
   return { rpc: o.rpc, connector, ctx, clean: await o.clean(l.source.workspace_id), saved: l.mappings, now: o.now };

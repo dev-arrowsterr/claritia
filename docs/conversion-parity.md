@@ -836,6 +836,22 @@ Records (custom objects and rich fields from week 8, pulled forward so imports a
 - **Left for later weeks:** Salesforce Change Data Capture (until then it pulls every few minutes) and its 1,000-change test against a Salesforce fake; deals, campaigns and company writes; Marketo, Pardot, Eloqua and the other CRMs and email tools in 4.4; the other form, event and ad lead tools; the import API and Zapier, Make and n8n apps; read-only MCP tools. Each tool's endpoints are rechecked on a real account before launch (check).
 - **Running cost:** no new paid service and no Claude calls; the tools' APIs are free on the customer's plan. Pulls every 15 minutes for CRMs and hourly for the rest add work on `claritia-intel`: within the 1 GB machine at Beta, a second 1 GB machine at Growth, about $6 (check). Sync log and links on Supabase disk: under $1 at Beta, about $5 at Growth (check). **Total: about $1 at Beta, about $11 at Growth.**
 
+## Part 21d. Week 8 status: segments and warehouses built
+
+| Piece | Where |
+|---|---|
+| Rule trees (AND and OR, 3 levels) over contact and company fields, custom fields, lists, activity, website visits, email consent, sources and custom objects, compiled to one SQL condition with every value bound; live count and 10 contacts; hourly refresh; joining and leaving as contact events | `supabase/migrations/037_segments.sql` |
+| Segments screen and builder | `src/components/app/views/SegmentsView.tsx` |
+| `segment_refresh` job | `worker-intel/jobs/segments.ts` |
+| Warehouse sources: PostgreSQL, Redshift, MySQL, ClickHouse, BigQuery, Snowflake (key pair), Databricks behind one runner; one SELECT only, `:cursor` bound by the driver, read-only transactions where the database has them, 120-second limit, 5,000 rows a page, private hosts refused | `src/lib/sources/warehouse.ts`, `src/lib/sources/sql.ts` |
+| Rows become contacts, companies, activity on contacts (a replay adds nothing) or custom object records linked to their contact | `supabase/migrations/038_warehouses.sql`, `src/lib/sources/sync.ts` |
+| Query editor with Test on the source page; the read-only grant on the connect screen | `src/components/app/views/SourcesSettings.tsx`, `src/app/api/sources/test-query/route.ts` |
+| Tests | `tests/pg/segments.pg.ts`, warehouse cases in `tests/sources.test.ts` and `tests/pg/sources.pg.ts`, segments block in `tests/db/leaks.sql` |
+
+- **Flaky and hostile cases tested:** 35 rule cases against a hand-counted fixture; values like `'; drop table contacts; --`, `%`, `_` and `$2` match nothing and change nothing; 4-level groups, unknown fields, events, objects and other workspaces' sources are refused; a refresh logs who joined and who left, and a second refresh changes nothing. A warehouse query reads on from its cursor and logs only changed rows; activity read twice lands once; two statements, a write hidden in a WITH, and a write through a function are all stopped (the last by the read-only transaction).
+- **Left for later weeks:** per-contact segment refresh on change (hourly and on save for now); Segment, PostHog, Mixpanel, Amplitude, Shopify and the other product connectors; the Data model screen; a Snowflake and BigQuery account test (both are tested against recorded answers until then, check).
+- **Running cost:** no new paid service and no Claude calls; warehouse queries run on the customer's warehouse. Hourly segment refresh and warehouse pulls: Supabase compute within the current plan at Beta, one size up at Growth, about $25 (check); `claritia-intel` within the machines from Part 21c. **Total: $0 at Beta, about $25 at Growth.**
+
 ---
 
 ## Part 22. Rollout

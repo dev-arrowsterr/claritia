@@ -198,3 +198,66 @@ test("a form webhook delivered twice makes one contact with the form's consent; 
   assert.equal(await runHooks(opts, id), 0);
   assert.equal((await q(`select count(*)::int n from contacts where workspace_id = $1`, [ws]))[0].n, 1);
 });
+
+test("a warehouse query feeds contacts, activity and a custom object, reads on from its cursor, and can't write", async () => {
+  const { ws, user } = await workspace("warehouse");
+  // The "warehouse": tables in their own schema of this database.
+  await q(`create schema if not exists wh`);
+  await q(`create table wh.users (email text, first_name text, plan text, updated_at timestamptz)`);
+  await q(`create table wh.usage (id text, email text, feature text, at timestamptz)`);
+  await q(`create table wh.subs (sub_id text, email text, name text, seats int, changed_at timestamptz)`);
+  await q(`insert into wh.users select 'u' || i || '@acme' || (i % 4) || '.com', 'Name' || i, case when i % 2 = 0 then 'pro' else 'free' end, now() - make_interval(hours => 100 - i) from generate_series(1, 12) i`);
+  await q(`insert into wh.usage values ('e1', 'u1@acme1.com', 'export', now() - interval '2 days'), ('e2', 'u2@acme2.com', 'invite', now() - interval '1 day'), ('e3', 'nobody@x.com', 'export', now())`);
+  const obj = (await q(`insert into objects (workspace_id, key, label, plural) values ($1, 'subscription', 'Subscription', 'Subscriptions') returning id`, [ws]))[0].id;
+  await q(`insert into fields (workspace_id, object, key, label, type) values ($1, 'subscription', 'seats', 'Seats', 'number')`, [ws]);
+  await q(`insert into fields (workspace_id, object, key, label, type, config) values ($1, 'subscription', 'buyer', 'Buyer', 'relation', '{"target":"contact"}')`, [ws]);
+  await q(`insert into wh.subs values ('s1', 'u1@acme1.com', 'Acme Pro', 10, now() - interval '1 day'), ('s2', 'U2@Acme2.com', 'Acme Team', 3, now())`);
+
+  const dbName = new URL(url!).pathname.slice(1);
+  const creds = { type: "key", values: { host: "localhost", port: "5432", database: dbName, user: "postgres", password: "", ssl: "disable" } };
+  const connect = async (kind: string, query: Record<string, string>) => {
+    await q(`delete from sources where workspace_id = $1 and kind = $2`, [ws, kind]);
+    return (await q(`select source_connect($1, $2, $3, $3, 'local', $4, $5) as id`, [ws, user, kind, seal(JSON.stringify(creds)), JSON.stringify({ basis: "legitimate_interest", query })]))[0].id as string;
+  };
+  const opts: RunOpts = { rpc, clean: (w) => ctxFor(pool, w), sleep: async () => {}, local: true };
+
+  // Contacts, read in pages by the cursor.
+  const users = await connect("postgres", { sql: "select email, first_name, plan, updated_at from wh.users where updated_at >= :cursor", key: "email", cursor: "updated_at", target: "contacts" });
+  await runPull(opts, users);
+  assert.equal((await q(`select count(*)::int n from contacts where workspace_id = $1`, [ws]))[0].n, 12);
+  const cursor1 = (await q(`select cursors->>'contacts' c from sources where id = $1`, [users]))[0].c;
+  assert.ok(cursor1, "the cursor is kept");
+  await q(`insert into wh.users values ('late@acme1.com', 'Late', 'pro', now())`);
+  await q(`update wh.users set first_name = 'Renamed', updated_at = now() where email = 'u3@acme3.com'`);
+  const logged = (await q(`select count(*)::int n from sync_log where source_id = $1`, [users]))[0].n;
+  await runPull(opts, users);
+  assert.equal((await q(`select count(*)::int n from contacts where workspace_id = $1`, [ws]))[0].n, 13);
+  assert.equal((await q(`select first_name from contacts where workspace_id = $1 and email_clean = 'u3@acme3.com'`, [ws]))[0].first_name, "Renamed");
+  assert.equal((await q(`select count(*)::int n from sync_log where source_id = $1`, [users]))[0].n - logged, 2, "only the two changed rows are logged; the overlap is skipped");
+
+  // Activity: a replay adds nothing; a row for someone who isn't a contact is skipped.
+  const usage = await connect("redshift", { sql: "select id, email, feature, at from wh.usage where at >= :cursor", key: "id", cursor: "at", target: "events", event: "product.used" });
+  await runPull(opts, usage);
+  await q(`update sources set cursors = '{}' where id = $1`, [usage]);
+  await runPull(opts, usage);
+  const ev = await q(`select c.email_clean, e.kind, e.data->>'feature' f from contact_events e join contacts c on c.id = e.contact_id where e.workspace_id = $1 and e.kind = 'product.used' order by 1`, [ws]);
+  assert.deepEqual(ev.map((r) => `${r.email_clean}:${r.f}`), ["u1@acme1.com:export", "u2@acme2.com:invite"]);
+
+  // A custom object, linked to its buyer.
+  const subs = await connect("postgres", { sql: "select sub_id, email, name, seats, changed_at from wh.subs where changed_at >= :cursor", key: "sub_id", cursor: "changed_at", target: "object:subscription" });
+  await runPull(opts, subs);
+  await runPull(opts, subs);
+  const recs = await q(`select r.name, r.fields->>'seats' seats, (select c.email_clean from record_links l join contacts c on c.id = l.to_id where l.from_id = r.id) buyer from records r where r.object_id = $1 order by r.name`, [obj]);
+  assert.deepEqual(recs.map((r) => `${r.name}:${r.seats}:${r.buyer}`), ["Acme Pro:10:u1@acme1.com", "Acme Team:3:u2@acme2.com"]);
+
+  // Two statements, or a write hidden in a WITH, never run; a write the checks miss is stopped by the read-only transaction.
+  const { runQuery } = await import("../../src/lib/sources/warehouse.ts");
+  const { makeCtx } = await import("../../src/lib/sources/ctx.ts");
+  const ctx = makeCtx({ source: { id: subs, workspace_id: ws, kind: "postgres", name: "pg", account: null, status: "active", settings: {}, cursors: {}, push_cursor: null }, creds: creds as never, local: true });
+  await assert.rejects(runQuery(ctx, { sql: "select 1 as k, now() as c; delete from wh.users", key: "k", cursor: "c", target: "contacts" }, "x"), /One statement only/);
+  await assert.rejects(runQuery(ctx, { sql: "with x as (delete from wh.users returning *) select * from x", key: "email", cursor: "updated_at", target: "contacts" }, "x"), /Only reading/);
+  await q(`create or replace function wh.wipe() returns int language sql as 'delete from wh.users returning 1'`);
+  await assert.rejects(runQuery(ctx, { sql: "select email, updated_at, wh.wipe() as w from wh.users", key: "email", cursor: "updated_at", target: "contacts" }, "x"), /read-only transaction/);
+  assert.equal((await q(`select count(*)::int n from wh.users`))[0].n, 13, "nothing was deleted");
+  await q(`drop schema wh cascade`);
+});

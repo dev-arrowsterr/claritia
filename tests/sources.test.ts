@@ -249,3 +249,110 @@ test("a 5xx is retried and then reported, never swallowed", async () => {
   await assert.rejects(ctx.api("https://api.brevo.com/v3/account"), /503/);
   assert.equal(n, 4);
 });
+
+// Warehouses -------------------------------------------------------------------------------------------------
+
+import { generateKeyPairSync } from "node:crypto";
+import { bindCursor, queryError } from "../src/lib/sources/sql.ts";
+import { runQuery, snowflakeJwt } from "../src/lib/sources/warehouse.ts";
+
+const q0 = { key: "email", cursor: "updated_at", target: "contacts" as const };
+
+test("warehouse queries: one SELECT, nothing that writes, :cursor bound outside quoted text", () => {
+  assert.equal(queryError({ ...q0, sql: "select email, updated_at from users where updated_at >= :cursor" }), null);
+  assert.equal(queryError({ ...q0, sql: "with x as (select 1) select * from x;" }), null, "a trailing semicolon is fine");
+  assert.equal(queryError({ ...q0, sql: "select 1; drop table users" }), "One statement only.");
+  assert.equal(queryError({ ...q0, sql: "select ';' as s, email from users" }), null, "a semicolon inside quotes is text");
+  assert.equal(queryError({ ...q0, sql: "select 1 -- ; drop\nfrom t" }), null, "comments are ignored");
+  assert.equal(queryError({ ...q0, sql: "delete from users" }), "Start with SELECT or WITH.");
+  assert.equal(queryError({ ...q0, sql: "with gone as (delete from users returning *) select * from gone" }), "Only reading is allowed.");
+  assert.equal(queryError({ ...q0, sql: "select * into backup from users" }), "Only reading is allowed.");
+  assert.equal(queryError({ ...q0, key: "email; drop", sql: "select 1" }), "Name the key column.");
+  assert.equal(queryError({ ...q0, cursor: "", sql: "select 1" }), "Name the cursor column.");
+  const b = bindCursor("select ':cursor' as x from t where a >= :cursor and b < :cursor", (n) => `$${n}`);
+  assert.equal(b.sql, "select ':cursor' as x from t where a >= $1 and b < $2");
+  assert.equal(b.count, 2);
+});
+
+test("Snowflake key-pair JWT names the user and the key's fingerprint", () => {
+  const { privateKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
+  const pem = privateKey.export({ type: "pkcs8", format: "pem" }).toString();
+  const [, body] = snowflakeJwt("myorg-acct", "claritia_read", pem, 1000).split(".");
+  const c = JSON.parse(Buffer.from(body, "base64url").toString());
+  assert.match(c.iss, /^MYORG-ACCT\.CLARITIA_READ\.SHA256:[A-Za-z0-9+/=]{44}$/);
+  assert.equal(c.sub, "MYORG-ACCT.CLARITIA_READ");
+  assert.equal(c.exp - c.iat, 3540);
+});
+
+test("REST warehouses: the query is wrapped, the cursor goes as a parameter, and rows come back by column", async () => {
+  const { privateKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
+  const pem = privateKey.export({ type: "pkcs8", format: "pem" }).toString();
+  const sql = "select email, updated_at from users where updated_at >= :cursor";
+  const cases: { kind: string; creds: Record<string, string>; answers: [RegExp, unknown][]; check: (body: Record<string, unknown> | string, url: string) => void }[] = [
+    {
+      kind: "clickhouse",
+      creds: { url: "https://abc.clickhouse.cloud:8443", user: "u", password: "p" },
+      answers: [[/clickhouse/, { meta: [{ name: "email" }, { name: "updated_at" }], data: [["a@x.com", "2026-01-01 00:00:00"]] }]],
+      check: (body, url) => {
+        assert.equal(body, "select * from (select email, updated_at from users where updated_at >= {cursor:String}) q order by updated_at limit 5000");
+        assert.match(url, /param_cursor=1970/);
+        assert.match(url, /readonly=1/);
+      },
+    },
+    {
+      kind: "bigquery",
+      creds: { service_account: JSON.stringify({ client_email: "sa@p.iam.gserviceaccount.com", private_key: pem, project_id: "proj" }) },
+      answers: [
+        [/oauth2/, { access_token: "ya29" }],
+        [/queries/, { jobComplete: true, schema: { fields: [{ name: "email" }, { name: "updated_at" }] }, rows: [{ f: [{ v: "a@x.com" }, { v: "1.7E9" }] }] }],
+      ],
+      check: (body) => {
+        const b = body as { query: string; queryParameters: { parameterValue: { value: string } }[] };
+        assert.match(b.query, /updated_at >= @cursor\) q order by updated_at limit 5000$/);
+        assert.equal(b.queryParameters[0].parameterValue.value, "1970-01-01 00:00:00");
+      },
+    },
+    {
+      kind: "snowflake",
+      creds: { account: "myorg-acct", user: "claritia_read", private_key: pem, warehouse: "WH", database: "DB" },
+      answers: [[/snowflakecomputing/, { statementHandle: "h1", resultSetMetaData: { rowType: [{ name: "EMAIL" }, { name: "UPDATED_AT" }] }, data: [["a@x.com", "2026-01-01"]] }]],
+      check: (body, url) => {
+        const b = body as { statement: string; bindings: Record<string, { value: string }> };
+        assert.match(b.statement, /updated_at >= \?\)/);
+        assert.equal(b.bindings["1"].value, "1970-01-01 00:00:00");
+        assert.match(url, /^https:\/\/myorg-acct\.snowflakecomputing\.com\/api\/v2\/statements/);
+      },
+    },
+    {
+      kind: "databricks",
+      creds: { host: "dbc-1.cloud.databricks.com", warehouse_id: "w1", token: "dapi" },
+      answers: [[/databricks/, { statement_id: "s1", status: { state: "SUCCEEDED" }, manifest: { schema: { columns: [{ name: "email" }, { name: "updated_at" }] } }, result: { data_array: [["a@x.com", "2026-01-01"]] } }]],
+      check: (body) => {
+        const b = body as { statement: string; parameters: { name: string; value: string }[]; row_limit: number };
+        assert.match(b.statement, /updated_at >= :cursor\)/);
+        assert.deepEqual(b.parameters[0], { name: "cursor", value: "1970-01-01 00:00:00", type: "STRING" });
+        assert.equal(b.row_limit, 5000);
+      },
+    },
+  ];
+  for (const c of cases) {
+    let seen: { body: Record<string, unknown> | string; url: string } | null = null;
+    const fetcher: typeof fetch = async (input, init) => {
+      const url = String(input);
+      const raw = String(init?.body ?? "");
+      if (!/oauth2/.test(url)) seen = { body: (() => { try { return JSON.parse(raw); } catch { return raw; } })(), url };
+      const hit = c.answers.find(([re]) => re.test(url));
+      return Response.json(hit ? hit[1] : { message: "no recording" }, { status: hit ? 200 : 404 });
+    };
+    const ctx = makeCtx({ source: row(c.kind), creds: key(c.creds), fetcher, sleep: async () => {}, local: true });
+    const r = await runQuery(ctx, { ...q0, sql }, "1970-01-01 00:00:00");
+    assert.equal(r.rows.length, 1, c.kind);
+    assert.equal(String(Object.values(r.rows[0])[0]), "a@x.com", c.kind);
+    c.check(seen!.body, seen!.url);
+  }
+});
+
+test("a warehouse host on a private network is refused", async () => {
+  const ctx = makeCtx({ source: row("clickhouse"), creds: key({ url: "https://127.0.0.1:8443", user: "u", password: "p" }), fetcher: async () => Response.json({}) });
+  await assert.rejects(runQuery(ctx, { ...q0, sql: "select email, updated_at from t" }, "x"), /private network/);
+});

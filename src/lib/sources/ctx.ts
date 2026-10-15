@@ -14,6 +14,8 @@ export type CtxOpts = {
   sleep?: (ms: number) => Promise<void>;
   signal?: AbortSignal;
   gapMs?: number;
+  /** Tests only: reach local databases without TLS. */
+  local?: boolean;
   /** Refresh a token; defaults to the tool's OAuth app. */
   refresh?: (refresh: string) => Promise<{ access: string; refresh: string | null; expiresAt: number }>;
 };
@@ -100,6 +102,7 @@ export function makeCtx(o: CtxOpts): Ctx {
     token,
     secret: (name) => (creds.type === "key" ? (creds.values[name] ?? "") : creds.type === "oauth" ? (creds.extra?.[name] ?? "") : ""),
     signal: o.signal,
+    local: o.local,
   };
 }
 

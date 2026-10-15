@@ -195,7 +195,9 @@ What shipped and what's left: the plan's Part 21c.
 
 ---
 
-## Week 8. Custom objects, warehouses, product data, segments
+## Week 8. Custom objects, warehouses, product data, segments (built)
+
+What shipped and what's left: the plan's Part 21b (custom objects) and Part 21d. The build used `037_segments.sql` and `038_warehouses.sql`; custom objects landed in `034_records.sql`.
 
 **Goal:** the data model Conversion sells, and segments over all of it.
 

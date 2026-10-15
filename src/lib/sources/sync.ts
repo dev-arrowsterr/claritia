@@ -8,6 +8,7 @@
 
 import { countryCode } from "../contacts/fields.ts";
 import { prepareImport, type Ctx as CleanCtx, type ContactInput } from "../contacts/import.ts";
+import { cleanEmail, isRejected } from "../identity/clean.ts";
 import { writeContacts } from "../contacts/contacts.ts";
 import type { Rpc } from "../jobs.ts";
 import { agreed, changedKeys, compared, effectiveMapping, pushable, recordsToCompanies, recordsToRows, toRemote, type Col, type SavedMapping } from "./map.ts";
@@ -172,6 +173,59 @@ export async function applySuppressions(d: Deps, records: RawRecord[]): Promise<
   return c;
 }
 
+/** The email column of a warehouse row: the one the query names, else the first that looks like one. */
+function emailOf(d: Deps, data: Record<string, unknown>): string | null {
+  const q = d.ctx.source.settings.query;
+  const col = q?.email ?? Object.keys(data).find((k) => /e-?mail/i.test(k));
+  const raw = col ? data[col] : null;
+  if (typeof raw !== "string" || !raw.includes("@")) return null;
+  const e = cleanEmail(raw, d.clean);
+  return isRejected(e) ? null : e.clean;
+}
+
+/** Warehouse rows as activity on contacts. A row read again (the cursor overlaps) adds nothing. */
+export async function applyEvents(d: Deps, records: RawRecord[]): Promise<Counts> {
+  const c = zero();
+  c.pulled = records.length;
+  const q = d.ctx.source.settings.query;
+  const rows = records.flatMap((r) => {
+    const email = emailOf(d, r.data);
+    const kind = String(q?.event || r.data.event || r.data.kind || "")
+      .toLowerCase()
+      .replace(/[^a-z0-9_.]+/g, "_");
+    if (!email || !/^[a-z][a-z0-9_.]{1,60}$/.test(kind)) return [];
+    const at = r.data[q?.cursor ?? ""] ?? r.data.at ?? r.data.timestamp ?? null;
+    const data = Object.fromEntries(Object.entries(r.data).filter(([k, v]) => v != null && !/e-?mail/i.test(k)).slice(0, 40));
+    return [{ key: r.id, email_clean: email, kind, at: at == null || Number.isNaN(Date.parse(String(at))) ? null : new Date(String(at)).toISOString(), data }];
+  });
+  c.skipped += records.length - rows.length;
+  for (let i = 0; i < rows.length; i += 5000) {
+    const out = await call<{ added: number; no_contact: number }>(d.rpc, "events_ingest", { p_source: d.ctx.source.id, p_rows: rows.slice(i, i + 5000) });
+    c.written += out.added;
+    c.skipped += out.no_contact + (Math.min(rows.length - i, 5000) - out.added - out.no_contact);
+  }
+  return c;
+}
+
+/** Warehouse rows as records of a custom object. Columns fill the fields with the same key ("Seats" fills seats). */
+export async function applyRecords(d: Deps, records: RawRecord[]): Promise<Counts> {
+  const c = zero();
+  c.pulled = records.length;
+  const q = d.ctx.source.settings.query;
+  const object = q?.target.startsWith("object:") ? q.target.slice(7) : "";
+  if (!object) return c;
+  const keyOf = (col: string) => col.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
+  const rows = records.map((r) => ({
+    id: r.id,
+    name: String(r.data.name ?? r.data.title ?? r.id),
+    fields: Object.fromEntries(Object.entries(r.data).map(([k, v]) => [keyOf(k), v])),
+    email_clean: emailOf(d, r.data),
+  }));
+  const out = await call<{ ids: (string | null)[]; created: number; updated: number }>(d.rpc, "records_ingest", { p_source: d.ctx.source.id, p_object: object, p_rows: rows });
+  c.written += out.created + out.updated;
+  return c;
+}
+
 async function applyLists(d: Deps, cursor: string | null) {
   const page = await d.connector.lists!(d.ctx, cursor);
   for (const l of page.lists) {
@@ -189,9 +243,10 @@ async function applyLists(d: Deps, cursor: string | null) {
 export async function pull(d: Deps, budgetMs = 240_000): Promise<{ more: boolean; counts: Record<string, Counts> }> {
   const start = (d.now ?? Date.now)();
   const counts: Record<string, Counts> = {};
-  const order: ObjectKind[] = ["suppressions", "companies", "contacts", "lists"];
+  const order: ObjectKind[] = ["suppressions", "companies", "contacts", "lists", "events", "records"];
+  const chosen = d.connector.objectsFor?.(d.ctx.source);
   for (const object of order) {
-    if (!d.connector.objects.includes(object) || !enabled(d, object)) continue;
+    if (chosen ? !chosen.includes(object) : !d.connector.objects.includes(object) || !enabled(d, object)) continue;
     const total = (counts[object] = zero());
     for (;;) {
       if (d.ctx.signal?.aborted) throw new Error("Stopped");
@@ -205,7 +260,16 @@ export async function pull(d: Deps, budgetMs = 240_000): Promise<{ more: boolean
         total.pulled += page.lists.length;
       } else {
         const page = await d.connector.pull!(d.ctx, object, cursor);
-        const got = object === "contacts" ? await applyContacts(d, page.records) : object === "companies" ? await applyCompanies(d, page.records) : await applySuppressions(d, page.records);
+        const got =
+          object === "contacts"
+            ? await applyContacts(d, page.records)
+            : object === "companies"
+              ? await applyCompanies(d, page.records)
+              : object === "events"
+                ? await applyEvents(d, page.records)
+                : object === "records"
+                  ? await applyRecords(d, page.records)
+                  : await applySuppressions(d, page.records);
         for (const k of ["pulled", "written", "skipped", "errors"] as const) total[k] += got[k];
         next = page.cursor;
         more = page.more;

@@ -7,6 +7,7 @@ import { useState } from "react";
 import { BASES, type Basis } from "@/lib/contacts/consent";
 import { TARGETS, type Target } from "@/lib/contacts/fields";
 import { CATALOG, GROUPS, entryOf, type Entry } from "@/lib/sources/catalog";
+import { queryError, type WhQuery } from "@/lib/sources/sql";
 import { Copy, Pause, Play, Plug, Refresh } from "../../Icons";
 import { BrandLogo } from "../BrandLogo";
 import { askConfirm } from "../Dialogs";
@@ -22,7 +23,7 @@ type Source = {
   name: string;
   account: string | null;
   status: string;
-  settings: { objects?: Record<string, string>; every_min?: number; basis?: Basis; push_new?: string; follow_deletes?: boolean };
+  settings: { objects?: Record<string, string>; every_min?: number; basis?: Basis; push_new?: string; follow_deletes?: boolean; query?: WhQuery };
   last_run_at: string | null;
   last_error: string | null;
   created_at: string;
@@ -39,7 +40,7 @@ const EVERY = [
   { value: 1440, label: "Every day" },
 ];
 const SEL = "h-9 w-full rounded-md border border-line bg-panel px-2.5 text-[13px] hover:border-line-strong";
-const OBJECT_LABEL: Record<string, string> = { contacts: "Contacts", companies: "Companies", lists: "Lists", suppressions: "Unsubscribes" };
+const OBJECT_LABEL: Record<string, string> = { contacts: "Contacts", companies: "Companies", lists: "Lists", suppressions: "Unsubscribes", events: "Activity", records: "Records" };
 
 async function getJson<T>(session: ViewProps["session"], path: string): Promise<T> {
   const res = await fetch(path, { headers: { Authorization: `Bearer ${session.access_token}` } });
@@ -247,11 +248,27 @@ function ConnectPanel({ session, wsId, entry, onClose, onError }: { session: Vie
           >
             {(entry.keys ?? []).map((k) => (
               <Field key={k.key} label={k.label}>
-                <Input value={keys[k.key] ?? ""} onChange={(e) => setKeys({ ...keys, [k.key]: e.target.value })} type={k.secret ? "password" : "text"} placeholder={k.placeholder} autoComplete="off" />
+                {k.multiline ? (
+                  <textarea
+                    value={keys[k.key] ?? ""}
+                    onChange={(e) => setKeys({ ...keys, [k.key]: e.target.value })}
+                    rows={5}
+                    spellCheck={false}
+                    autoComplete="off"
+                    className="w-full rounded-md border border-line bg-panel px-2.5 py-2 font-mono text-[12px] outline-none focus:border-ink"
+                  />
+                ) : (
+                  <Input value={keys[k.key] ?? ""} onChange={(e) => setKeys({ ...keys, [k.key]: e.target.value })} type={k.secret ? "password" : "text"} placeholder={k.placeholder} autoComplete="off" />
+                )}
               </Field>
             ))}
+            {entry.grant ? (
+              <Field label="Read-only user">
+                <pre className="overflow-x-auto border border-line bg-canvas px-3 py-2 font-mono text-[11.5px] leading-relaxed whitespace-pre text-body">{entry.grant}</pre>
+              </Field>
+            ) : null}
             <div className="flex items-center gap-3">
-              <Button type="submit" disabled={busy || (entry.keys ?? []).some((k) => !keys[k.key]?.trim())}>
+              <Button type="submit" disabled={busy || (entry.keys ?? []).some((k) => !k.optional && !keys[k.key]?.trim())}>
                 {busy ? "Checking…" : "Connect"}
               </Button>
               {signIn ? (
@@ -346,7 +363,7 @@ function SourcePanel({ sb, session, wsId, source, owner, onClose, changed }: { s
           <Panel>
             <CardHead label="Sync" />
             <div className="grid gap-4 p-4 sm:grid-cols-2">
-              {(e?.objects ?? []).map((o) => (
+              {(e?.warehouse ? [] : (e?.objects ?? [])).map((o) => (
                 <Field key={o} label={OBJECT_LABEL[o] ?? o}>
                   <Select
                     className={SEL}
@@ -378,7 +395,7 @@ function SourcePanel({ sb, session, wsId, source, owner, onClose, changed }: { s
                   />
                 </Field>
               ) : null}
-              {!e?.hook ? (
+              {!e?.hook && !e?.warehouse ? (
                 <Field label="When a contact is deleted there">
                   <Select
                     className={SEL}
@@ -408,7 +425,9 @@ function SourcePanel({ sb, session, wsId, source, owner, onClose, changed }: { s
           </Panel>
         ) : null}
 
-        {source.status !== "disconnected" ? <MappingPanel sb={sb} session={session} wsId={wsId} source={source} owner={owner} hasCompanies={!!e?.objects.includes("companies")} /> : null}
+        {e?.warehouse && source.status !== "disconnected" ? <QueryPanel sb={sb} session={session} wsId={wsId} source={source} owner={owner} changed={changed} /> : null}
+
+        {source.status !== "disconnected" && (!e?.warehouse || (source.settings.query && ["contacts", "companies"].includes(source.settings.query.target))) ? <MappingPanel sb={sb} session={session} wsId={wsId} source={source} owner={owner} hasCompanies={!!e?.objects.includes("companies")} /> : null}
 
         <Panel>
           <CardHead label="Runs" count={runs.data?.length} />
@@ -453,6 +472,125 @@ function SourcePanel({ sb, session, wsId, source, owner, onClose, changed }: { s
         </Panel>
       </div>
     </SidePanel>
+  );
+}
+
+function QueryPanel({ sb, session, wsId, source, owner, changed }: { sb: ViewProps["sb"]; session: ViewProps["session"]; wsId: string; source: Source; owner: boolean; changed: () => void }) {
+  const start: WhQuery = source.settings.query ?? { sql: "select email, first_name, last_name, company, updated_at\nfrom users\nwhere updated_at >= :cursor", key: "email", cursor: "updated_at", target: "contacts" };
+  const [q, setQ] = useState<WhQuery>(start);
+  const [test, setTest] = useState<{ columns: string[]; rows: Record<string, unknown>[] } | null>(null);
+  const [busy, setBusy] = useState("");
+  const [error, setError] = useState("");
+  const [saved, setSaved] = useState(false);
+  const objects = useLoad(async () => must(await sb.from("objects").select("key, plural").eq("workspace_id", wsId).order("plural")) as { key: string; plural: string }[], wsId);
+  const targets = [
+    { value: "contacts", label: "Contacts" },
+    { value: "companies", label: "Companies" },
+    { value: "events", label: "Activity on contacts" },
+    ...(objects.data ?? []).map((o) => ({ value: `object:${o.key}`, label: o.plural })),
+  ];
+  const wrong = queryError(q);
+  const run = async (label: string, fn: () => Promise<void>) => {
+    setError("");
+    setBusy(label);
+    try {
+      await fn();
+    } catch (e) {
+      setError(errorText(e));
+    } finally {
+      setBusy("");
+    }
+  };
+  const set = (patch: Partial<WhQuery>) => {
+    setQ({ ...q, ...patch });
+    setSaved(false);
+  };
+  return (
+    <Panel>
+      <CardHead label="Query" />
+      <div className="flex flex-col gap-3 p-4">
+        <textarea
+          value={q.sql}
+          onChange={(e) => set({ sql: e.target.value })}
+          rows={7}
+          spellCheck={false}
+          disabled={!owner}
+          aria-label="Query"
+          className="w-full rounded-md border border-line bg-panel px-3 py-2 font-mono text-[12.5px] leading-relaxed outline-none focus:border-ink"
+        />
+        <div className="grid gap-3 sm:grid-cols-2">
+          <Field label="Rows become">
+            <Select className={SEL} value={q.target} onChange={(t) => set({ target: t as WhQuery["target"] })} options={targets} disabled={!owner} />
+          </Field>
+          <Field label="Key column">
+            <Input value={q.key} onChange={(e) => set({ key: e.target.value.trim() })} disabled={!owner} className="font-mono" />
+          </Field>
+          <Field label="Cursor column">
+            <Input value={q.cursor} onChange={(e) => set({ cursor: e.target.value.trim() })} disabled={!owner} className="font-mono" />
+          </Field>
+          {q.target === "events" ? (
+            <Field label="Activity name">
+              <Input value={q.event ?? ""} onChange={(e) => set({ event: e.target.value.trim() })} placeholder="product.signup" disabled={!owner} className="font-mono" />
+            </Field>
+          ) : null}
+          {q.target !== "contacts" && q.target !== "companies" ? (
+            <Field label="Email column">
+              <Input value={q.email ?? ""} onChange={(e) => set({ email: e.target.value.trim() || undefined })} placeholder="email" disabled={!owner} className="font-mono" />
+            </Field>
+          ) : null}
+        </div>
+        <ErrorNote message={error || (q.sql.trim() ? (wrong ?? "") : "")} />
+        {owner ? (
+          <div className="flex items-center gap-2">
+            <Button
+              variant="ghost"
+              disabled={!!wrong || !!busy}
+              onClick={() => run("test", async () => setTest(await postJson<{ columns: string[]; rows: Record<string, unknown>[] }>(session, "/api/sources/test-query", { id: source.id, query: q })))}
+            >
+              <Play size={14} />
+              {busy === "test" ? "Running…" : "Test"}
+            </Button>
+            <Button
+              disabled={!!wrong || !!busy}
+              onClick={() =>
+                run("save", async () => {
+                  must(await sb.rpc("source_settings_save", { p_id: source.id, p_name: source.name, p_settings: { ...source.settings, query: q } }));
+                  setSaved(true);
+                  changed();
+                })
+              }
+            >
+              Save query
+            </Button>
+            {saved ? <span className="text-[12px] text-faint">Saved</span> : null}
+          </div>
+        ) : null}
+      </div>
+      {test ? (
+        <div className="overflow-x-auto border-t border-line">
+          <table className="w-full border-collapse">
+            <thead>
+              <tr>
+                {test.columns.map((c) => (
+                  <Th key={c}>{c}</Th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {test.rows.map((r, i) => (
+                <tr key={i} className="border-t border-line">
+                  {test.columns.map((c) => (
+                    <Td key={c} className="max-w-[220px] truncate font-mono text-[12px]">
+                      {r[c] == null ? "—" : typeof r[c] === "object" ? JSON.stringify(r[c]) : String(r[c])}
+                    </Td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : null}
+    </Panel>
   );
 }
 

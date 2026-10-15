@@ -879,6 +879,9 @@ select pg_temp.fails($$select companies_upsert('22222222-0000-0000-0000-00000000
 select pg_temp.fails($$select source_links_put('5c000000-0000-0000-0000-0000000000c1', 'contact', '[]')$$, 'Ben writes links');
 select pg_temp.fails($$select sync_log_add('5c000000-0000-0000-0000-0000000000c1', '[]')$$, 'Ben writes the sync log');
 select pg_temp.fails($$insert into sources (workspace_id, kind, name) values ('11111111-0000-0000-0000-000000000000', 'stripe', 'x')$$, 'Ben inserts a source');
+select pg_temp.fails($$select events_ingest('5c000000-0000-0000-0000-0000000000c1', '[]')$$, 'Ben writes activity through a source');
+select pg_temp.fails($$select records_ingest('5c000000-0000-0000-0000-0000000000c1', 'x', '[]')$$, 'Ben writes records through a source');
+select pg_temp.fails($$select * from source_event_keys$$, 'Ben reads event keys');
 reset role;
 select pg_temp.as_user('a0000000-0000-0000-0000-000000000000');
 set role authenticated;

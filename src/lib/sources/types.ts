@@ -4,8 +4,8 @@
 
 import type { Target } from "../contacts/fields.ts";
 
-export type Group = "crm" | "email" | "form" | "event" | "product" | "api";
-export type ObjectKind = "contacts" | "companies" | "lists" | "suppressions";
+export type Group = "crm" | "email" | "form" | "event" | "product" | "warehouse" | "api";
+export type ObjectKind = "contacts" | "companies" | "lists" | "suppressions" | "events" | "records";
 
 /** One record as the tool has it. `id` is the tool's own id; `data` is flat (column → value). */
 export type RawRecord = {
@@ -48,6 +48,7 @@ export type SourceRow = {
 
 export type Settings = {
   objects?: Partial<Record<ObjectKind, "both" | "in" | "off">>;
+  query?: import("./sql.ts").WhQuery;
   every_min?: number;
   basis?: "opt_in" | "soft_opt_in" | "legitimate_interest" | "none";
   push_new?: "all" | "lifecycle" | "none";
@@ -64,6 +65,10 @@ export type Ctx = {
   /** The access token, refreshed when it's about to expire. */
   token(): Promise<string>;
   signal?: AbortSignal;
+  /** Tests only: reach local databases without TLS. */
+  local?: boolean;
+  /** A warehouse source's saved query, while it runs. */
+  query?: import("./sql.ts").WhQuery;
 };
 
 export type HookRequest = { headers: Headers; body: string; url: string; method: string };
@@ -81,7 +86,9 @@ export type Connector = {
   gapMs?: number;
   /** The connected account: its id (for account-wide webhooks) and a label for the card. */
   account(ctx: Ctx): Promise<{ id: string; label: string }>;
-  pull?(ctx: Ctx, object: "contacts" | "companies" | "suppressions", cursor: string | null): Promise<Page>;
+  pull?(ctx: Ctx, object: Exclude<ObjectKind, "lists">, cursor: string | null): Promise<Page>;
+  /** What it pulls when that depends on the source's settings (a warehouse query's target). */
+  objectsFor?(source: SourceRow): ObjectKind[];
   lists?(ctx: Ctx, cursor: string | null): Promise<ListPage>;
   /** Records by id, for hooks that only say which record changed. */
   fetch?(ctx: Ctx, object: "contacts" | "companies", ids: string[]): Promise<RawRecord[]>;

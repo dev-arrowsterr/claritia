@@ -41,8 +41,8 @@ export async function POST(request: Request) {
       const values: Record<string, string> = {};
       for (const f of e.keys ?? []) {
         const v = typeof keys?.[f.key] === "string" ? (keys[f.key] as string).trim() : "";
-        if (!v) return bad(`Fill in ${f.label}.`);
-        values[f.key] = v.slice(0, 500);
+        if (!v && !f.optional) return bad(`Fill in ${f.label}.`);
+        if (v) values[f.key] = v.slice(0, f.multiline ? 10_000 : 500);
       }
       creds = { type: "key", values };
     }
