@@ -4,9 +4,10 @@
 
 import { useEffect, useState } from "react";
 import { Eye } from "../../Icons";
+import { applyFilters, cleanFilters, type Filter, type FilterField } from "@/lib/filters";
 import { persona } from "@/lib/web/names";
 import { Badge, Button, Empty, ErrorNote, Loading, must, Page, Panel, Td, Th, timeAgo, useLoad, type Tone, type ViewProps } from "../ui";
-import { Select } from "../Select";
+import { FilterBar, useFilters } from "../FilterBar";
 import { VisitorsIntro } from "./MarketingIntros";
 
 export type Visit = {
@@ -62,15 +63,48 @@ const REF_LABEL: Record<string, string> = {
 
 export const activeTime = (s: number) => (s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, "0")}s`);
 
-type Filter = "all" | "company" | "people" | "ai" | "unknown";
+const VISIT_FIELDS: FilterField<Visit>[] = [
+  { key: "company", label: "Company", type: "text", get: (v) => v.account_name ?? v.account_domain },
+  { key: "known", label: "Known person", type: "bool", get: (v) => !!v.person_id },
+  { key: "source", label: "Source", type: "enum", options: Object.entries(REF_LABEL).map(([value, label]) => ({ value, label })), get: (v) => v.ref_class ?? "direct" },
+  { key: "page", label: "Page", type: "text", get: (v) => v.pages },
+  { key: "pages", label: "Pages viewed", type: "number", get: (v) => v.pageviews },
+  { key: "active", label: "Active time", type: "number", unit: "min", get: (v) => v.engaged_s / 60 },
+  { key: "referrer", label: "Referrer", type: "text", get: (v) => v.referrer_host },
+  { key: "country", label: "Country", type: "text", get: (v) => v.country },
+  { key: "city", label: "City", type: "text", get: (v) => v.city },
+  {
+    key: "device",
+    label: "Device",
+    type: "enum",
+    options: [
+      { value: "desktop", label: "Desktop" },
+      { value: "mobile", label: "Mobile" },
+      { value: "tablet", label: "Tablet" },
+      { value: "other", label: "Other" },
+    ],
+    get: (v) => v.device_type,
+  },
+  {
+    key: "level",
+    label: "Person match",
+    type: "enum",
+    options: [
+      { value: "verified", label: "Verified" },
+      { value: "asserted", label: "Asserted" },
+      { value: "probable", label: "Probable" },
+    ],
+    get: (v) => v.person_level,
+  },
+];
 
-const FILTERS: Record<Filter, (v: Visit) => boolean> = {
-  all: () => true,
-  company: (v) => !!v.account_id,
-  people: (v) => !!v.person_id,
-  ai: (v) => v.ref_class === "ai_assistant",
-  unknown: (v) => !v.account_id && !v.person_id,
-};
+const AI: Filter = { field: "source", op: "is", values: ["ai_assistant"] };
+const VISIT_PRESETS: { name: string; filters: Filter[] }[] = [
+  { name: "With a company", filters: [{ field: "company", op: "not_empty", values: [] }] },
+  { name: "Known people", filters: [{ field: "known", op: "is", values: ["true"] }] },
+  { name: "From AI", filters: [AI] },
+  { name: "Unknown", filters: [{ field: "company", op: "empty", values: [] }, { field: "known", op: "is", values: ["false"] }] },
+];
 
 /** The visitor's square avatar: initials on their color. */
 export function VisitorAvatar({ code, size = 24 }: { code: string; size?: number }) {
@@ -94,7 +128,8 @@ export function VisitorsView({ sb, ws, navigate }: ViewProps) {
   const sites = useLoad(async () => must(await sb.rpc("site_health", { p_ws: ws.id })) as SiteHealth[], ws.id);
   const visits = useLoad(async () => must(await sb.rpc("visitors_live", { p_ws: ws.id, p_hours: 24, p_limit: 200 })) as Visit[], ws.id);
   const reload = visits.reload;
-  const [filter, setFilter] = useState<Filter>("all");
+  const [stored, setFilters] = useFilters("visitors", ws.id);
+  const filters = cleanFilters(stored, VISIT_FIELDS as FilterField<never>[]);
   const [openId, setOpenId] = useState<string | null>(null);
 
   useEffect(() => {
@@ -119,13 +154,13 @@ export function VisitorsView({ sb, ws, navigate }: ViewProps) {
   if (!sites.data.length) return <VisitorsIntro action={<Button onClick={() => navigate("settings")}>Add your site</Button>} />;
 
   const all = visits.data;
-  const rows = all.filter(FILTERS[filter]);
+  const rows = applyFilters(all, filters, VISIT_FIELDS);
   const open = all.find((v) => v.id === openId) ?? null;
   const stats = [
     { label: "Visits", value: all.length },
     { label: "Companies", value: new Set(all.map((v) => v.account_id).filter(Boolean)).size },
     { label: "Known people", value: new Set(all.map((v) => v.person_id).filter(Boolean)).size },
-    { label: "From AI", value: all.filter(FILTERS.ai).length },
+    { label: "From AI", value: applyFilters(all, [AI], VISIT_FIELDS).length },
   ];
   return (
     <Page
@@ -133,22 +168,8 @@ export function VisitorsView({ sb, ws, navigate }: ViewProps) {
       title="Visitors"
       count={rows.length}
       flush
-      actions={
-        <Select<Filter>
-          value={filter}
-          onChange={setFilter}
-          ariaLabel="Filter"
-          className="h-8 w-44 rounded-md border border-line bg-panel px-2.5 text-[13px] hover:border-line-strong"
-          options={[
-            { value: "all", label: "All visits" },
-            { value: "company", label: "With a company" },
-            { value: "people", label: "Known people" },
-            { value: "ai", label: "From AI" },
-            { value: "unknown", label: "Unknown" },
-          ]}
-        />
-      }
     >
+      <FilterBar sb={sb} wsId={ws.id} screen="visitors" fields={VISIT_FIELDS as FilterField<never>[]} filters={filters} onChange={setFilters} presets={VISIT_PRESETS} allLabel="All visits" />
       <div className="grid grid-cols-2 border-b border-line bg-canvas md:grid-cols-4">
         {stats.map((x, i) => (
           <div key={x.label} className={`px-4 py-3 md:px-5 ${i ? "border-l border-line" : ""}`}>

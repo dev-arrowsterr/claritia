@@ -174,3 +174,24 @@ export const Link = (p: P) => (
     <path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1" />
   </Svg>
 );
+
+export const Contact = (p: P) => (
+  <Svg {...p}>
+    <circle cx="12" cy="8" r="4" />
+    <path d="M4 21v-1a6 6 0 0 1 6-6h4a6 6 0 0 1 6 6v1" />
+  </Svg>
+);
+
+export const Upload = (p: P) => (
+  <Svg {...p}>
+    <path d="M12 15V3M7 8l5-5 5 5" />
+    <path d="M4 15v4a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-4" />
+  </Svg>
+);
+
+export const Download = (p: P) => (
+  <Svg {...p}>
+    <path d="M12 3v12M7 10l5 5 5-5" />
+    <path d="M4 15v4a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-4" />
+  </Svg>
+);

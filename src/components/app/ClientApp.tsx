@@ -4,7 +4,7 @@ import type { Session } from "@supabase/supabase-js";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { getSupabase, type SupaConfig } from "@/lib/supa";
 import { allowedRoute, navFor, showsProjectPicker, type Route as NavRoute } from "@/lib/nav";
-import { BarChart, Box, Branch, Check, Clock, Eye, FileText, Globe, ListIcon, LogOut, MapIcon, Play, Settings, Users } from "../Icons";
+import { BarChart, Box, Branch, Check, Clock, Contact, Eye, FileText, Globe, ListIcon, LogOut, MapIcon, Play, Settings, Users } from "../Icons";
 import { Logo } from "../Logo";
 import { AuthScreen } from "./AuthScreen";
 import { askText, DialogHost } from "./Dialogs";
@@ -19,6 +19,7 @@ import { RunsView } from "./views/RunsView";
 import { ConnectExtension } from "./ConnectExtension";
 import { MapView } from "./views/MapView";
 import { AccountsView } from "./views/AccountsView";
+import { ContactsView } from "./views/ContactsView";
 import { JourneysView, PagesView, ReportsView } from "./views/MarketingIntros";
 import { VisitorsView } from "./views/VisitorsView";
 import { SettingsView } from "./views/SettingsView";
@@ -28,6 +29,7 @@ import { TestsView } from "./views/TestsView";
 // four modules (AI works inside each: the Writer in Authoring, the Healer in Execution, smart retries in Management
 // and the Judge in Analytics), the marketing platform's screens, or both.
 const ICONS: Record<NavRoute, React.ReactNode> = {
+  contacts: <Contact size={15} />,
   visitors: <Eye size={15} />,
   accounts: <Users size={15} />,
   people: <Users size={15} />,
@@ -49,7 +51,7 @@ const PROJECT_KEY = "claritia:project";
 const NEW_PROJECT = "__new";
 
 type Loc = { route: Route; id: string };
-const WITH_ID = new Set<Route>(["tests", "blocks", "runs", "approvals", "accounts"]);
+const WITH_ID = new Set<Route>(["tests", "blocks", "runs", "approvals", "accounts", "contacts"]);
 
 const readLoc = (): Loc => {
   const [, first = "", id = ""] = window.location.pathname.split("/");
@@ -271,7 +273,7 @@ export function ClientApp({ config }: { config: SupaConfig }) {
             <ErrorNote message={error} />
           </div>
         ) : null}
-        {route === "visitors" ? <VisitorsView {...props} /> : route === "accounts" ? <AccountsView {...props} /> : route === "journeys" ? <JourneysView /> : route === "pages" ? <PagesView /> : route === "reports" ? <ReportsView /> : route === "tests" ? <TestsView {...props} /> : route === "blocks" ? <BlocksView {...props} /> : route === "map" ? <MapView {...props} /> : route === "runs" ? <RunsView {...props} /> : route === "approvals" ? <ApprovalsView {...props} /> : route === "environments" ? <EnvironmentsView {...props} /> : route === "schedules" ? <SchedulesView {...props} /> : route === "insights" ? <InsightsView {...props} /> : <SettingsView {...props} />}
+        {route === "contacts" ? <ContactsView {...props} /> : route === "visitors" ? <VisitorsView {...props} /> : route === "accounts" ? <AccountsView {...props} /> : route === "journeys" ? <JourneysView /> : route === "pages" ? <PagesView /> : route === "reports" ? <ReportsView /> : route === "tests" ? <TestsView {...props} /> : route === "blocks" ? <BlocksView {...props} /> : route === "map" ? <MapView {...props} /> : route === "runs" ? <RunsView {...props} /> : route === "approvals" ? <ApprovalsView {...props} /> : route === "environments" ? <EnvironmentsView {...props} /> : route === "schedules" ? <SchedulesView {...props} /> : route === "insights" ? <InsightsView {...props} /> : <SettingsView {...props} />}
       </main>
     </div>
   );

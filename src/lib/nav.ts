@@ -3,6 +3,7 @@
 // A workspace with only testing sees the app exactly as before.
 
 export type Route =
+  | "contacts"
   | "visitors"
   | "accounts"
   | "people"
@@ -22,7 +23,8 @@ export type Route =
 export type NavItem = { route: Route; label: string; group?: string };
 
 const MARKETING: NavItem[] = [
-  { route: "visitors", label: "Visitors", group: "Audience" },
+  { route: "contacts", label: "Contacts", group: "Audience" },
+  { route: "visitors", label: "Visitors" },
   { route: "accounts", label: "Accounts" },
   { route: "journeys", label: "Journeys", group: "Engage" },
   { route: "pages", label: "Pages" },

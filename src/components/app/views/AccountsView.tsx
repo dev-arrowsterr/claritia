@@ -3,10 +3,11 @@
 // Accounts and the account page (docs/m1-website-intelligence.md 8.5, 8.6).
 
 import { useState } from "react";
+import { applyFilters, cleanFilters, type Filter, type FilterField } from "@/lib/filters";
 import { decayed } from "@/lib/web/scores";
 import { Users } from "../../Icons";
 import { Badge, Button, CardHead, Empty, ErrorNote, errorText, Loading, must, Page, Panel, Td, Th, timeAgo, useLoad, type Tone, type ViewProps } from "../ui";
-import { Select } from "../Select";
+import { FilterBar, useFilters } from "../FilterBar";
 import { activeTime, LEVEL_TONE } from "./VisitorsView";
 
 type Row = {
@@ -20,6 +21,7 @@ type Row = {
   temperature: string | null;
   why_now: string | null;
   last_signal_at: string | null;
+  first_seen: string;
   industry: string | null;
   size: string | null;
   country: string | null;
@@ -28,7 +30,38 @@ type Row = {
   feedback: string | null;
 };
 
-type View = "hot" | "evaluating" | "new" | "fit_quiet" | "all";
+const opts = (...xs: string[]) => xs.map((x) => ({ value: x, label: x[0].toUpperCase() + x.slice(1) }));
+
+const ACCOUNT_FIELDS: FilterField<Row>[] = [
+  { key: "name", label: "Name", type: "text", get: (a) => a.name ?? a.domain },
+  { key: "domain", label: "Domain", type: "text", get: (a) => a.domain },
+  { key: "fit", label: "Fit", type: "number", get: (a) => a.fit },
+  { key: "intent", label: "Intent", type: "number", get: (a) => a.intent },
+  { key: "priority", label: "Priority", type: "number", get: (a) => a.priority },
+  { key: "stage", label: "Stage", type: "enum", options: opts("evaluating", "researching", "engaged", "unknown"), get: (a) => a.stage },
+  { key: "temperature", label: "Temperature", type: "enum", options: opts("hot", "warming", "steady", "cooling", "cold"), get: (a) => a.temperature },
+  { key: "industry", label: "Industry", type: "text", get: (a) => a.industry },
+  { key: "size", label: "Size", type: "text", get: (a) => a.size },
+  { key: "country", label: "Country", type: "text", get: (a) => a.country },
+  { key: "people", label: "People", type: "number", get: (a) => a.people },
+  { key: "sessions_7d", label: "Visits 7d", type: "number", get: (a) => a.sessions_7d },
+  { key: "last_active", label: "Last activity", type: "date", get: (a) => a.last_signal_at ?? a.first_seen },
+  { key: "first_seen", label: "First seen", type: "date", get: (a) => a.first_seen },
+];
+
+// The old tabs, as built-in views.
+const ACCOUNT_PRESETS: { name: string; filters: Filter[] }[] = [
+  { name: "Hot this week", filters: [{ field: "temperature", op: "is", values: ["hot"] }] },
+  { name: "Evaluating", filters: [{ field: "stage", op: "is", values: ["evaluating"] }] },
+  { name: "New this week", filters: [{ field: "first_seen", op: "within", values: ["7"] }] },
+  {
+    name: "High fit, quiet",
+    filters: [
+      { field: "fit", op: "gte", values: ["70"] },
+      { field: "last_active", op: "before", values: ["30"] },
+    ],
+  },
+];
 
 export const STAGE_TONE: Record<string, Tone> = { evaluating: "brand", researching: "violet", engaged: "gray", unknown: "gray" };
 export const TEMP_TONE: Record<string, Tone> = { hot: "red", steady: "gray", cooling: "amber", cold: "gray" };
@@ -50,31 +83,13 @@ export function AccountsView(props: ViewProps) {
 }
 
 function AccountsList({ sb, ws, navigate }: ViewProps) {
-  const [view, setView] = useState<View>("all");
-  const list = useLoad(async () => must(await sb.rpc("accounts_list", { p_ws: ws.id, p_view: view, p_limit: 300 })) as Row[], `${ws.id}:${view}`);
-  const rows = list.data ?? [];
+  const [stored, setFilters] = useFilters("accounts", ws.id);
+  const filters = cleanFilters(stored, ACCOUNT_FIELDS as FilterField<never>[]);
+  const list = useLoad(async () => must(await sb.rpc("accounts_list", { p_ws: ws.id, p_view: "all", p_limit: 1000 })) as Row[], ws.id);
+  const rows = applyFilters(list.data ?? [], filters, ACCOUNT_FIELDS);
   return (
-    <Page
-      icon={<Users size={14} />}
-      title="Accounts"
-      count={list.data ? rows.length : undefined}
-      flush
-      actions={
-        <Select<View>
-          value={view}
-          onChange={setView}
-          ariaLabel="Filter"
-          className="h-8 w-44 rounded-md border border-line bg-panel px-2.5 text-[13px] hover:border-line-strong"
-          options={[
-            { value: "all", label: "All accounts" },
-            { value: "hot", label: "Hot this week" },
-            { value: "evaluating", label: "Evaluating" },
-            { value: "new", label: "New this week" },
-            { value: "fit_quiet", label: "High fit, quiet" },
-          ]}
-        />
-      }
-    >
+    <Page icon={<Users size={14} />} title="Accounts" count={list.data ? rows.length : undefined} flush>
+      <FilterBar sb={sb} wsId={ws.id} screen="accounts" fields={ACCOUNT_FIELDS as FilterField<never>[]} filters={filters} onChange={setFilters} presets={ACCOUNT_PRESETS} allLabel="All accounts" />
       {list.error ? (
         <div className="p-4">
           <ErrorNote message={list.error} />
@@ -82,7 +97,7 @@ function AccountsList({ sb, ws, navigate }: ViewProps) {
       ) : !list.data ? (
         <Loading />
       ) : !rows.length ? (
-        <Empty icon={<Users size={16} />} title="No accounts here yet" />
+        <Empty icon={<Users size={16} />} title={list.data.length ? "No accounts match" : "No accounts here yet"} />
       ) : (
         <table className="w-full border-collapse">
           <thead>
