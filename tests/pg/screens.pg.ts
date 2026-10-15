@@ -25,7 +25,8 @@ test("visitors, accounts, account page, timeline and site health", async () => {
   const s = uuid7();
   await q(`insert into sessions (id, workspace_id, site_id, started_at, ended_at, policy, cookieless_key, account_id, account_source, person_id, person_level, pageviews, engaged_s, ref_class, referrer_host, country)
            values ($1, $2, $3, now() - interval '10 minutes', now(), 'notice', '\\x01', $4, 'email', $5, 'asserted', 4, 95, 'search', 'google.com', 'US')`, [s, ws, site, acc, person]);
-  for (const p of ["/", "/pricing", "/security", "/docs/a"]) await q(`insert into events (id, workspace_id, session_id, day, kind, path, server_at) values ($1, $2, $3, current_date, 'view', $4, now())`, [uuid7(), ws, s, p]);
+  for (const [i, p] of ["/", "/pricing", "/security", "/docs/a"].entries())
+    await q(`insert into events (id, workspace_id, session_id, day, kind, path, server_at) values ($1, $2, $3, current_date, 'view', $4, now() - make_interval(secs => $5))`, [uuid7(), ws, s, p, 60 - i * 10]);
   await q(`insert into signals (workspace_id, account_id, person_id, kind, weight, at, dedupe_key, evidence) values ($1, $2, $3, 'page_pricing', 10, now(), $4, $5)`, [ws, acc, person, `k-${s}`, JSON.stringify({ session_id: s })]);
 
   const c = await pool.connect();
@@ -34,8 +35,9 @@ test("visitors, accounts, account page, timeline and site health", async () => {
     const rpc = async (fn: string, args: unknown[]) => (await c.query(`select ${fn}(${args.map((_, i) => `$${i + 1}`).join(", ")}) as r`, args)).rows[0].r;
 
     const [v] = await rpc("visitors_live", [ws, 24, 100]);
-    for (const k of ["id", "started_at", "account_id", "account_name", "account_domain", "account_source", "person_email", "person_level", "pageviews", "engaged_s", "pages", "ref_class", "referrer_host", "country"]) assert.ok(k in v, `visitors_live.${k}`);
-    assert.deepEqual(v.pages, ["/", "/pricing", "/security"]);
+    for (const k of ["id", "device_id", "started_at", "account_id", "account_name", "account_domain", "account_source", "person_email", "person_level", "pageviews", "engaged_s", "pages", "page_times", "ref_class", "referrer_host", "country"]) assert.ok(k in v, `visitors_live.${k}`);
+    assert.deepEqual(v.pages, ["/", "/pricing", "/security", "/docs/a"]);
+    assert.equal(v.page_times.length, 4);
 
     for (const view of ["all", "hot", "evaluating", "new", "fit_quiet"]) await rpc("accounts_list", [ws, view, 50]);
     const [a] = await rpc("accounts_list", [ws, "hot", 50]);

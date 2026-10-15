@@ -5,7 +5,8 @@
 import { useState } from "react";
 import { decayed } from "@/lib/web/scores";
 import { Users } from "../../Icons";
-import { Badge, Button, CardHead, Empty, ErrorNote, errorText, Loading, must, Page, Panel, Tabs, Td, Th, timeAgo, useLoad, type Tone, type ViewProps } from "../ui";
+import { Badge, Button, CardHead, Empty, ErrorNote, errorText, Loading, must, Page, Panel, Td, Th, timeAgo, useLoad, type Tone, type ViewProps } from "../ui";
+import { Select } from "../Select";
 import { activeTime, LEVEL_TONE } from "./VisitorsView";
 
 type Row = {
@@ -53,20 +54,27 @@ function AccountsList({ sb, ws, navigate }: ViewProps) {
   const list = useLoad(async () => must(await sb.rpc("accounts_list", { p_ws: ws.id, p_view: view, p_limit: 300 })) as Row[], `${ws.id}:${view}`);
   const rows = list.data ?? [];
   return (
-    <Page icon={<Users size={14} />} title="Accounts" count={list.data ? rows.length : undefined} flush>
-      <div className="border-b border-line bg-canvas px-4 md:px-5">
-        <Tabs
+    <Page
+      icon={<Users size={14} />}
+      title="Accounts"
+      count={list.data ? rows.length : undefined}
+      flush
+      actions={
+        <Select<View>
           value={view}
           onChange={setView}
-          tabs={[
-            { value: "all", label: "All" },
+          ariaLabel="Filter"
+          className="h-8 w-44 rounded-md border border-line bg-panel px-2.5 text-[13px] hover:border-line-strong"
+          options={[
+            { value: "all", label: "All accounts" },
             { value: "hot", label: "Hot this week" },
             { value: "evaluating", label: "Evaluating" },
             { value: "new", label: "New this week" },
             { value: "fit_quiet", label: "High fit, quiet" },
           ]}
         />
-      </div>
+      }
+    >
       {list.error ? (
         <div className="p-4">
           <ErrorNote message={list.error} />
