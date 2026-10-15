@@ -31,7 +31,7 @@ export function Copy({ text }: { text: string }) {
 }
 
 function Install({ site }: { site: SiteHealth }) {
-  const [mode, setMode] = useState<"proxy" | "subdomain" | "direct">("proxy");
+  const [mode, setMode] = useState<"direct" | "proxy">("direct");
   const tag = (src: string) => `<script defer src="${src}" data-site="${site.site_key}"></script>`;
   const next = `// app/_clr/[...path]/route.ts (folder name: %5Fclr)
 const COLLECT = "${COLLECT}";
@@ -74,14 +74,19 @@ CLR_PROXY_SECRET=${site.proxy_secret}`;
         value={mode}
         onChange={setMode}
         tabs={[
-          { value: "proxy", label: "Proxy path · Best" },
-          { value: "subdomain", label: "Subdomain" },
-          { value: "direct", label: "Direct" },
+          { value: "direct", label: "Any website" },
+          { value: "proxy", label: "Your own server" },
         ]}
       />
-      {mode === "proxy" ? (
+      {mode === "direct" ? (
+        <Field label="Framer, Webflow, WordPress, Shopify, Wix, HTML: paste in <head> on every page">
+          <Copy text={tag(`${COLLECT}/s.js`)} />
+        </Field>
+      ) : (
         <>
-          <Copy text={tag("/_clr/s.js")} />
+          <Field label="Script tag (only works with the route below)">
+            <Copy text={tag("/_clr/s.js")} />
+          </Field>
           <Field label="Next.js">
             <Copy text={next} />
           </Field>
@@ -89,13 +94,6 @@ CLR_PROXY_SECRET=${site.proxy_secret}`;
             <Copy text={nginx} />
           </Field>
         </>
-      ) : mode === "subdomain" ? (
-        <>
-          <Copy text={`fly certs add t.${site.domain} --app claritia-collect`} />
-          <Copy text={tag(`https://t.${site.domain}/s.js`)} />
-        </>
-      ) : (
-        <Copy text={tag(`${COLLECT}/s.js`)} />
       )}
     </div>
   );
