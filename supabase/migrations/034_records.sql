@@ -841,7 +841,8 @@ begin
   end loop;
   insert into records (workspace_id, object_id, name, fields, field_sources, created_by)
   values (p_ws, o.id, left(trim(p_name), 300), vals,
-          (select coalesce(jsonb_object_agg(k, jsonb_build_object('s', 'manual', 'at', now(), 'by', auth.uid())), '{}') from jsonb_object_keys(vals || '{"name":1}') k),
+          (select coalesce(jsonb_object_agg(case when k = 'name' then k else 'f.' || k end, jsonb_build_object('s', 'manual', 'at', now(), 'by', auth.uid())), '{}')
+           from jsonb_object_keys(vals || '{"name":1}') k),
           auth.uid())
   returning records.id into rid;
   return rid;
@@ -1114,6 +1115,11 @@ begin
         when 'multi' then format('(%s.fields->%L)', t, substr(field, 3))
         when 'link' then format('array(select l.to_id::text from record_links l where l.field_id = %L and l.from_id = %s.id)', fid, t)
         else format('(%s.fields->>%L)', t, substr(field, 3)) end;
+    elsif field = 'q' then
+      -- Quick search across the names people look for.
+      typ := 'text';
+      expr := case p_object when 'contact' then $e$concat_ws(' ', c.first_name, c.last_name, c.email, co.name)$e$
+                            when 'company' then $e$concat_ws(' ', co.name, co.domain)$e$ else 'r.name' end;
     elsif p_object = 'contact' then
       case field
         when 'email' then typ := 'text'; expr := 'c.email';

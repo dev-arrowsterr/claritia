@@ -1,179 +1,76 @@
 "use client";
 
-// Contacts and the contact page (docs/conversion-parity.md Part 11): the table with the filter bar, saved views,
-// a columns picker and bulk export and remove; the import wizard; adding and editing a contact.
+// Contacts, Leads and the contact page (docs/conversion-parity.md Parts 4 and 17). The lists run on the shared
+// records list (src/components/app/records): views, filters, table or board, columns, inline edits and bulk
+// actions. The import wizard and the add and edit forms live here.
 
 import { useEffect, useState } from "react";
 import { BASES, BASIS_LABEL, IMPORT_SOURCES, sourceRefused, type Basis, type ImportSource } from "@/lib/contacts/consent";
-import { MAX_ROWS, parseCsv, toCsv } from "@/lib/contacts/csv";
-import { contactFilterFields, fullName, guessTarget, LIFECYCLES, SOURCES, TARGETS, type ContactRow, type CustomField, type Target } from "@/lib/contacts/fields";
-import { cleanFilters, type Filter, type FilterField } from "@/lib/filters";
-import { Check, Contact, Download, Plus, Trash, Upload } from "../../Icons";
-import { askConfirm, askText } from "../Dialogs";
-import { FilterBar, Popover, useFilters } from "../FilterBar";
+import { MAX_ROWS, parseCsv } from "@/lib/contacts/csv";
+import { fullName, guessTarget, LIFECYCLES, TARGETS, type ContactRow, type CustomField, type Target } from "@/lib/contacts/fields";
+import type { AnyField } from "@/lib/records/fields";
+import { Contact, Plus, Upload } from "../../Icons";
+import { askConfirm, askText, tell } from "../Dialogs";
+import { Popover } from "../FilterBar";
 import { Select } from "../Select";
 import { SampleRows, SampleStats, SampleTags, ToolIntro } from "../ToolIntro";
-import { Avatar, Badge, Button, CardHead, Empty, ErrorNote, errorText, Field, Input, Loading, must, Page, Panel, postJson, Td, Th, timeAgo, useLoad, type Tone, type ViewProps } from "../ui";
+import { Avatar, Badge, Button, CardHead, Empty, ErrorNote, errorText, Field, Input, Loading, must, Page, Panel, postJson, Th, Td, timeAgo, useLoad, type Tone, type ViewProps } from "../ui";
+import type { Link } from "../records/FieldInput";
+import { useMeta, type Meta } from "../records/meta";
+import { FieldsPanel, HistoryPanel, sourceLabel, type Change } from "../records/RecordParts";
+import { RecordsList, type Preset, type ViewState } from "../records/RecordsList";
+import { DEFAULT_WIDTH, type Row } from "../records/RecordTable";
 import { activeTime } from "./VisitorsView";
 
-const PAGE = 100;
 const LIFECYCLE_LABEL = Object.fromEntries(LIFECYCLES.map((l) => [l.value, l.label]));
-const SOURCE_LABEL = Object.fromEntries(SOURCES.map((s) => [s.value, s.label]));
 const LIFECYCLE_TONE: Record<string, Tone> = { customer: "green", opportunity: "brand", sql: "brand", mql: "violet" };
 const BASIS_TONE: Record<Basis, Tone> = { opt_in: "green", soft_opt_in: "green", legitimate_interest: "gray", none: "amber" };
 
 const displayName = (c: { first_name: string | null; last_name: string | null; email: string | null }) => fullName(c) ?? c.email ?? "Contact";
 const fmtDate = (iso: string) => new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+const cols = (...keys: string[]) => keys.map((key) => ({ key, width: DEFAULT_WIDTH }));
 
-function useCustomFields(sb: ViewProps["sb"], wsId: string) {
-  return useLoad(async () => must(await sb.from("fields").select("key, label, type, options").eq("workspace_id", wsId).eq("object", "contact").order("created_at")) as CustomField[], wsId);
-}
+const CONTACTS_BASE: ViewState = {
+  filters: [],
+  columns: cols("company", "title", "lifecycle", "lead_status", "owner", "country", "score", "updated_at"),
+  sort: { key: "updated_at", desc: true },
+  layout: "table",
+  group: "lifecycle",
+};
+const CONTACT_PRESETS: Preset[] = [
+  { name: "Customers", filters: [{ field: "lifecycle", op: "is", values: ["customer"] }] },
+  { name: "Seen on site", filters: [{ field: "known", op: "is", values: ["true"] }] },
+  { name: "New this week", filters: [{ field: "created_at", op: "within", values: ["7"] }] },
+  { name: "By lifecycle", layout: "board", group: "lifecycle" },
+];
+const LEADS_BASE: ViewState = {
+  filters: [{ field: "lead_status", op: "not_empty", values: [] }],
+  columns: cols("lead_status", "company", "title", "owner", "score", "fit", "updated_at"),
+  sort: { key: "updated_at", desc: true },
+  layout: "board",
+  group: "lead_status",
+};
+const LEAD_PRESETS: Preset[] = [
+  { name: "Open", filters: [{ field: "lead_status", op: "is", values: ["new", "attempting", "connected"] }], layout: "table" },
+  { name: "No owner", filters: [{ field: "lead_status", op: "not_empty", values: [] }, { field: "owner", op: "empty", values: [] }], layout: "table" },
+  { name: "Fit 70+", filters: [{ field: "lead_status", op: "not_empty", values: [] }, { field: "fit", op: "gte", values: ["70"] }], layout: "table" },
+];
 
 export function ContactsView(props: ViewProps) {
   if (props.id) return <ContactPage {...props} />;
   return <ContactsList {...props} />;
 }
 
-// The table ------------------------------------------------------------------------------------------------------
-
-type Column = { key: string; label: string; sort?: string; right?: boolean; cell: (c: ContactRow) => React.ReactNode };
-
-function columnsFor(custom: CustomField[]): Column[] {
-  const text = (v: unknown) => (v == null || v === "" ? <span className="text-faint">—</span> : String(v));
-  return [
-    { key: "company", label: "Company", sort: "company", cell: (c) => text(c.company_name ?? c.company_domain) },
-    { key: "title", label: "Title", cell: (c) => <span className="block max-w-[220px] truncate">{text(c.title)}</span> },
-    { key: "lifecycle", label: "Lifecycle", sort: "lifecycle", cell: (c) => (c.lifecycle ? <Badge tone={LIFECYCLE_TONE[c.lifecycle] ?? "gray"}>{LIFECYCLE_LABEL[c.lifecycle] ?? c.lifecycle}</Badge> : text(null)) },
-    { key: "country", label: "Country", cell: (c) => text(c.country) },
-    { key: "score", label: "Score", sort: "score", right: true, cell: (c) => <span className="font-mono text-[12px] tabular-nums">{c.score ?? "—"}</span> },
-    { key: "fit", label: "Fit", sort: "fit", right: true, cell: (c) => <span className="font-mono text-[12px] tabular-nums">{c.fit ?? "—"}</span> },
-    { key: "lead_status", label: "Lead status", cell: (c) => text(c.lead_status) },
-    { key: "phone", label: "Phone", cell: (c) => text(c.phone) },
-    { key: "region", label: "State or region", cell: (c) => text(c.region) },
-    { key: "source", label: "Source", cell: (c) => <Badge>{SOURCE_LABEL[c.source] ?? c.source}</Badge> },
-    { key: "created_at", label: "Created", sort: "created_at", cell: (c) => <span className="font-mono text-[12px] text-muted">{timeAgo(c.created_at)}</span> },
-    { key: "updated_at", label: "Updated", sort: "updated_at", cell: (c) => <span className="font-mono text-[12px] text-muted">{timeAgo(c.updated_at)}</span> },
-    ...custom.map((f) => ({ key: `f.${f.key}`, label: f.label, cell: (c: ContactRow) => text(f.type === "checkbox" && c.fields?.[f.key] != null ? (c.fields[f.key] ? "Yes" : "No") : c.fields?.[f.key]) })),
-  ];
+export function LeadsView(props: ViewProps) {
+  if (props.id) return <ContactPage {...props} back="leads" />;
+  return <ContactsList {...props} leads />;
 }
 
-const DEFAULT_COLUMNS = ["company", "title", "lifecycle", "country", "score", "updated_at"];
-
-function useColumns(wsId: string) {
-  const key = `claritia:contact-columns:${wsId}`;
-  const [cols, setCols] = useState<string[]>(() => {
-    try {
-      const raw = localStorage.getItem(key);
-      return raw ? (JSON.parse(raw) as string[]) : DEFAULT_COLUMNS;
-    } catch {
-      return DEFAULT_COLUMNS;
-    }
-  });
-  const set = (c: string[]) => {
-    setCols(c);
-    try {
-      localStorage.setItem(key, JSON.stringify(c));
-    } catch {}
-  };
-  return [cols, set] as const;
-}
-
-function download(name: string, text: string) {
-  const url = URL.createObjectURL(new Blob([text], { type: "text/csv;charset=utf-8" }));
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = name;
-  a.click();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
-}
-
-function ContactsList({ sb, ws, session, navigate }: ViewProps) {
-  const custom = useCustomFields(sb, ws.id);
-  const fields = contactFilterFields(custom.data ?? []);
-  const [stored, setStored] = useFilters("contacts", ws.id);
-  // Custom-field filters wait for the fields, so a saved filter isn't dropped while they load.
-  const filters = custom.data ? cleanFilters(stored, fields as FilterField<never>[]) : stored.filter((f) => !f.field.startsWith("f."));
-  const [sort, setSort] = useState<{ key: string; desc: boolean }>({ key: "updated_at", desc: true });
-  const [offset, setOffset] = useState(0);
-  const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [allMatching, setAllMatching] = useState(false);
-  const [cols, setCols] = useColumns(ws.id);
+function ContactsList({ sb, ws, session, navigate, leads = false }: ViewProps & { leads?: boolean }) {
   const [panel, setPanel] = useState<"import" | "add" | null>(null);
-  const [colsAnchor, setColsAnchor] = useState<HTMLElement | null>(null);
-  const [busy, setBusy] = useState("");
-  const [error, setError] = useState("");
-
-  const query = JSON.stringify({ filters, sort, offset });
-  const list = useLoad(
-    async () => must(await sb.rpc("contacts_list", { p_ws: ws.id, p_filters: filters, p_sort: sort.key, p_desc: sort.desc, p_limit: PAGE, p_offset: offset })) as { total: number; rows: ContactRow[] },
-    `${ws.id}:${query}`,
-  );
-  const unselect = () => {
-    setSelected(new Set());
-    setAllMatching(false);
-  };
-  const setFilters = (f: Filter[]) => {
-    setStored(f);
-    setOffset(0);
-    unselect();
-  };
-  const goTo = (at: number) => {
-    setOffset(at);
-    unselect();
-  };
-
-  const columns = columnsFor(custom.data ?? []);
-  const shown = columns.filter((c) => cols.includes(c.key));
-  const rows = list.data?.rows ?? [];
-  const total = list.data?.total ?? 0;
-  const pageAll = rows.length > 0 && rows.every((r) => selected.has(r.id));
-  const count = allMatching ? total : selected.size;
-
-  /** Every contact the current selection means, paging through when all matching are picked. */
-  async function picked(): Promise<ContactRow[]> {
-    if (!allMatching) return rows.filter((r) => selected.has(r.id));
-    const out: ContactRow[] = [];
-    for (let at = 0; at < Math.min(total, MAX_ROWS); at += 1000) {
-      const page = must(await sb.rpc("contacts_list", { p_ws: ws.id, p_filters: filters, p_sort: sort.key, p_desc: sort.desc, p_limit: 1000, p_offset: at })) as { rows: ContactRow[] };
-      out.push(...page.rows);
-      if (page.rows.length < 1000) break;
-    }
-    return out;
-  }
-
-  async function exportCsv() {
-    setError("");
-    setBusy("export");
-    try {
-      const chosen = await picked();
-      const cf = custom.data ?? [];
-      const head = ["Email", "First name", "Last name", "Title", "Company", "Company domain", "Phone", "Country", "State or region", "Lifecycle", "Lead status", "Source", "Score", "Created", "Updated", ...cf.map((f) => f.label)];
-      const body = chosen.map((c) => [c.email, c.first_name, c.last_name, c.title, c.company_name, c.company_domain, c.phone, c.country, c.region, c.lifecycle, c.lead_status, c.source, c.score, c.created_at, c.updated_at, ...cf.map((f) => c.fields?.[f.key])]);
-      download(`contacts-${new Date().toISOString().slice(0, 10)}.csv`, toCsv([head, ...body]));
-      must(await sb.rpc("contacts_export_log", { p_ws: ws.id, p_count: chosen.length, p_filters: filters }));
-    } catch (e) {
-      setError(errorText(e));
-    } finally {
-      setBusy("");
-    }
-  }
-
-  async function remove() {
-    if (!(await askConfirm(`Remove ${count.toLocaleString("en-US")} ${count === 1 ? "contact" : "contacts"}?`, { ok: "Remove", danger: true }))) return;
-    setError("");
-    setBusy("remove");
-    try {
-      const ids = (await picked()).map((c) => c.id);
-      for (let i = 0; i < ids.length; i += 5000) must(await sb.rpc("contacts_delete", { p_ws: ws.id, p_ids: ids.slice(i, i + 5000) }));
-      unselect();
-      list.reload();
-    } catch (e) {
-      setError(errorText(e));
-    } finally {
-      setBusy("");
-    }
-  }
-
+  const [tick, setTick] = useState(0);
+  const custom = useMeta(sb, ws.id, "contact");
+  const route = leads ? "leads" : "contacts";
   const actions = (
     <>
       <Button variant="ghost" onClick={() => setPanel("import")}>
@@ -186,18 +83,35 @@ function ContactsList({ sb, ws, session, navigate }: ViewProps) {
       </Button>
     </>
   );
-  const panels = (
+  return (
     <>
+      <RecordsList
+        key={tick}
+        sb={sb}
+        session={session}
+        ws={ws}
+        object="contact"
+        screen={route}
+        title={leads ? "Leads" : "Contacts"}
+        icon={<Contact size={14} />}
+        base={leads ? LEADS_BASE : CONTACTS_BASE}
+        presets={leads ? LEAD_PRESETS : CONTACT_PRESETS}
+        actions={actions}
+        onOpen={(r) => navigate(route, r.id)}
+        nameExtra={(r) => (r.person_id ? <Badge tone="brand">On site</Badge> : null)}
+        intro={leads ? undefined : <ContactsIntro action={actions} />}
+        bulkExtra={(ids, done, meta) => <ContactBulk sb={sb} wsId={ws.id} ids={ids} done={done} meta={meta} />}
+      />
       {panel === "import" ? (
         <ImportPanel
           sb={sb}
           session={session}
           wsId={ws.id}
-          custom={custom.data ?? []}
+          custom={custom.data?.custom ?? []}
           fieldsChanged={custom.reload}
           onClose={(changed) => {
             setPanel(null);
-            if (changed) list.reload();
+            if (changed) setTick((t) => t + 1);
           }}
         />
       ) : null}
@@ -205,198 +119,78 @@ function ContactsList({ sb, ws, session, navigate }: ViewProps) {
         <ContactPanel
           session={session}
           wsId={ws.id}
-          custom={custom.data ?? []}
+          custom={custom.data?.custom ?? []}
           onClose={(id) => {
             setPanel(null);
-            if (id) navigate("contacts", id);
+            if (id) navigate(route, id);
           }}
         />
       ) : null}
     </>
   );
+}
 
-  if (list.data && total === 0 && !filters.length) {
-    return (
-      <Page icon={<Contact size={14} />} title="Contacts">
-        <ContactsIntro action={actions} />
-        {panels}
-      </Page>
-    );
-  }
-
-  const sortBy = (key: string) => {
-    setSort((s) => ({ key, desc: s.key === key ? !s.desc : key !== "name" && key !== "company" }));
-    goTo(0);
+/** Contacts' own bulk actions: add to a list, merge two. */
+function ContactBulk({ sb, wsId, ids, done, meta }: { sb: ViewProps["sb"]; wsId: string; ids: () => Promise<string[]>; done: () => void; meta: Meta }) {
+  const [anchor, setAnchor] = useState<HTMLElement | null>(null);
+  const [error, setError] = useState("");
+  const addTo = async (list: string | null) => {
+    setAnchor(null);
+    let name = "";
+    if (!list) {
+      const n = await askText("New list", { placeholder: "List name", ok: "Create" });
+      if (!n) return;
+      name = n;
+    }
+    try {
+      const chosen = await ids();
+      must(await sb.rpc("list_add", { p_ws: wsId, p_list: list, p_name: name, p_ids: chosen }));
+      done();
+      await tell(`Added ${chosen.length.toLocaleString("en-US")} to the list`);
+    } catch (e) {
+      setError(errorText(e));
+    }
   };
-  const head = (label: string, key?: string, right = false, id = label) => (
-    <Th key={id} className={right ? "text-right" : ""}>
-      {key ? (
-        <button type="button" onClick={() => sortBy(key)} className="uppercase hover:text-ink">
-          {label}
-          {sort.key === key ? (sort.desc ? " ↓" : " ↑") : ""}
-        </button>
-      ) : (
-        label
-      )}
-    </Th>
-  );
-
+  const merge = async () => {
+    const chosen = await ids();
+    if (chosen.length !== 2) return void tell("Pick exactly two contacts to merge");
+    if (!(await askConfirm("Merge these two contacts?", { body: "The first one picked stays. Its empty fields fill from the other.", ok: "Merge" }))) return;
+    try {
+      must(await sb.rpc("contacts_merge", { p_keep: chosen[0], p_drop: chosen[1] }));
+      done();
+    } catch (e) {
+      setError(errorText(e));
+    }
+  };
   return (
-    <Page icon={<Contact size={14} />} title="Contacts" count={list.data ? total.toLocaleString("en-US") : undefined} flush actions={actions}>
-      <FilterBar
-        sb={sb}
-        wsId={ws.id}
-        screen="contacts"
-        fields={fields as FilterField<never>[]}
-        filters={filters}
-        onChange={setFilters}
-        allLabel="All contacts"
-        right={
-          <Button variant="plain" className="h-8 px-2.5" onClick={(e) => setColsAnchor(colsAnchor ? null : e.currentTarget)}>
-            Columns
-          </Button>
-        }
-      />
-      {count ? (
-        <div className="flex flex-wrap items-center gap-2 border-b border-line bg-brand-pale px-4 py-2 text-[13px] md:px-5">
-          <span className="font-medium">{count.toLocaleString("en-US")} selected</span>
-          {pageAll && !allMatching && total > rows.length ? (
-            <Button variant="plain" className="h-7 px-2" onClick={() => setAllMatching(true)}>
-              Select all {total.toLocaleString("en-US")}
-            </Button>
-          ) : null}
-          <span className="ml-auto flex items-center gap-2">
-            <Button variant="ghost" className="h-7 px-2.5" onClick={exportCsv} disabled={!!busy}>
-              <Download size={13} />
-              {busy === "export" ? "Exporting…" : "Export"}
-            </Button>
-            <Button variant="danger" className="h-7 px-2.5" onClick={remove} disabled={!!busy}>
-              <Trash size={13} />
-              {busy === "remove" ? "Removing…" : "Remove"}
-            </Button>
-            <Button variant="plain" className="h-7 px-2" onClick={unselect}>
-              Clear
-            </Button>
-          </span>
-        </div>
-      ) : null}
-      {error ? (
-        <div className="p-4">
-          <ErrorNote message={error} />
-        </div>
-      ) : null}
-      {list.error ? (
-        <div className="p-4">
-          <ErrorNote message={list.error} />
-        </div>
-      ) : !list.data ? (
-        <Loading />
-      ) : !rows.length ? (
-        <Empty icon={<Contact size={16} />} title="No contacts match" />
-      ) : (
-        <>
-          <div className="overflow-x-auto">
-            <table className="w-full border-collapse">
-              <thead>
-                <tr>
-                  <Th className="w-10 pr-0">
-                    <CheckBox
-                      on={pageAll}
-                      label="Select this page"
-                      onClick={() => {
-                        setAllMatching(false);
-                        setSelected(pageAll ? new Set() : new Set(rows.map((r) => r.id)));
-                      }}
-                    />
-                  </Th>
-                  {head("Name", "name")}
-                  {shown.map((c) => head(c.label, c.sort, c.right, c.key))}
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map((c) => (
-                  <tr key={c.id} onClick={() => navigate("contacts", c.id)} className={`cursor-pointer hover:bg-hover ${selected.has(c.id) || allMatching ? "bg-hover" : ""}`}>
-                    <Td className="w-10 pr-0">
-                      <CheckBox
-                        on={selected.has(c.id) || allMatching}
-                        label="Select"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setAllMatching(false);
-                          const next = new Set(allMatching ? rows.map((r) => r.id) : selected);
-                          if (next.has(c.id)) next.delete(c.id);
-                          else next.add(c.id);
-                          setSelected(next);
-                        }}
-                      />
-                    </Td>
-                    <Td>
-                      <span className="flex items-center gap-2.5">
-                        <Avatar label={displayName(c)} />
-                        <span className="flex min-w-0 flex-col">
-                          <span className="max-w-[260px] truncate font-medium">{displayName(c)}</span>
-                          {fullName(c) ? <span className="max-w-[260px] truncate text-[12px] text-faint">{c.email}</span> : null}
-                        </span>
-                        {c.person_id ? <Badge tone="brand">On site</Badge> : null}
-                      </span>
-                    </Td>
-                    {shown.map((col) => (
-                      <Td key={col.key} className={col.right ? "text-right" : ""}>
-                        {col.cell(c)}
-                      </Td>
-                    ))}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          <div className="flex items-center gap-2 px-4 py-3 font-mono text-[11.5px] text-muted md:px-5">
-            <span>
-              {(offset + 1).toLocaleString("en-US")}–{(offset + rows.length).toLocaleString("en-US")} of {total.toLocaleString("en-US")}
-            </span>
-            <span className="ml-auto flex gap-2">
-              <Button variant="ghost" className="h-7 px-2.5" disabled={offset === 0} onClick={() => goTo(Math.max(0, offset - PAGE))}>
-                Previous
-              </Button>
-              <Button variant="ghost" className="h-7 px-2.5" disabled={offset + PAGE >= total} onClick={() => goTo(offset + PAGE)}>
-                Next
-              </Button>
-            </span>
-          </div>
-        </>
-      )}
-      {colsAnchor ? (
-        <Popover anchor={colsAnchor} onClose={() => setColsAnchor(null)} width={240}>
-          <ul className="max-h-80 overflow-y-auto p-1">
-            {columns.map((c) => {
-              const on = cols.includes(c.key);
-              return (
-                <li key={c.key}>
-                  <button
-                    type="button"
-                    aria-pressed={on}
-                    onClick={() => setCols(on ? cols.filter((k) => k !== c.key) : [...cols, c.key])}
-                    className="flex h-8 w-full items-center gap-2 rounded-md px-2 text-left hover:bg-hover"
-                  >
-                    <span className={`flex size-4 items-center justify-center border ${on ? "border-ink bg-ink text-white" : "border-line-strong"}`}>{on ? <Check size={11} /> : null}</span>
-                    {c.label}
-                  </button>
-                </li>
-              );
-            })}
+    <>
+      {error ? <span className="text-[12.5px] text-danger">{error}</span> : null}
+      <Button variant="ghost" className="h-7 px-2.5" onClick={(e) => setAnchor(e.currentTarget)}>
+        Add to list
+      </Button>
+      <Button variant="ghost" className="h-7 px-2.5" onClick={merge}>
+        Merge
+      </Button>
+      {anchor ? (
+        <Popover anchor={anchor} onClose={() => setAnchor(null)} width={240}>
+          <ul className="max-h-72 overflow-y-auto p-1">
+            {meta.lists.map((l) => (
+              <li key={l.value}>
+                <button type="button" onClick={() => addTo(l.value)} className="flex h-8 w-full items-center rounded-md px-2 text-left hover:bg-hover">
+                  {l.label}
+                </button>
+              </li>
+            ))}
+            <li>
+              <button type="button" onClick={() => addTo(null)} className="flex h-8 w-full items-center gap-2 rounded-md px-2 text-left hover:bg-hover">
+                <Plus size={13} />
+                New list
+              </button>
+            </li>
           </ul>
         </Popover>
       ) : null}
-      {panels}
-    </Page>
-  );
-}
-
-function CheckBox({ on, label, onClick }: { on: boolean; label: string; onClick: (e: React.MouseEvent) => void }) {
-  return (
-    <button type="button" role="checkbox" aria-checked={on} aria-label={label} onClick={onClick} className={`flex size-4 items-center justify-center border ${on ? "border-ink bg-ink text-white" : "border-line-strong bg-panel hover:border-ink"}`}>
-      {on ? <Check size={11} /> : null}
-    </button>
+    </>
   );
 }
 
@@ -429,7 +223,7 @@ function ContactsIntro({ action }: { action: React.ReactNode }) {
 
 // Side panels -----------------------------------------------------------------------------------------------------
 
-function SidePanel({ title, onClose, children, footer, wide = false }: { title: string; onClose: () => void; children: React.ReactNode; footer?: React.ReactNode; wide?: boolean }) {
+export function SidePanel({ title, onClose, children, footer, wide = false }: { title: string; onClose: () => void; children: React.ReactNode; footer?: React.ReactNode; wide?: boolean }) {
   useEffect(() => {
     const esc = (e: KeyboardEvent) => e.key === "Escape" && !document.querySelector('[role="listbox"]') && onClose();
     window.addEventListener("keydown", esc);
@@ -790,30 +584,39 @@ function ContactPanel({
 // The contact page ------------------------------------------------------------------------------------------------
 
 type Detail = {
-  contact: ContactRow & { email_clean: string; timezone: string | null; score_reasons: unknown; company_id: string | null };
+  moved_to?: string;
+  contact: ContactRow & { email_clean: string; timezone: string | null; score_reasons: unknown; company_id: string | null; owner: string | null };
   company: { id: string; name: string | null; domain: string | null; industry: string | null; size: string | null; account_id: string | null; fit: number | null; intent: number | null; stage: string | null } | null;
   person: { id: string; level: string | null } | null;
   writes: Record<string, { source: string; at: string }>;
+  history: Change[];
   fields: CustomField[];
+  links: Record<string, Link[]>;
   consents: { channel: string; basis: Basis; status: string; source: string; at: string }[];
+  suppressed: { reason: string; source: string; at: string } | null;
   topics: { name: string; status: string; at: string }[];
-  segments: { id: string; name: string; entered_at: string }[];
+  segments: { id: string; name: string; kind: string; entered_at: string }[];
   events: { kind: string; data: Record<string, unknown>; source: string; at: string }[];
   visits: { id: string; started_at: string; pageviews: number; engaged_s: number; referrer_host: string | null; pages: string[] }[];
 };
 
 const EVENT_LABEL: Record<string, string> = { "contact.created": "Added" };
 
-function ContactPage({ sb, ws, session, id, navigate }: ViewProps) {
+function ContactPage({ sb, ws, session, id, navigate, back: backRoute = "contacts" }: ViewProps & { back?: "contacts" | "leads" }) {
   const detail = useLoad(async () => must(await sb.rpc("contact_detail", { p_id: id })) as Detail, id);
+  const meta = useMeta(sb, ws.id, "contact");
   const [editing, setEditing] = useState(false);
   const [error, setError] = useState("");
-  const back = { label: "Contacts", onClick: () => navigate("contacts") };
+  const back = { label: backRoute === "leads" ? "Leads" : "Contacts", onClick: () => navigate(backRoute) };
 
-  if (detail.error || !detail.data) {
+  if (detail.data?.moved_to) {
+    navigate(backRoute, detail.data.moved_to);
+    return null;
+  }
+  if (detail.error || meta.error || !detail.data || !meta.data) {
     return (
       <Page icon={<Contact size={14} />} title="Contact" back={back}>
-        {detail.error ? <ErrorNote message={detail.error} /> : <Loading />}
+        {detail.error || meta.error ? <ErrorNote message={detail.error || meta.error} /> : <Loading />}
       </Page>
     );
   }
@@ -821,39 +624,26 @@ function ContactPage({ sb, ws, session, id, navigate }: ViewProps) {
   const c = d.contact;
   const name = displayName(c);
   const consent = d.consents[0];
+  const fields = meta.data.fields;
+  const record: Row = { ...(c as unknown as Row), company_name: d.company?.name ?? d.company?.domain ?? null, company_domain: d.company?.domain ?? null, fit: d.company?.fit ?? null, intent: d.company?.intent ?? null, industry: d.company?.industry ?? null, size: d.company?.size ?? null };
+  const stage = fields.find((f) => f.key === "lead_status");
 
   async function remove() {
     if (!(await askConfirm(`Remove ${name}?`, { ok: "Remove", danger: true }))) return;
     try {
       must(await sb.rpc("contacts_delete", { p_ws: ws.id, p_ids: [id] }));
-      navigate("contacts");
+      navigate(backRoute);
     } catch (e) {
       setError(errorText(e));
     }
   }
-
-  const source = (key: string) => {
-    const w = d.writes[key];
-    return w ? `${SOURCE_LABEL[w.source] ?? w.source} · ${timeAgo(w.at)}` : null;
+  const save = async (f: AnyField, v: unknown) => {
+    must(await sb.rpc("record_set", { p_object: "contact", p_id: id, p_key: f.key, p_value: v ?? null }));
+    detail.reload();
   };
-  const rows: [string, string, React.ReactNode][] = [
-    ["email", "Email", c.email],
-    ["first_name", "First name", c.first_name],
-    ["last_name", "Last name", c.last_name],
-    ["title", "Title", c.title],
-    ["company", "Company", d.company?.name ?? d.company?.domain],
-    ["phone", "Phone", c.phone],
-    ["country", "Country", c.country],
-    ["region", "State or region", c.region],
-    ["lifecycle", "Lifecycle", c.lifecycle ? (LIFECYCLE_LABEL[c.lifecycle] ?? c.lifecycle) : null],
-    ["lead_status", "Lead status", c.lead_status],
-    ...d.fields.map((f): [string, string, React.ReactNode] => {
-      const v = c.fields?.[f.key];
-      return [`f.${f.key}`, f.label, v == null ? null : f.type === "checkbox" ? (v ? "Yes" : "No") : String(v)];
-    }),
-  ];
+
   const timeline = [
-    ...d.events.map((e) => ({ at: e.at, key: `e${e.at}${e.kind}`, node: <span>{`${EVENT_LABEL[e.kind] ?? e.kind} · ${SOURCE_LABEL[e.source] ?? e.source}`}</span> })),
+    ...d.events.map((e) => ({ at: e.at, key: `e${e.at}${e.kind}`, node: <span>{`${EVENT_LABEL[e.kind] ?? e.kind} · ${sourceLabel(e.source)}`}</span> })),
     ...d.visits.map((v) => ({
       at: v.started_at,
       key: v.id,
@@ -887,7 +677,7 @@ function ContactPage({ sb, ws, session, id, navigate }: ViewProps) {
       lead_status: c.lead_status ?? "",
       lifecycle: c.lifecycle ?? "",
     },
-    fields: Object.fromEntries(d.fields.map((f) => [f.key, c.fields?.[f.key] == null ? "" : f.type === "checkbox" ? (c.fields[f.key] ? "yes" : "no") : String(c.fields[f.key])])),
+    fields: Object.fromEntries(d.fields.filter((f) => f.type !== "relation").map((f) => [f.key, c.fields?.[f.key] == null ? "" : f.type === "checkbox" ? (c.fields[f.key] ? "yes" : "no") : Array.isArray(c.fields[f.key]) ? (c.fields[f.key] as string[]).join(", ") : String(c.fields[f.key])])),
   };
 
   return (
@@ -918,6 +708,7 @@ function ContactPage({ sb, ws, session, id, navigate }: ViewProps) {
                 <span className="mt-1 flex flex-wrap gap-1.5">
                   {c.lifecycle ? <Badge tone={LIFECYCLE_TONE[c.lifecycle] ?? "gray"}>{LIFECYCLE_LABEL[c.lifecycle] ?? c.lifecycle}</Badge> : null}
                   {consent ? <Badge tone={BASIS_TONE[consent.basis]}>{BASIS_LABEL[consent.basis]}</Badge> : null}
+                  {d.suppressed ? <Badge tone="red">{d.suppressed.reason}</Badge> : null}
                   {d.person ? <Badge tone="brand">On site</Badge> : null}
                 </span>
               </div>
@@ -933,47 +724,52 @@ function ContactPage({ sb, ws, session, id, navigate }: ViewProps) {
               </div>
             ))}
           </div>
+          {stage ? <StageBar stages={stage.options} value={c.lead_status} onPick={(v) => void save(stage, v).catch((e) => setError(errorText(e)))} /> : null}
         </Panel>
 
         <div className="grid gap-5 lg:grid-cols-[2fr_1fr]">
-          <Panel>
-            <CardHead label="Timeline" count={timeline.length} />
-            {!timeline.length ? (
-              <Empty title="Nothing yet" />
-            ) : (
-              <ol className="divide-y divide-line">
-                {timeline.map((t) => (
-                  <li key={t.key} className="flex gap-4 px-4 py-3 text-[13px]">
-                    <span className="w-32 shrink-0 font-mono text-[12px] whitespace-nowrap text-muted">{new Date(t.at).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}</span>
-                    {t.node}
-                  </li>
-                ))}
-              </ol>
-            )}
-          </Panel>
-
           <div className="flex flex-col gap-5">
             <Panel>
-              <CardHead label="Details" />
-              <dl className="divide-y divide-line">
-                {rows.map(([key, label, value]) => (
-                  <div key={key} className="grid grid-cols-[110px_1fr] gap-3 px-4 py-2 text-[13px]">
-                    <dt className="text-muted">{label}</dt>
-                    <dd className="min-w-0">
-                      <span className="block truncate">{value ?? <span className="text-faint">—</span>}</span>
-                      {value != null && source(key) ? <span className="font-mono text-[10.5px] text-faint">{source(key)}</span> : null}
-                    </dd>
-                  </div>
-                ))}
-              </dl>
+              <CardHead label="Timeline" count={timeline.length} />
+              {!timeline.length ? (
+                <Empty title="Nothing yet" />
+              ) : (
+                <ol className="divide-y divide-line">
+                  {timeline.map((t) => (
+                    <li key={t.key} className="flex gap-4 px-4 py-3 text-[13px]">
+                      <span className="w-32 shrink-0 font-mono text-[12px] whitespace-nowrap text-muted">{new Date(t.at).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}</span>
+                      {t.node}
+                    </li>
+                  ))}
+                </ol>
+              )}
             </Panel>
+            <HistoryPanel history={d.history} fields={fields} people={meta.data.people} />
+          </div>
+
+          <div className="flex flex-col gap-5">
+            <FieldsPanel
+              sb={sb}
+              wsId={ws.id}
+              record={record}
+              fields={fields}
+              layout={meta.data.layout}
+              writes={d.writes}
+              links={d.links}
+              skip={["name", "known", "segment", "fit", "intent", "score"]}
+              onSave={save}
+              onCustomize={() => navigate("settings", "fields")}
+            />
 
             {d.company ? (
               <Panel>
                 <CardHead label="Company">
+                  <Button variant="plain" className="h-7 px-2" onClick={() => navigate("companies", d.company!.id)}>
+                    Open
+                  </Button>
                   {d.company.account_id ? (
                     <Button variant="plain" className="h-7 px-2" onClick={() => navigate("accounts", d.company!.account_id!)}>
-                      Open account
+                      Intent
                     </Button>
                   ) : null}
                 </CardHead>
@@ -1003,7 +799,7 @@ function ContactPage({ sb, ws, session, id, navigate }: ViewProps) {
                   {d.consents.map((k, i) => (
                     <li key={i} className="flex items-center gap-2 px-4 py-2.5 text-[13px]">
                       <Badge tone={BASIS_TONE[k.basis]}>{BASIS_LABEL[k.basis]}</Badge>
-                      <span className="text-muted">{SOURCE_LABEL[k.source] ?? k.source}</span>
+                      <span className="text-muted">{sourceLabel(k.source)}</span>
                       <span className="ml-auto font-mono text-[11.5px] text-faint">{fmtDate(k.at)}</span>
                     </li>
                   ))}
@@ -1022,7 +818,7 @@ function ContactPage({ sb, ws, session, id, navigate }: ViewProps) {
             </Panel>
 
             <Panel>
-              <CardHead label="Segments" count={d.segments.length} />
+              <CardHead label="Lists and segments" count={d.segments.length} />
               {!d.segments.length ? (
                 <p className="px-4 py-3 text-[13px] text-faint">—</p>
               ) : (
@@ -1043,7 +839,7 @@ function ContactPage({ sb, ws, session, id, navigate }: ViewProps) {
         <ContactPanel
           session={session}
           wsId={ws.id}
-          custom={d.fields}
+          custom={d.fields.filter((f) => f.type !== "relation")}
           id={id}
           initial={edit}
           onClose={(saved) => {
@@ -1053,5 +849,28 @@ function ContactPage({ sb, ws, session, id, navigate }: ViewProps) {
         />
       ) : null}
     </Page>
+  );
+}
+
+/** The lead stages as one bar; the current stage is filled, a click moves the lead. */
+function StageBar({ stages, value, onPick }: { stages: { value: string; label: string; kind?: string }[]; value: string | null; onPick: (v: string) => void }) {
+  return (
+    <div className="flex border-t border-line">
+      {stages.map((s, i) => {
+        const on = s.value === value;
+        return (
+          <button
+            key={s.value}
+            type="button"
+            onClick={() => !on && onPick(s.value)}
+            className={`h-9 flex-1 truncate px-2 text-[12.5px] font-medium ${i ? "border-l border-line" : ""} ${
+              on ? (s.kind === "lost" ? "bg-danger-soft text-danger" : s.kind === "won" ? "bg-success-soft text-success" : "bg-ink text-white") : "text-muted hover:bg-hover hover:text-ink"
+            }`}
+          >
+            {s.label}
+          </button>
+        );
+      })}
+    </div>
   );
 }

@@ -4,6 +4,9 @@
 
 export type Route =
   | "contacts"
+  | "leads"
+  | "companies"
+  | "objects"
   | "visitors"
   | "accounts"
   | "people"
@@ -24,8 +27,10 @@ export type NavItem = { route: Route; label: string; group?: string };
 
 const MARKETING: NavItem[] = [
   { route: "contacts", label: "Contacts", group: "Audience" },
-  { route: "visitors", label: "Visitors" },
+  { route: "leads", label: "Leads" },
+  { route: "companies", label: "Companies" },
   { route: "accounts", label: "Accounts" },
+  { route: "visitors", label: "Visitors" },
   { route: "journeys", label: "Journeys", group: "Engage" },
   { route: "pages", label: "Pages" },
   { route: "reports", label: "Reports", group: "Prove" },
@@ -44,7 +49,7 @@ const TESTING: NavItem[] = [
 ];
 
 // Screens reached from other screens, never from the sidebar.
-const LINKED: Partial<Record<Route, string>> = { people: "marketing" };
+const LINKED: Partial<Record<Route, string>> = { people: "marketing", objects: "marketing" };
 
 export const TESTING_ROUTES = new Set<Route>(TESTING.map((n) => n.route));
 
