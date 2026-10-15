@@ -718,6 +718,22 @@ reset role;
 select pg_temp.check((select identify_secrets_sealed from identity_settings where workspace_id = '11111111-0000-0000-0000-000000000000') = 'sealed', 'Setting domains wiped the secrets');
 select set_config('request.jwt.claim.sub', '', false);
 
+-- Person page and Privacy search (030).
+insert into persons (id, workspace_id, primary_email) values ('cc000000-0000-0000-0000-0000000000d1', '22222222-0000-0000-0000-000000000000', 'hidden@secret-co.com');
+insert into identifiers (id, workspace_id, person_id, kind, value_clean, value_hash) values
+  ('cc000000-0000-0000-0000-0000000000d2', '22222222-0000-0000-0000-000000000000', 'cc000000-0000-0000-0000-0000000000d1', 'email', 'hidden@secret-co.com', '\x01');
+select pg_temp.as_user('b0000000-0000-0000-0000-000000000000');
+set role authenticated;
+select pg_temp.fails($$select person_detail('cc000000-0000-0000-0000-0000000000d1')$$, 'Ben opens Cat''s person');
+select pg_temp.fails($$select privacy_find('22222222-0000-0000-0000-000000000000', 'hidden@secret-co.com')$$, 'Ben searches Cat''s people');
+select pg_temp.fails($$select privacy_find('11111111-0000-0000-0000-000000000000', 'hidden@secret-co.com')$$, 'Ben, a member, runs a privacy search');
+reset role;
+select pg_temp.as_user('a0000000-0000-0000-0000-000000000000');
+set role authenticated;
+select pg_temp.check(jsonb_array_length(privacy_find('11111111-0000-0000-0000-000000000000', 'hidden@secret-co.com')) = 0, 'Ann finds Cat''s person from her own workspace');
+reset role;
+select set_config('request.jwt.claim.sub', '', false);
+
 -- Cloud minutes: once Acme has used its 2,000, nobody there can start a run.
 insert into runs (workspace_id, project_id, test_name, test_version, environment_name, base_url, lock, status, duration_ms)
 values ('11111111-0000-0000-0000-000000000000', 'a1000000-0000-0000-0000-000000000000', 'long', 1, 'staging', 'https://x.com', '', 'passed', 2000 * 60000);

@@ -5,6 +5,7 @@
 export type Route =
   | "visitors"
   | "accounts"
+  | "people"
   | "journeys"
   | "pages"
   | "reports"
@@ -40,6 +41,9 @@ const TESTING: NavItem[] = [
   { route: "insights", label: "Insights", group: "Analytics" },
 ];
 
+// Screens reached from other screens, never from the sidebar.
+const LINKED: Partial<Record<Route, string>> = { people: "marketing" };
+
 export const TESTING_ROUTES = new Set<Route>(TESTING.map((n) => n.route));
 
 const SETTINGS: NavItem = { route: "settings", label: "Settings", group: "" };
@@ -56,7 +60,8 @@ export function navFor(features: readonly string[]): NavItem[] {
 export const defaultRoute = (features: readonly string[]): Route => (features.includes("marketing") ? "visitors" : "tests");
 
 /** The route to show: the one asked for if this workspace has it, otherwise its first screen. */
-export const allowedRoute = (features: readonly string[], route: Route): Route => (navFor(features).some((n) => n.route === route) ? route : defaultRoute(features));
+export const allowedRoute = (features: readonly string[], route: Route): Route =>
+  navFor(features).some((n) => n.route === route) || (LINKED[route] && features.includes(LINKED[route])) ? route : defaultRoute(features);
 
 /** The project picker belongs to the testing product's screens. */
 export const showsProjectPicker = (features: readonly string[], route: Route) => features.includes("testing") && (!features.includes("marketing") || TESTING_ROUTES.has(route) || route === "settings");
