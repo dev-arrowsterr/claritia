@@ -21,6 +21,7 @@ import { MapView } from "./views/MapView";
 import { AccountsView } from "./views/AccountsView";
 import { ContactsView, LeadsView } from "./views/ContactsView";
 import { CompaniesView, ObjectsView } from "./views/RecordsViews";
+import { SegmentsView } from "./views/SegmentsView";
 import { JourneysView, PagesView, ReportsView } from "./views/MarketingIntros";
 import { VisitorsView } from "./views/VisitorsView";
 import { SettingsView } from "./views/SettingsView";
@@ -32,6 +33,7 @@ import { TestsView } from "./views/TestsView";
 const ICONS: Record<NavRoute, React.ReactNode> = {
   contacts: <Contact size={15} />,
   leads: <Target size={15} />,
+  segments: <ListIcon size={15} />,
   companies: <Users size={15} />,
   objects: <Box size={15} />,
   visitors: <Eye size={15} />,
@@ -55,7 +57,7 @@ const PROJECT_KEY = "claritia:project";
 const NEW_PROJECT = "__new";
 
 type Loc = { route: Route; id: string };
-const WITH_ID = new Set<Route>(["tests", "blocks", "runs", "approvals", "accounts", "contacts", "leads", "companies"]);
+const WITH_ID = new Set<Route>(["tests", "blocks", "runs", "approvals", "accounts", "contacts", "leads", "companies", "segments"]);
 
 const readLoc = (): Loc => {
   const [, first = "", id = "", rest = ""] = window.location.pathname.split("/");
@@ -64,6 +66,7 @@ const readLoc = (): Loc => {
   if (route === "objects") return { route, id: /^[a-z][a-z0-9_]{0,39}$/.test(id) ? (/^[0-9a-f-]{36}$/.test(rest) ? `${id}/${rest}` : id) : "" };
   // Settings pages: /settings/<page>.
   if (route === "settings") return { route, id: /^[a-z_]{2,30}$/.test(id) ? id : "" };
+  if (route === "segments" && id === "new") return { route, id };
   return { route, id: WITH_ID.has(route) && /^[0-9a-f-]{36}$/.test(id) ? id : "" };
 };
 
@@ -316,7 +319,7 @@ export function ClientApp({ config }: { config: SupaConfig }) {
             <ErrorNote message={error} />
           </div>
         ) : null}
-        {route === "contacts" ? <ContactsView {...props} /> : route === "leads" ? <LeadsView {...props} /> : route === "companies" ? <CompaniesView {...props} /> : route === "objects" ? <ObjectsView key={loc.id.split("/")[0]} {...props} /> : route === "visitors" ? <VisitorsView {...props} /> : route === "accounts" ? <AccountsView {...props} /> : route === "journeys" ? <JourneysView /> : route === "pages" ? <PagesView /> : route === "reports" ? <ReportsView /> : route === "tests" ? <TestsView {...props} /> : route === "blocks" ? <BlocksView {...props} /> : route === "map" ? <MapView {...props} /> : route === "runs" ? <RunsView {...props} /> : route === "approvals" ? <ApprovalsView {...props} /> : route === "environments" ? <EnvironmentsView {...props} /> : route === "schedules" ? <SchedulesView {...props} /> : route === "insights" ? <InsightsView {...props} /> : <SettingsView {...props} />}
+        {route === "contacts" ? <ContactsView {...props} /> : route === "leads" ? <LeadsView {...props} /> : route === "companies" ? <CompaniesView {...props} /> : route === "segments" ? <SegmentsView {...props} /> : route === "objects" ? <ObjectsView key={loc.id.split("/")[0]} {...props} /> : route === "visitors" ? <VisitorsView {...props} /> : route === "accounts" ? <AccountsView {...props} /> : route === "journeys" ? <JourneysView /> : route === "pages" ? <PagesView /> : route === "reports" ? <ReportsView /> : route === "tests" ? <TestsView {...props} /> : route === "blocks" ? <BlocksView {...props} /> : route === "map" ? <MapView {...props} /> : route === "runs" ? <RunsView {...props} /> : route === "approvals" ? <ApprovalsView {...props} /> : route === "environments" ? <EnvironmentsView {...props} /> : route === "schedules" ? <SchedulesView {...props} /> : route === "insights" ? <InsightsView {...props} /> : <SettingsView {...props} />}
       </main>
     </div>
   );

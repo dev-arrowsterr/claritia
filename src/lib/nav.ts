@@ -6,6 +6,7 @@ export type Route =
   | "contacts"
   | "leads"
   | "companies"
+  | "segments"
   | "objects"
   | "visitors"
   | "accounts"
@@ -29,6 +30,7 @@ const MARKETING: NavItem[] = [
   { route: "contacts", label: "Contacts", group: "Audience" },
   { route: "leads", label: "Leads" },
   { route: "companies", label: "Companies" },
+  { route: "segments", label: "Segments" },
   { route: "accounts", label: "Accounts" },
   { route: "visitors", label: "Visitors" },
   { route: "journeys", label: "Journeys", group: "Engage" },

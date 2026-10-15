@@ -890,6 +890,25 @@ select pg_temp.check((select count(*) from hook_events where source_id = '5c0000
 select set_config('request.jwt.claim.sub', '', false);
 delete from jobs;
 
+-- Segments (037): Ben previews, saves and deletes only in Acme; refreshing and compiling rules are server only.
+insert into segments (id, workspace_id, name, kind, rules) values
+  ('5e000000-0000-0000-0000-0000000000c1', '22222222-0000-0000-0000-000000000000', 'Cat''s VIPs', 'dynamic', '{"op":"and","rules":[]}');
+select pg_temp.as_user('b0000000-0000-0000-0000-000000000000');
+set role authenticated;
+select pg_temp.fails($$select segment_preview('22222222-0000-0000-0000-000000000000', '{"op":"and","rules":[]}')$$, 'Ben previews Cat''s contacts');
+select pg_temp.fails($$select segment_save('22222222-0000-0000-0000-000000000000', null, 'x', '{"op":"and","rules":[]}')$$, 'Ben saves a segment in Cat''s workspace');
+select pg_temp.fails($$select segment_save('11111111-0000-0000-0000-000000000000', '5e000000-0000-0000-0000-0000000000c1', 'mine now', '{"op":"and","rules":[]}')$$, 'Ben takes over Cat''s segment');
+select pg_temp.fails($$select segment_delete('5e000000-0000-0000-0000-0000000000c1')$$, 'Ben deletes Cat''s segment');
+select pg_temp.fails($$select segment_refresh_now('5e000000-0000-0000-0000-0000000000c1')$$, 'Ben refreshes Cat''s segment');
+select pg_temp.fails($$select segment_refresh('5e000000-0000-0000-0000-0000000000c1')$$, 'Ben runs a refresh');
+select pg_temp.fails($$select segment_where('22222222-0000-0000-0000-000000000000', '{"op":"and","rules":[]}')$$, 'Ben compiles rules');
+select pg_temp.fails($$select segments_due()$$, 'Ben queues refreshes');
+select pg_temp.check((select (segment_preview('11111111-0000-0000-0000-000000000000', '{"op":"and","rules":[]}')->>'count') is not null), 'Ben can''t preview Acme''s contacts');
+reset role;
+select pg_temp.check((select name from segments where id = '5e000000-0000-0000-0000-0000000000c1') = 'Cat''s VIPs', 'Cat''s segment changed');
+select set_config('request.jwt.claim.sub', '', false);
+delete from jobs;
+
 -- Cloud minutes: once Acme has used its 2,000, nobody there can start a run.
 insert into runs (workspace_id, project_id, test_name, test_version, environment_name, base_url, lock, status, duration_ms)
 values ('11111111-0000-0000-0000-000000000000', 'a1000000-0000-0000-0000-000000000000', 'long', 1, 'staging', 'https://x.com', '', 'passed', 2000 * 60000);

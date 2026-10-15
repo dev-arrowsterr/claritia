@@ -11,6 +11,7 @@ import { jobLoop } from "../src/lib/jobs.ts";
 import { enrichCompany, identityChanged, ipLookup } from "./jobs/company.ts";
 import { accountAlert, scoreAccount, sweepSignals } from "./jobs/signals.ts";
 import { importFile, importUndo, pruneImportFiles } from "./jobs/imports.ts";
+import { segmentRefresh } from "./jobs/segments.ts";
 import { crmPush, sourceHook, sourcePull } from "./jobs/sources.ts";
 import { deviceReset, privacy, rebuild, stitch, stitchEvidence } from "./jobs/stitch.ts";
 import { pgRpc } from "./rpc.ts";
@@ -45,6 +46,7 @@ const handlers = {
   source_pull: sourcePull(pool, rpc),
   crm_push: crmPush(pool, rpc),
   source_hook: sourceHook(pool, rpc),
+  segment_refresh: segmentRefresh(rpc),
 };
 const stop = new AbortController();
 const worker = `intel-${hostname()}-${process.pid}`;
