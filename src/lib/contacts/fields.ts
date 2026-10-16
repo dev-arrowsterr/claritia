@@ -1,9 +1,10 @@
 // Contact fields: the built-in ones, the workspace's custom ones (the fields table), what a CSV column can map to,
 // and how a custom value is checked. Runs in the browser and on the server.
 
-import type { Choice, FieldType, FilterField } from "../filters.ts";
+import type { FilterField } from "../filters.ts";
+import { customValue, EMAIL_CLASSES, filterKind, LEAD_STAGES, LIFECYCLES, optionsOf, SOURCES, type CustomField } from "../records/fields.ts";
 
-export type CustomField = { key: string; label: string; type: FieldType; options: Choice[] | string[] };
+export { customValue, EMAIL_CLASSES, LIFECYCLES, SOURCES, type CustomField };
 
 /** A row of the Contacts table (contacts_list). */
 export type ContactRow = {
@@ -34,35 +35,6 @@ export type ContactRow = {
   size?: string | null;
 };
 
-export const LIFECYCLES: Choice[] = [
-  { value: "subscriber", label: "Subscriber" },
-  { value: "lead", label: "Lead" },
-  { value: "mql", label: "MQL" },
-  { value: "sql", label: "SQL" },
-  { value: "opportunity", label: "Opportunity" },
-  { value: "customer", label: "Customer" },
-  { value: "evangelist", label: "Evangelist" },
-  { value: "other", label: "Other" },
-];
-
-export const SOURCES: Choice[] = [
-  { value: "manual", label: "App" },
-  { value: "import", label: "Import" },
-  { value: "hubspot", label: "HubSpot" },
-  { value: "salesforce", label: "Salesforce" },
-  { value: "omniscient", label: "Omniscient" },
-  { value: "form", label: "Form" },
-  { value: "api", label: "API" },
-];
-
-export const EMAIL_CLASSES: Choice[] = [
-  { value: "work", label: "Work" },
-  { value: "free", label: "Free mail" },
-  { value: "role", label: "Shared inbox" },
-  { value: "own", label: "Own team" },
-  { value: "partner", label: "Partner" },
-];
-
 export const fullName = (c: { first_name: string | null; last_name: string | null }) => [c.first_name, c.last_name].filter(Boolean).join(" ").trim() || null;
 
 /** Built-in contact fields. Keys match contacts_where in supabase/migrations/033_contacts.sql. */
@@ -73,7 +45,7 @@ export const CONTACT_FIELDS: FilterField<ContactRow>[] = [
   { key: "company_domain", label: "Company domain", type: "text", get: (c) => c.company_domain },
   { key: "title", label: "Title", type: "text", get: (c) => c.title },
   { key: "lifecycle", label: "Lifecycle", type: "enum", options: LIFECYCLES, get: (c) => c.lifecycle },
-  { key: "lead_status", label: "Lead status", type: "text", get: (c) => c.lead_status },
+  { key: "lead_status", label: "Lead status", type: "enum", options: LEAD_STAGES, get: (c) => c.lead_status },
   { key: "country", label: "Country", type: "text", get: (c) => c.country },
   { key: "region", label: "State or region", type: "text", get: (c) => c.region },
   { key: "fit", label: "Fit", type: "number", get: (c) => c.fit },
@@ -90,13 +62,17 @@ export const CONTACT_FIELDS: FilterField<ContactRow>[] = [
   { key: "updated_at", label: "Updated", type: "date", get: (c) => c.updated_at },
 ];
 
-const optionsOf = (f: CustomField): Choice[] => (f.options ?? []).map((o) => (typeof o === "string" ? { value: o, label: o } : o));
-
 /** Built-in fields plus the workspace's custom ones, keyed f.<key>. */
 export function contactFilterFields(custom: CustomField[]): FilterField<ContactRow>[] {
   return [
     ...CONTACT_FIELDS,
-    ...custom.map((f) => ({ key: `f.${f.key}`, label: f.label, type: f.type, options: f.type === "enum" ? optionsOf(f) : undefined, get: (c: ContactRow) => c.fields?.[f.key] })),
+    ...custom.map((f) => ({
+      key: `f.${f.key}`,
+      label: f.label,
+      type: filterKind(f.type),
+      options: f.type === "select" || f.type === "multi_select" ? optionsOf(f) : undefined,
+      get: (c: ContactRow) => c.fields?.[f.key],
+    })),
   ];
 }
 
@@ -118,6 +94,8 @@ export type Target =
   | "lifecycle"
   | "lead_status"
   | "basis"
+  /** The record's id in a connected tool; sources only. */
+  | "source_id"
   | `f.${string}`;
 
 export const TARGETS: { value: Target; label: string }[] = [
@@ -168,34 +146,6 @@ export function guessTarget(header: string, custom: CustomField[]): Target {
 }
 
 // Values ------------------------------------------------------------------------------------------------------
-
-const YES = new Set(["yes", "y", "true", "1"]);
-const NO = new Set(["no", "n", "false", "0"]);
-
-/** A custom field's value as stored, or undefined when the cell is blank or doesn't fit the type. */
-export function customValue(f: CustomField, raw: string): string | number | boolean | undefined {
-  const s = raw.trim();
-  if (!s) return undefined;
-  switch (f.type) {
-    case "number": {
-      const n = s.replace(/[,\s]/g, "");
-      return /^-?\d+(\.\d+)?$/.test(n) ? Number(n) : undefined;
-    }
-    case "date": {
-      const iso = /^\d{4}-\d{2}-\d{2}/.test(s) ? s.slice(0, 10) : null;
-      const t = iso ? Date.parse(`${iso}T00:00:00Z`) : NaN;
-      return Number.isNaN(t) ? undefined : iso!;
-    }
-    case "bool":
-      return YES.has(s.toLowerCase()) ? true : NO.has(s.toLowerCase()) ? false : undefined;
-    case "enum": {
-      const o = optionsOf(f).find((x) => x.value.toLowerCase() === s.toLowerCase() || x.label.toLowerCase() === s.toLowerCase());
-      return o?.value;
-    }
-    default:
-      return s.slice(0, 500);
-  }
-}
 
 const LIFECYCLE_WORDS: Record<string, string> = {
   subscriber: "subscriber", lead: "lead", mql: "mql", "marketing qualified lead": "mql", "marketingqualifiedlead": "mql", sql: "sql",

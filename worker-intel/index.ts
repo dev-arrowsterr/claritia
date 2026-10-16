@@ -1,6 +1,8 @@
 // claritia-intel: runs the fast jobs that need no browser (stitch now; lookups, signals and scores next).
 // Several claim loops share one pool. SIGTERM lets running jobs finish (Fly gives 30 seconds).
 //   DATABASE_URL=… SECRETS_KEY=… node worker-intel/index.ts
+// Imports also need SUPABASE_URL and SUPABASE_SECRET_KEY, to read uploaded files from storage. Sources need
+// SECRETS_KEY (credentials are sealed with it) and each tool's <PREFIX>_CLIENT_ID and _CLIENT_SECRET to refresh sign-ins.
 
 import { createServer } from "node:http";
 import { hostname } from "node:os";
@@ -8,6 +10,9 @@ import pg from "pg";
 import { jobLoop } from "../src/lib/jobs.ts";
 import { enrichCompany, identityChanged, ipLookup } from "./jobs/company.ts";
 import { accountAlert, scoreAccount, sweepSignals } from "./jobs/signals.ts";
+import { importFile, importUndo, pruneImportFiles } from "./jobs/imports.ts";
+import { segmentRefresh } from "./jobs/segments.ts";
+import { crmPush, sourceHook, sourcePull } from "./jobs/sources.ts";
 import { deviceReset, privacy, rebuild, stitch, stitchEvidence } from "./jobs/stitch.ts";
 import { pgRpc } from "./rpc.ts";
 
@@ -36,6 +41,12 @@ const handlers = {
   enrich_company: enrichCompany(pool, company),
   score_account: scoreAccount(pool),
   account_alert: accountAlert(pool),
+  import_file: importFile(pool, rpc),
+  import_undo: importUndo(rpc),
+  source_pull: sourcePull(pool, rpc),
+  crm_push: crmPush(pool, rpc),
+  source_hook: sourceHook(pool, rpc),
+  segment_refresh: segmentRefresh(rpc),
 };
 const stop = new AbortController();
 const worker = `intel-${hostname()}-${process.pid}`;
@@ -64,10 +75,32 @@ const sweep = setInterval(async () => {
   }
 }, 30_000);
 
+// Old import files: once an hour, one instance at a time.
+const prune = setInterval(async () => {
+  if (!process.env.SUPABASE_URL) return;
+  const c = await pool.connect().catch(() => null);
+  if (!c) return;
+  try {
+    const got = (await c.query(`select pg_try_advisory_lock(hashtext('claritia:import_prune')) as ok`)).rows[0].ok;
+    if (!got) return;
+    try {
+      const n = await pruneImportFiles(rpc);
+      if (n) log("import files pruned", { files: n });
+    } finally {
+      await c.query(`select pg_advisory_unlock(hashtext('claritia:import_prune'))`);
+    }
+  } catch (e) {
+    log("import prune failed", { error: String((e as Error).message ?? e) });
+  } finally {
+    c.release();
+  }
+}, 3_600_000);
+
 const shutdown = async (sig: string) => {
   log("stopping", { sig });
   stop.abort();
   clearInterval(sweep);
+  clearInterval(prune);
   await Promise.race([Promise.all(running), new Promise((r) => setTimeout(r, 25_000))]);
   await pool.end().catch(() => {});
   process.exit(0);

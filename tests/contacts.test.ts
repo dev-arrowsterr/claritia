@@ -9,10 +9,10 @@ import { mappingError, prepareImport, type Mapping } from "../src/lib/contacts/i
 import { applyFilters, cleanFilters, describe, matches, type Filter, type FilterField } from "../src/lib/filters.ts";
 
 const custom: CustomField[] = [
-  { key: "plan", label: "Plan", type: "enum", options: ["Free", "Pro"] },
+  { key: "plan", label: "Plan", type: "select", options: ["Free", "Pro"] },
   { key: "seats", label: "Seats", type: "number", options: [] },
   { key: "trial_end", label: "Trial end", type: "date", options: [] },
-  { key: "paying", label: "Paying", type: "bool", options: [] },
+  { key: "paying", label: "Paying", type: "checkbox", options: [] },
 ];
 
 test("csv: quotes, line breaks in cells, BOM, CRLF, semicolons and tabs", () => {

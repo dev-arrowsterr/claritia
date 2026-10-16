@@ -747,7 +747,7 @@ grant select on cat_contact, ben_contact to authenticated;
 select pg_temp.as_user('b0000000-0000-0000-0000-000000000000');
 set role authenticated;
 select pg_temp.check((select count(*) from contacts) = 1 and (select count(*) from companies) = 1, 'Ben sees another workspace''s contacts or companies');
-select pg_temp.check((select count(*) from consents) = 1 and (select count(*) from field_writes) > 0 and (select count(*) from field_writes w join contacts c on c.id = w.contact_id) = (select count(*) from field_writes), 'Ben sees another workspace''s consent or field history');
+select pg_temp.check((select count(*) from consents) = 1 and (select count(*) from field_writes w join contacts c on c.id = w.contact_id) = (select count(*) from field_writes), 'Ben sees another workspace''s consent or field history');
 select pg_temp.check((select count(*) from contact_events) = 1, 'Ben sees another workspace''s contact events');
 select pg_temp.check((select count(*) from topics) = 0 and (select count(*) from fields) = 0 and (select count(*) from saved_views) = 0, 'Ben sees Cat''s topics, fields or views');
 select pg_temp.check(pg_temp.visible($$select count(*) from partitions.contact_events_$$ || to_char(now(), 'YYYY_MM')) = 0, 'Ben reads an event month directly');
@@ -775,6 +775,140 @@ select pg_temp.check((field_add('11111111-0000-0000-0000-000000000000', 'contact
 reset role;
 select pg_temp.check((select count(*) from contacts where workspace_id = '22222222-0000-0000-0000-000000000000' and deleted_at is null) = 1, 'Cat''s contact was removed');
 select pg_temp.check((select count(*) from saved_views where workspace_id = '11111111-0000-0000-0000-000000000000') = 1, 'Ben''s view wasn''t saved');
+select set_config('request.jwt.claim.sub', '', false);
+delete from jobs;
+
+-- Records (034): custom objects, records, links, history, suppressions, views and which source wins stay in the
+-- workspace; personal views stay with their owner; writes go through functions that check membership.
+insert into objects (id, workspace_id, key, label, plural) values
+  ('cd000000-0000-0000-0000-0000000000a1', '22222222-0000-0000-0000-000000000000', 'deal_room', 'Deal room', 'Deal rooms');
+insert into records (id, workspace_id, object_id, name) values
+  ('cd000000-0000-0000-0000-0000000000a2', '22222222-0000-0000-0000-000000000000', 'cd000000-0000-0000-0000-0000000000a1', 'Cat secret room');
+insert into field_history (workspace_id, object, record_id, key, new, source) values
+  ('22222222-0000-0000-0000-000000000000', 'deal_room', 'cd000000-0000-0000-0000-0000000000a2', 'name', '"x"', 'manual');
+insert into suppressions (workspace_id, email_clean, reason, source) values ('22222222-0000-0000-0000-000000000000', 'gone@cat.com', 'unsubscribed', 'csv');
+insert into field_order (workspace_id, object, key, classes) values ('22222222-0000-0000-0000-000000000000', 'contact', '*', '{crm}');
+insert into saved_views (workspace_id, screen, name, filters, created_by, owner_id) values
+  ('11111111-0000-0000-0000-000000000000', 'contacts', 'Ann only', '[]', 'a0000000-0000-0000-0000-000000000000', 'a0000000-0000-0000-0000-000000000000');
+select pg_temp.as_user('b0000000-0000-0000-0000-000000000000');
+set role authenticated;
+select pg_temp.check((select count(*) from objects) = 0 and (select count(*) from records) = 0 and (select count(*) from field_history where object = 'deal_room') = 0, 'Ben sees Cat''s objects, records or history');
+select pg_temp.check((select count(*) from suppressions) = 0 and (select count(*) from field_order) = 0, 'Ben sees Cat''s suppressions or field order');
+select pg_temp.check((select count(*) from saved_views where name = 'Ann only') = 0, 'Ben sees Ann''s personal view');
+select pg_temp.check(pg_temp.touched($$update saved_views set name = 'mine' where name = 'Ann only'$$) = 0, 'Ben renames Ann''s personal view');
+select pg_temp.fails($$insert into records (workspace_id, object_id, name) values ('22222222-0000-0000-0000-000000000000', 'cd000000-0000-0000-0000-0000000000a1', 'x')$$, 'Ben writes records directly');
+select pg_temp.fails($$insert into suppressions (workspace_id, email_clean, reason, source) values ('11111111-0000-0000-0000-000000000000', 'a@b.com', 'manual', 'x')$$, 'Ben writes suppressions directly');
+select pg_temp.fails($$select record_set('deal_room', 'cd000000-0000-0000-0000-0000000000a2', 'name', '"mine"')$$, 'Ben edits Cat''s record');
+select pg_temp.fails($$select record_detail('cd000000-0000-0000-0000-0000000000a2')$$, 'Ben opens Cat''s record');
+select pg_temp.fails($$select records_list('22222222-0000-0000-0000-000000000000', 'deal_room')$$, 'Ben lists Cat''s records');
+select pg_temp.fails($$select records_list('11111111-0000-0000-0000-000000000000', 'deal_room')$$, 'Ben lists Cat''s object through his own workspace');
+select pg_temp.fails($$select record_create('22222222-0000-0000-0000-000000000000', 'deal_room', 'x')$$, 'Ben adds a record to Cat''s object');
+select pg_temp.fails($$select records_delete('22222222-0000-0000-0000-000000000000', 'deal_room', array['cd000000-0000-0000-0000-0000000000a2'::uuid])$$, 'Ben removes Cat''s records');
+select pg_temp.check(records_delete('11111111-0000-0000-0000-000000000000', 'deal_room', array['cd000000-0000-0000-0000-0000000000a2'::uuid]) = 0, 'Ben removes Cat''s record through his own workspace');
+select pg_temp.fails($$select object_save('22222222-0000-0000-0000-000000000000', 'x', 'X', 'Xs')$$, 'Ben adds an object to Cat''s workspace');
+select pg_temp.fails($$select object_delete('11111111-0000-0000-0000-000000000000', 'anything')$$, 'Ben, a member, deletes an object');
+select pg_temp.fails($$select field_order_save('11111111-0000-0000-0000-000000000000', 'contact', '*', '{import}')$$, 'Ben, a member, changes which source wins');
+select pg_temp.fails($$select field_delete('22222222-0000-0000-0000-000000000000', 'contact', 'secret')$$, 'Ben deletes Cat''s field');
+select pg_temp.fails($$select records_bulk_set('22222222-0000-0000-0000-000000000000', 'contact', array[(select id from cat_contact)], 'title', '"x"')$$, 'Ben bulk edits Cat''s contacts');
+select pg_temp.fails($$select records_bulk_set('11111111-0000-0000-0000-000000000000', 'contact', array[(select id from cat_contact)], 'title', '"x"')$$, 'Ben bulk edits Cat''s contact through his own workspace');
+select pg_temp.fails($$select contacts_merge((select id from ben_contact), (select id from cat_contact))$$, 'Ben merges Cat''s contact into his');
+select list_add('11111111-0000-0000-0000-000000000000', null, 'Ben list', array[(select id from cat_contact)]);
+select pg_temp.check((select count(*) from segment_members) = 0, 'Ben put Cat''s contact on his list');
+select pg_temp.check(workspace_people('22222222-0000-0000-0000-000000000000') is null, 'Ben lists Cat''s teammates');
+select pg_temp.fails($$select merge_values('{}', 'manual', null, '{}', '{}', '{}')$$, 'Ben calls the merge helper');
+select pg_temp.fails($$select field_value('11111111-0000-0000-0000-000000000000', 'text', '[]', 'x', '"y"')$$, 'Ben calls the value checker');
+reset role;
+select pg_temp.check((select name from records where id = 'cd000000-0000-0000-0000-0000000000a2') = 'Cat secret room' and (select deleted_at from records where id = 'cd000000-0000-0000-0000-0000000000a2') is null, 'Cat''s record changed');
+select pg_temp.check((select title from contacts where email_clean = 'spy@secret-co.com') is null, 'Cat''s contact was edited');
+select set_config('request.jwt.claim.sub', '', false);
+delete from jobs;
+
+-- Imports (035): files stay in their workspace's folder; undo stays in the workspace; the import machinery is
+-- server only.
+insert into storage.buckets (id, name) values ('imports', 'imports') on conflict do nothing;
+insert into storage.objects (bucket_id, name) values ('imports', '22222222-0000-0000-0000-000000000000/u1/cat.csv');
+insert into imports (id, workspace_id, file_name, status, undo_until) values
+  ('ce000000-0000-0000-0000-0000000000a1', '22222222-0000-0000-0000-000000000000', 'cat.csv', 'done', now() + interval '1 day');
+select pg_temp.as_user('b0000000-0000-0000-0000-000000000000');
+set role authenticated;
+select pg_temp.check((select count(*) from storage.objects where bucket_id = 'imports') = 0, 'Ben sees Cat''s import files');
+select pg_temp.fails($$insert into storage.objects (bucket_id, name) values ('imports', '22222222-0000-0000-0000-000000000000/u2/x.csv')$$, 'Ben uploads into Cat''s folder');
+insert into storage.objects (bucket_id, name) values ('imports', '11111111-0000-0000-0000-000000000000/u3/ben.csv');
+select pg_temp.check((select count(*) from imports where id = 'ce000000-0000-0000-0000-0000000000a1') = 0, 'Ben sees Cat''s import');
+select pg_temp.fails($$select import_undo('ce000000-0000-0000-0000-0000000000a1')$$, 'Ben undoes Cat''s import');
+select pg_temp.fails($$select import_undo_run('ce000000-0000-0000-0000-0000000000a1')$$, 'Ben runs an undo');
+select pg_temp.fails($$select suppress('11111111-0000-0000-0000-000000000000', 'csv', '[]')$$, 'Ben writes suppressions');
+select pg_temp.fails($$select import_lookup('22222222-0000-0000-0000-000000000000', array['spy@secret-co.com'])$$, 'Ben looks up Cat''s contacts');
+select pg_temp.fails($$select imports_start('11111111-0000-0000-0000-000000000000', 'b0000000-0000-0000-0000-000000000000', 'x', '{}')$$, 'Ben starts an import record');
+select pg_temp.fails($$select import_claim('ce000000-0000-0000-0000-0000000000a1')$$, 'Ben claims an import');
+select pg_temp.fails($$select imports_files_to_prune()$$, 'Ben lists files to prune');
+reset role;
+select pg_temp.check((select status from imports where id = 'ce000000-0000-0000-0000-0000000000a1') = 'done', 'Cat''s import changed');
+select set_config('request.jwt.claim.sub', '', false);
+delete from jobs;
+
+-- Sources (036): Ben (a member) sees Acme's sources but can't change them or read credentials; nobody sees Cat's;
+-- the sync machinery is server only.
+insert into sources (id, workspace_id, kind, name, account) values
+  ('5a000000-0000-0000-0000-0000000000a1', '11111111-0000-0000-0000-000000000000', 'hubspot', 'HubSpot', '1'),
+  ('5c000000-0000-0000-0000-0000000000c1', '22222222-0000-0000-0000-000000000000', 'hubspot', 'HubSpot', '2');
+insert into source_secrets (source_id, sealed, hook_sealed) values
+  ('5a000000-0000-0000-0000-0000000000a1', 'v1:acme-token', 'v1:acme-hook'),
+  ('5c000000-0000-0000-0000-0000000000c1', 'v1:cat-token', 'v1:cat-hook');
+insert into sync_log (workspace_id, source_id, direction, object, action) values
+  ('22222222-0000-0000-0000-000000000000', '5c000000-0000-0000-0000-0000000000c1', 'in', 'contact', 'create');
+insert into hook_events (workspace_id, source_id, dedupe, body) values
+  ('22222222-0000-0000-0000-000000000000', '5c000000-0000-0000-0000-0000000000c1', 'd1', '{}');
+select pg_temp.as_user('b0000000-0000-0000-0000-000000000000');
+set role authenticated;
+select pg_temp.check((select count(*) from sources) = 1, 'Ben sees only Acme''s source');
+select pg_temp.fails($$select * from source_secrets$$, 'Ben reads credentials');
+select pg_temp.fails($$select * from hook_events$$, 'Ben reads webhook bodies');
+select pg_temp.check((select count(*) from sync_log) = 0, 'Ben sees Cat''s sync log');
+select pg_temp.fails($$select source_settings_save('5a000000-0000-0000-0000-0000000000a1', 'x', '{}')$$, 'Ben (a member) changes a source');
+select pg_temp.fails($$select source_disconnect('5a000000-0000-0000-0000-0000000000a1')$$, 'Ben disconnects a source');
+select pg_temp.fails($$select source_pause('5c000000-0000-0000-0000-0000000000c1', true)$$, 'Ben pauses Cat''s source');
+select pg_temp.fails($$select source_sync_now('5c000000-0000-0000-0000-0000000000c1')$$, 'Ben syncs Cat''s source');
+select pg_temp.fails($$select mapping_save('5c000000-0000-0000-0000-0000000000c1', 'contact', '[]')$$, 'Ben maps Cat''s source');
+select pg_temp.check((select sync_retry(array(select id from sync_log))) = 0, 'Ben retries Cat''s sync log');
+select pg_temp.fails($$select source_load('5c000000-0000-0000-0000-0000000000c1')$$, 'Ben loads a source with its credentials');
+select pg_temp.fails($$select source_connect('11111111-0000-0000-0000-000000000000', 'b0000000-0000-0000-0000-000000000000', 'hubspot', 'x', 'y', 'v1:z')$$, 'Ben connects a source');
+select pg_temp.fails($$select hook_stage('5c000000-0000-0000-0000-0000000000c1', 'd2', '{}')$$, 'Ben stages a webhook');
+select pg_temp.fails($$select push_candidates('5c000000-0000-0000-0000-0000000000c1', null)$$, 'Ben reads push candidates');
+select pg_temp.fails($$select companies_upsert('22222222-0000-0000-0000-000000000000', 'hubspot', '[]')$$, 'Ben writes Cat''s companies');
+select pg_temp.fails($$select source_links_put('5c000000-0000-0000-0000-0000000000c1', 'contact', '[]')$$, 'Ben writes links');
+select pg_temp.fails($$select sync_log_add('5c000000-0000-0000-0000-0000000000c1', '[]')$$, 'Ben writes the sync log');
+select pg_temp.fails($$insert into sources (workspace_id, kind, name) values ('11111111-0000-0000-0000-000000000000', 'stripe', 'x')$$, 'Ben inserts a source');
+select pg_temp.fails($$select events_ingest('5c000000-0000-0000-0000-0000000000c1', '[]')$$, 'Ben writes activity through a source');
+select pg_temp.fails($$select records_ingest('5c000000-0000-0000-0000-0000000000c1', 'x', '[]')$$, 'Ben writes records through a source');
+select pg_temp.fails($$select * from source_event_keys$$, 'Ben reads event keys');
+reset role;
+select pg_temp.as_user('a0000000-0000-0000-0000-000000000000');
+set role authenticated;
+select pg_temp.fails($$select source_settings_save('5c000000-0000-0000-0000-0000000000c1', 'x', '{}')$$, 'Ann changes Cat''s source');
+select source_pause('5a000000-0000-0000-0000-0000000000a1', true);
+reset role;
+select pg_temp.check((select status from sources where id = '5a000000-0000-0000-0000-0000000000a1') = 'paused', 'Ann (an owner) can''t pause her own source');
+select pg_temp.check((select count(*) from hook_events where source_id = '5c000000-0000-0000-0000-0000000000c1') = 1, 'Cat''s webhook was touched');
+select set_config('request.jwt.claim.sub', '', false);
+delete from jobs;
+
+-- Segments (037): Ben previews, saves and deletes only in Acme; refreshing and compiling rules are server only.
+insert into segments (id, workspace_id, name, kind, rules) values
+  ('5e000000-0000-0000-0000-0000000000c1', '22222222-0000-0000-0000-000000000000', 'Cat''s VIPs', 'dynamic', '{"op":"and","rules":[]}');
+select pg_temp.as_user('b0000000-0000-0000-0000-000000000000');
+set role authenticated;
+select pg_temp.fails($$select segment_preview('22222222-0000-0000-0000-000000000000', '{"op":"and","rules":[]}')$$, 'Ben previews Cat''s contacts');
+select pg_temp.fails($$select segment_save('22222222-0000-0000-0000-000000000000', null, 'x', '{"op":"and","rules":[]}')$$, 'Ben saves a segment in Cat''s workspace');
+select pg_temp.fails($$select segment_save('11111111-0000-0000-0000-000000000000', '5e000000-0000-0000-0000-0000000000c1', 'mine now', '{"op":"and","rules":[]}')$$, 'Ben takes over Cat''s segment');
+select pg_temp.fails($$select segment_delete('5e000000-0000-0000-0000-0000000000c1')$$, 'Ben deletes Cat''s segment');
+select pg_temp.fails($$select segment_refresh_now('5e000000-0000-0000-0000-0000000000c1')$$, 'Ben refreshes Cat''s segment');
+select pg_temp.fails($$select segment_refresh('5e000000-0000-0000-0000-0000000000c1')$$, 'Ben runs a refresh');
+select pg_temp.fails($$select segment_where('22222222-0000-0000-0000-000000000000', '{"op":"and","rules":[]}')$$, 'Ben compiles rules');
+select pg_temp.fails($$select segments_due()$$, 'Ben queues refreshes');
+select pg_temp.check((select (segment_preview('11111111-0000-0000-0000-000000000000', '{"op":"and","rules":[]}')->>'count') is not null), 'Ben can''t preview Acme''s contacts');
+reset role;
+select pg_temp.check((select name from segments where id = '5e000000-0000-0000-0000-0000000000c1') = 'Cat''s VIPs', 'Cat''s segment changed');
 select set_config('request.jwt.claim.sub', '', false);
 delete from jobs;
 

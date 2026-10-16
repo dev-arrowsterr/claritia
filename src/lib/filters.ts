@@ -2,7 +2,7 @@
 // filter the rows they loaded with matches() here; Contacts filters in the database with contacts_where
 // (supabase/migrations/033_contacts.sql), which gives every condition the same meaning.
 
-export type FieldType = "text" | "enum" | "number" | "date" | "bool";
+export type FieldType = "text" | "enum" | "number" | "date" | "bool" | "multi" | "link";
 export type Op = "is" | "is_not" | "contains" | "empty" | "not_empty" | "gte" | "lte" | "within" | "before";
 export type Filter = { field: string; op: Op; values: string[] };
 export type Choice = { value: string; label: string };
@@ -24,6 +24,8 @@ export const OPS: Record<FieldType, Op[]> = {
   number: ["gte", "lte", "empty", "not_empty"],
   date: ["within", "before", "empty", "not_empty"],
   bool: ["is"],
+  multi: ["is", "is_not", "empty", "not_empty"],
+  link: ["is", "is_not", "empty", "not_empty"],
 };
 
 export const OP_LABEL: Record<Op, string> = {
@@ -48,6 +50,12 @@ const DAY = 86_400_000;
 export function matches(value: unknown, f: Filter, type: FieldType, now = Date.now()): boolean {
   if (f.op === "empty") return blank(value);
   if (f.op === "not_empty") return !blank(value);
+  if (type === "multi" || type === "link") {
+    const list = Array.isArray(value) ? value.map(String) : [];
+    if (f.op === "is") return f.values.some((x) => list.includes(x));
+    if (f.op === "is_not") return !f.values.some((x) => list.includes(x));
+    return false;
+  }
   if (Array.isArray(value) && type === "text") {
     if (f.op === "is_not") return value.every((v) => matches(v, f, type, now));
     return value.some((v) => matches(v, f, type, now));
@@ -78,6 +86,8 @@ export function matches(value: unknown, f: Filter, type: FieldType, now = Date.n
     }
     case "bool":
       return f.op === "is" && !!value === (v0 === "true");
+    default:
+      return false;
   }
 }
 

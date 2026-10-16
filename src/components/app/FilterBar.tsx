@@ -82,7 +82,7 @@ export function Popover({ anchor, onClose, children, width = 300 }: { anchor: HT
 }
 
 /** Pick a field, then its condition and values. */
-function FilterEditor({ fields, start, onDone }: { fields: AnyField[]; start: Filter | null; onDone: (f: Filter | null) => void }) {
+export function FilterEditor({ fields, start, onDone }: { fields: AnyField[]; start: Filter | null; onDone: (f: Filter | null) => void }) {
   const [field, setField] = useState<AnyField | null>(start ? (fields.find((f) => f.key === start.field) ?? null) : null);
   const [op, setOp] = useState<Op>(start?.op ?? "is");
   const [values, setValues] = useState<string[]>(start?.values ?? []);

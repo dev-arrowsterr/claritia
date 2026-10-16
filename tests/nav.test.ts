@@ -12,7 +12,7 @@ test("a testing-only workspace sees the app exactly as before", () => {
 });
 
 test("a marketing-only workspace sees no testing screens and no project picker", () => {
-  assert.deepEqual(routes(["marketing"]), ["contacts", "visitors", "accounts", "journeys", "pages", "reports", "settings"]);
+  assert.deepEqual(routes(["marketing"]), ["contacts", "leads", "companies", "segments", "accounts", "visitors", "journeys", "pages", "reports", "settings"]);
   assert.equal(defaultRoute(["marketing"]), "visitors");
   assert.equal(allowedRoute(["marketing"], "runs"), "visitors");
   assert.ok(!showsProjectPicker(["marketing"], "settings"));
@@ -20,7 +20,7 @@ test("a marketing-only workspace sees no testing screens and no project picker",
 
 test("with both, testing sits under one Testing group after the marketing screens", () => {
   const nav = navFor(["testing", "marketing"]);
-  assert.deepEqual(nav.map((n) => n.route).slice(0, 7), ["contacts", "visitors", "accounts", "journeys", "pages", "reports", "tests"]);
+  assert.deepEqual(nav.map((n) => n.route).slice(0, 10), ["contacts", "leads", "companies", "segments", "accounts", "visitors", "journeys", "pages", "reports", "tests"]);
   assert.equal(nav.find((n) => n.route === "tests")!.group, "Testing");
   assert.equal(nav.find((n) => n.route === "runs")!.group, undefined);
   assert.equal(allowedRoute(["testing", "marketing"], "runs"), "runs");
