@@ -29,7 +29,7 @@ if (!process.env.DATABASE_URL) {
 const loops = Math.max(1, Number(process.env.CONCURRENCY || 4));
 const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL, max: loops + 2, statement_timeout: 30_000 });
 const rpc = pgRpc(pool);
-const company = { ipinfoToken: process.env.IPINFO_TOKEN, ipinfoCompany: process.env.IPINFO_COMPANY === "1", coresignalKey: process.env.CORESIGNAL_API_KEY };
+const company = { ipinfoToken: process.env.IPINFO_TOKEN, ipinfoCompany: process.env.IPINFO_COMPANY === "1", ipSecret: (process.env.CLR_IP_SECRET ?? "").length >= 32 ? process.env.CLR_IP_SECRET : undefined, coresignalKey: process.env.CORESIGNAL_API_KEY };
 const handlers = {
   stitch: stitch(pool),
   device_reset: deviceReset(pool),
@@ -52,7 +52,7 @@ const stop = new AbortController();
 const worker = `intel-${hostname()}-${process.pid}`;
 
 health({ ok: true, worker, kinds: Object.keys(handlers), loops });
-log("intel started", { worker, loops, secrets: !!process.env.SECRETS_KEY, ipinfo: !!company.ipinfoToken, coresignal: !!company.coresignalKey });
+log("intel started", { worker, loops, secrets: !!process.env.SECRETS_KEY, ipinfo: !!company.ipinfoToken, ipSecret: !!company.ipSecret, coresignal: !!company.coresignalKey });
 const running = Array.from({ length: loops }, (_, i) => jobLoop({ rpc, worker: `${worker}-${i}`, handlers, leaseS: 120, idleMs: 1000, signal: stop.signal, log: (m) => log(m) }));
 
 // The signals sweep: one instance at a time (session advisory lock), every 30 seconds.

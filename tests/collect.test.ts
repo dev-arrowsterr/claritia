@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { randomBytes } from "node:crypto";
 import { test } from "node:test";
+import { openIp } from "../src/lib/company/ipinfo.ts";
 import { createApp, eventDay } from "../collect/app.ts";
 import { attribute } from "../collect/attribution.ts";
 import { botVerdict, looksAutomated } from "../collect/bots.ts";
@@ -289,7 +290,7 @@ class FakeStore implements Store {
   devices: string[] = [];
   events: EventRow[] = [];
   evidence: EvidenceRow[] = [];
-  jobs: { kind: string; key: string }[] = [];
+  jobs: { kind: string; key: string; payload?: Record<string, unknown> }[] = [];
   nonces = new Set<string>();
   opted = new Set<string>();
   bots = new Map<string, boolean>();
@@ -329,8 +330,8 @@ class FakeStore implements Store {
   async addEvidence(e: EvidenceRow) {
     this.evidence.push(e);
   }
-  async enqueue(_w: string, kind: string, key: string) {
-    this.jobs.push({ kind, key });
+  async enqueue(_w: string, kind: string, key: string, payload?: Record<string, unknown>) {
+    this.jobs.push({ kind, key, payload });
   }
   async ping() {}
 }
@@ -340,7 +341,7 @@ const DE: Geo = { country: "DE", subdivision: "", city: "Berlin", asn: 3320 };
 
 function setup(geo: Geo = US) {
   const store = new FakeStore();
-  const { app, buffer } = createApp({ store, secret: SECRET, geo: () => geo });
+  const { app, buffer } = createApp({ store, secret: SECRET, ipSecret: "i".repeat(40), geo: () => geo });
   const send = async (path: string, body: unknown, headers: Record<string, string> = {}) => {
     const res = await app.request(path, {
       method: "POST",
@@ -388,7 +389,8 @@ test("notice region: device cookie, session, scrubbed events, CORS", async () =>
   assert.deepEqual(store.events.map((e) => [e.kind, e.path]), [["view", "/pricing?utm_source=g&utm_campaign=q4"], ["click", "/pricing"]]);
   assert.equal((store.events[1].data as { text: string }).text, "Mail [removed]");
   assert.deepEqual(store.jobs.map((j) => j.kind), ["ip_lookup"]);
-  assert.ok(!JSON.stringify(store).includes("203.0.113.9"), "full IP never stored");
+  assert.equal(openIp(store.jobs[0]!.payload?.ip, "i".repeat(40)), "203.0.113.9", "the lookup job carries the IP, encrypted");
+  assert.ok(!JSON.stringify(store).includes("203.0.113.9"), "full IP never stored"); // also not in the job's key or payload
 });
 
 test("the cookie brings the same device back; a second batch in the visit reuses the session", async () => {

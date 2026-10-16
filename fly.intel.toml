@@ -1,5 +1,6 @@
 # claritia-intel on Fly.io: stitch now; IP lookups, enrichment, signals and scores next. Always on, no browser.
-# Secrets: DATABASE_URL (Supabase pooler, session mode), SECRETS_KEY (same as claritia-web), SUPABASE_URL and
+# Secrets: DATABASE_URL (Supabase pooler, session mode), SECRETS_KEY (same as claritia-web), IPINFO_TOKEN and
+# IPINFO_COMPANY=1 (company matches), CLR_IP_SECRET (same as claritia-collect), SUPABASE_URL and
 # SUPABASE_SECRET_KEY (import files), and each sign-in app's <PREFIX>_CLIENT_ID and _CLIENT_SECRET (docs/sources-setup.md).
 #   fly deploy --config fly.intel.toml
 app = "claritia-intel"

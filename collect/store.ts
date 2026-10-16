@@ -79,7 +79,8 @@ export interface Store {
   siteByKey(key: string): Promise<Site | null>;
   priorSession(siteId: string, by: { deviceId?: string; ckey?: Buffer }): Promise<Prior | null>;
   isOptedOut(siteId: string, deviceId: string): Promise<boolean>;
-  startSession(s: SessionRow, device: { id: string; consent: string } | null): Promise<void>;
+  /** `ipKey` (the HMAC of the visitor's IP, never stored on the visit) finds an IP already looked up. */
+  startSession(s: SessionRow, device: { id: string; consent: string } | null, ipKey?: Buffer | null): Promise<void>;
   /** Inserts events once each (by id) and adds what was actually inserted to the sessions' counts. */
   writeEvents(rows: EventRow[]): Promise<void>;
   setBot(sessionId: string, bot: boolean): Promise<void>;
@@ -129,7 +130,7 @@ export class PgStore implements Store {
     return r.rowCount! > 0;
   }
 
-  async startSession(s: SessionRow, device: { id: string; consent: string } | null): Promise<void> {
+  async startSession(s: SessionRow, device: { id: string; consent: string } | null, ipKey: Buffer | null = null): Promise<void> {
     const c = await this.pool.connect();
     try {
       await c.query("begin");
@@ -155,23 +156,35 @@ export class PgStore implements Store {
       );
       await c.query(
         `update sessions s set account_id = coalesce(p.account_id, n.account_id), account_source = case when p.account_id is not null then 'email' else n.source end,
-                network_account_id = n.account_id
+                network_account_id = n.account_id, ip_account_id = i.account_id
          from (select 1) one
          left join lateral (
            select ad.account_id from identifiers i join account_domains ad on ad.workspace_id = i.workspace_id and ad.domain = i.domain
            where i.workspace_id = $2 and i.person_id = (select person_id from sessions where id = $1) and i.kind = 'email' and i.class = 'work'
            order by i.created_at limit 1
          ) p on true
+         -- The visit's own IP, when it was looked up before (docs/m1-website-intelligence.md 7.1).
          left join lateral (
-           select account_id, 'learned_network' as source from learned_networks where workspace_id = $2 and net = (select ip_net from sessions where id = $1) and account_id is not null
-           union all
-           select ad.account_id, 'vendor_network' from ip_cache ic join account_domains ad on ad.workspace_id = $2 and ad.domain = ic.domain
-           where ic.net = (select ip_net from sessions where id = $1) and ic.kind in ('business', 'education', 'government') and ic.confidence >= 70
+           select ad.account_id from ip_cache ic join account_domains ad on ad.workspace_id = $2 and ad.domain = ic.domain
+           where $3::bytea is not null and ic.key = $3 and ic.scope = 'ip' and ic.kind in ('business', 'education', 'government') and ic.confidence >= 70
              and ic.fetched_at > now() - interval '30 days'
-           limit 1
+             and not exists (select 1 from network_flags f where f.workspace_id = $2 and f.net = (select ip_net from sessions where id = $1) and f.flag in ('shared', 'ignore'))
+         ) i on true
+         -- In order: a network the workspace learned, the visit's own IP, a whole network 3 IPs agreed on.
+         left join lateral (
+           select account_id, source from (
+             select account_id, 'learned_network' as source, 1 as rank from learned_networks where workspace_id = $2 and net = (select ip_net from sessions where id = $1) and account_id is not null
+             union all
+             select i.account_id, 'vendor_network', 2 where i.account_id is not null
+             union all
+             select ad.account_id, 'vendor_network', 3 from ip_cache ic join account_domains ad on ad.workspace_id = $2 and ad.domain = ic.domain
+             where ic.net = (select ip_net from sessions where id = $1) and ic.scope = 'net' and ic.kind in ('business', 'education', 'government') and ic.confidence >= 70
+               and ic.fetched_at > now() - interval '30 days'
+               and not exists (select 1 from network_flags f where f.workspace_id = $2 and f.net = ic.net and f.flag in ('shared', 'ignore'))
+           ) c order by rank limit 1
          ) n on true
-         where s.id = $1 and not s.internal and (p.account_id is not null or n.account_id is not null)`,
-        [s.id, s.workspace_id],
+         where s.id = $1 and not s.internal and (p.account_id is not null or n.account_id is not null or i.account_id is not null)`,
+        [s.id, s.workspace_id, ipKey],
       );
       await c.query("commit");
     } catch (e) {

@@ -1,5 +1,6 @@
 # claritia-collect on Fly.io: takes events from claritia.js. Public and always on.
-# Secrets: DATABASE_URL (Supabase pooler, session mode), CLR_ID_SECRET (32+ chars), IPINFO_TOKEN (country file).
+# Secrets: DATABASE_URL (Supabase pooler, session mode), CLR_ID_SECRET (32+ chars), IPINFO_TOKEN (country file),
+#   CLR_IP_SECRET (32+ chars, the same value as on claritia-intel; company matches by IP are off without it).
 #   fly deploy --config fly.collect.toml
 app = "claritia-collect"
 primary_region = "nrt" # Tokyo, next to Supabase

@@ -97,7 +97,9 @@ Rules come from three specs, and this plan doesn't repeat them:
 | `SUPABASE_URL`, `SUPABASE_SECRET_KEY` | intel | Storage and RPC calls |
 | `CLR_ID_SECRET` | collect | Signs device ids (one per site is derived as HMAC(CLR_ID_SECRET, site_id)) |
 | `CLR_SALT_SECRET` | collect | Seeds the daily cookieless salt (the salt itself rotates daily) |
-| `IPINFO_TOKEN` | intel | Company, geo and privacy lookups |
+| `IPINFO_TOKEN` | intel, collect | Company and privacy lookups (intel); the free country file (collect) |
+| `IPINFO_COMPANY` | intel | `1` on an IPinfo plan with company data. Without it only the network owner is known, which never sets an account |
+| `CLR_IP_SECRET` | collect, intel | Same value on both, 32+ characters. Encrypts the visitor's IP inside the `ip_lookup` job and keys the per-IP cache. Without it there are no company matches by IP |
 | `GEO_DB_PATH` | collect | Local geo file for country and region at intake (IPinfo's free country-ASN download, or MaxMind GeoLite2; check license) |
 | `CORESIGNAL_API_KEY` | intel | Enrichment. In this cloud session the proxy injects it. |
 | `SECRETS_KEY` | intel | Unseal Slack and Omniscient tokens |
@@ -524,6 +526,7 @@ The intel app scales by machine count, since jobs are claimed with `skip locked`
   - 60 otherwise.
   - Only 70+ sets an account (`docs/identity.md` 8.1).
 - **Cache:** by /24 when IPinfo returns the same company for 3 IPs in that /24. Otherwise by `HMAC(cache_secret, ip)` for 30 days. Raw IPs are never stored.
+- **Built (migration 039):** each visitor's own IP is looked up (`lookupIp`), cached per IP (`ip_cache.scope = 'ip'`, key = HMAC with `CLR_IP_SECRET`), and sets `sessions.ip_account_id` for that visit only. A network gets a `scope = 'net'` row from `netVerdict`: a company when 3+ IPs agree, `mixed` when any IP disagrees (another company, broadband, hosting, a weak match). Only agreed `net` rows set accounts for a whole network. Rows from the earlier stand-in lookups (one `x.x.x.1` address per /24) are `legacy` and set nothing. The IP travels encrypted in the job payload and is erased once used. Tests: `tests/pg/accounts.pg.ts` (shared broadband block, office network, legacy rows, shared flag).
 
 ### 7.2 Domain and account
 

@@ -5,6 +5,7 @@ import { timingSafeEqual } from "node:crypto";
 import { Hono, type Context } from "hono";
 import { getCookie } from "hono/cookie";
 import { decide, regionOf, type ConsentState, type Decision } from "../src/lib/web/policy.ts";
+import { ipKey, sealIp } from "../src/lib/company/ipinfo.ts";
 import { attribute } from "./attribution.ts";
 import { botVerdict, looksAutomated } from "./bots.ts";
 import { WriteBuffer } from "./buffer.ts";
@@ -28,6 +29,8 @@ export type Deps = {
   geo?: GeoLookup;
   /** CLR_ID_SECRET */
   secret: string;
+  /** CLR_IP_SECRET, also set on intel. Without it there are no company matches by IP. */
+  ipSecret?: string;
   script?: { code: string; tag: string };
   now?: () => number;
   /** Hosts allowed as origins for every site (local testing only). */
@@ -62,7 +65,8 @@ export function createApp(deps: Deps) {
   const perIp = new Buckets(50, 100);
   const perSite = new Buckets(2000, 4000);
   const siteCache = new Map<string, { site: Site | null; at: number }>();
-  const seenNets = new Map<string, number>();
+  // IPs queued for a company lookup in the last hour, by their HMAC (never the address).
+  const seenIps = new Map<string, number>();
   const touched = new Map<string, number>();
   const salts = new Map<string, Buffer>();
   const app = new Hono();
@@ -309,6 +313,7 @@ export function createApp(deps: Deps) {
             is_bot: marked,
           },
           device ? { id: device, consent: consentOf(b) } : null,
+          keepNet && deps.ipSecret ? ipKey(x.ip, deps.ipSecret) : null,
         );
         return { id, startedAt: t, lastAt: t, campaign, pageviews: 0, inputs: 0, bot: marked, hosting: verdict === "hosting" };
       },
@@ -319,12 +324,16 @@ export function createApp(deps: Deps) {
     await afterEvents(s, rows, b, verdict, t);
 
     if (full && device) await identityBits(b, site, device, s.id);
-    // Company match by network: full visits, and GPC visits in notice regions (company stats only, no person).
-    const net = x.ip && x.trusted && decision.lookup ? ipNet(x.ip) : null;
-    if (net && (seenNets.get(net) ?? 0) < t - 3600_000) {
-      seenNets.set(net, t);
-      if (seenNets.size > 200_000) seenNets.clear();
-      await store.enqueue(site.workspace_id, "ip_lookup", net, { net, site_id: site.id, session_id: s.id }).catch((e) => log("enqueue failed", { e: String(e) }));
+    // Company match by the visitor's own IP: full visits, and GPC visits in notice regions (company stats only, no
+    // person). The IP goes to intel encrypted and is erased from the job once looked up (docs/m1-website-intelligence.md 7.1).
+    const net = x.ip && x.trusted && decision.lookup && deps.ipSecret ? ipNet(x.ip) : null;
+    const seen = net ? ipKey(x.ip, deps.ipSecret!).toString("base64url") : "";
+    if (net && (seenIps.get(seen) ?? 0) < t - 3600_000) {
+      seenIps.set(seen, t);
+      if (seenIps.size > 200_000) seenIps.clear();
+      await store
+        .enqueue(site.workspace_id, "ip_lookup", seen, { net, ip: sealIp(x.ip, deps.ipSecret!), site_id: site.id, session_id: s.id })
+        .catch((e) => log("enqueue failed", { e: String(e) }));
     }
     if ((touched.get(site.id) ?? 0) < t - 60_000) {
       touched.set(site.id, t);

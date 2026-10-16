@@ -45,7 +45,10 @@ try {
 
 const buffer = new WriteBuffer(store, { log });
 const devOrigins = process.env.DEV_ORIGINS ? process.env.DEV_ORIGINS.split(",") : undefined;
-const { app } = createApp({ store, secret, geo, script, buffer, log, devOrigins });
+// Company matches by IP need CLR_IP_SECRET here and on claritia-intel (the same value, 32+ characters).
+const ipSecret = (process.env.CLR_IP_SECRET ?? "").length >= 32 ? process.env.CLR_IP_SECRET : undefined;
+if (!ipSecret) log("no CLR_IP_SECRET (32+ characters): company matches by IP are off");
+const { app } = createApp({ store, secret, ipSecret, geo, script, buffer, log, devOrigins });
 buffer.start();
 
 const server = serve({ fetch: app.fetch, port, hostname: "0.0.0.0" }, () => log("collect listening", { port, geo: !!(process.env.IPINFO_TOKEN || process.env.GEO_DB_PATH), script: script?.tag }));
