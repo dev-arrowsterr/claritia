@@ -46,3 +46,6 @@ services:
         sync: false
       - key: MAILCHIMP_CLIENT_SECRET
         sync: false
+      # Sending (docs/sending-setup.md): the SNS topic SES events come from.
+      - key: SES_SNS_TOPIC_ARN
+        sync: false

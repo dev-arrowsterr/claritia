@@ -222,7 +222,9 @@ What shipped and what's left: the plan's Part 21b (custom objects) and Part 21d.
 
 ---
 
-## Week 9. Sending
+## Week 9. Sending (built)
+
+What shipped and what's left: the plan's Part 21e and `docs/sending-setup.md`. The build used `039_email.sql` (segments and warehouses took 037 and 038), one shared configuration set at Beta, and applies SES events in the `/api/ses` route itself in place of an `ses_event` job. Templates and brand kits move to week 10 with the editor.
 
 **Goal:** a verified domain sends with every guard on.
 
