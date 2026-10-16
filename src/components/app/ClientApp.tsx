@@ -4,7 +4,7 @@ import type { Session } from "@supabase/supabase-js";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { getSupabase, type SupaConfig } from "@/lib/supa";
 import { allowedRoute, navFor, showsProjectPicker, type Route as NavRoute } from "@/lib/nav";
-import { BarChart, Box, Branch, Check, Clock, Eye, FileText, Globe, ListIcon, LogOut, MapIcon, Play, Settings, Users } from "../Icons";
+import { BarChart, Box, Branch, Check, Clock, Contact, Eye, FileText, Globe, ListIcon, LogOut, MapIcon, Play, Settings, Target, Users } from "../Icons";
 import { Logo } from "../Logo";
 import { AuthScreen } from "./AuthScreen";
 import { askText, DialogHost } from "./Dialogs";
@@ -19,6 +19,9 @@ import { RunsView } from "./views/RunsView";
 import { ConnectExtension } from "./ConnectExtension";
 import { MapView } from "./views/MapView";
 import { AccountsView } from "./views/AccountsView";
+import { ContactsView, LeadsView } from "./views/ContactsView";
+import { CompaniesView, ObjectsView } from "./views/RecordsViews";
+import { SegmentsView } from "./views/SegmentsView";
 import { JourneysView, PagesView, ReportsView } from "./views/MarketingIntros";
 import { VisitorsView } from "./views/VisitorsView";
 import { SettingsView } from "./views/SettingsView";
@@ -28,6 +31,11 @@ import { TestsView } from "./views/TestsView";
 // four modules (AI works inside each: the Writer in Authoring, the Healer in Execution, smart retries in Management
 // and the Judge in Analytics), the marketing platform's screens, or both.
 const ICONS: Record<NavRoute, React.ReactNode> = {
+  contacts: <Contact size={15} />,
+  leads: <Target size={15} />,
+  segments: <ListIcon size={15} />,
+  companies: <Users size={15} />,
+  objects: <Box size={15} />,
   visitors: <Eye size={15} />,
   accounts: <Users size={15} />,
   people: <Users size={15} />,
@@ -49,11 +57,16 @@ const PROJECT_KEY = "claritia:project";
 const NEW_PROJECT = "__new";
 
 type Loc = { route: Route; id: string };
-const WITH_ID = new Set<Route>(["tests", "blocks", "runs", "approvals", "accounts"]);
+const WITH_ID = new Set<Route>(["tests", "blocks", "runs", "approvals", "accounts", "contacts", "leads", "companies", "segments"]);
 
 const readLoc = (): Loc => {
-  const [, first = "", id = ""] = window.location.pathname.split("/");
+  const [, first = "", id = "", rest = ""] = window.location.pathname.split("/");
   const route = first in ICONS ? (first as Route) : "tests";
+  // Custom objects: /objects/<key> and /objects/<key>/<record id>.
+  if (route === "objects") return { route, id: /^[a-z][a-z0-9_]{0,39}$/.test(id) ? (/^[0-9a-f-]{36}$/.test(rest) ? `${id}/${rest}` : id) : "" };
+  // Settings pages: /settings/<page>.
+  if (route === "settings") return { route, id: /^[a-z_]{2,30}$/.test(id) ? id : "" };
+  if (route === "segments" && id === "new") return { route, id };
   return { route, id: WITH_ID.has(route) && /^[0-9a-f-]{36}$/.test(id) ? id : "" };
 };
 
@@ -147,6 +160,22 @@ export function ClientApp({ config }: { config: SupaConfig }) {
 
   useEffect(() => loadProjects(), [loadProjects]);
 
+  // The workspace's custom objects, listed in the sidebar after Companies.
+  const [customObjects, setCustomObjects] = useState<{ key: string; plural: string }[]>([]);
+  useEffect(() => {
+    if (!ws || !ws.features.includes("marketing")) return;
+    const load = () =>
+      void sb
+        .from("objects")
+        .select("key, plural")
+        .eq("workspace_id", ws.id)
+        .order("created_at")
+        .then(({ data }) => setCustomObjects((data ?? []) as { key: string; plural: string }[]));
+    load();
+    window.addEventListener("claritia:changed", load);
+    return () => window.removeEventListener("claritia:changed", load);
+  }, [sb, ws]);
+
   // How many fixes wait for approval in the open project, for the sidebar.
   const [waiting, setWaiting] = useState(0);
   useEffect(() => {
@@ -215,6 +244,24 @@ export function ClientApp({ config }: { config: SupaConfig }) {
     if (loc.id) navigate(loc.route);
   };
 
+  const objectLinks = customObjects.map((o) => {
+    const on = route === "objects" && (loc.id === o.key || loc.id.startsWith(`${o.key}/`));
+    return (
+      <a
+        key={`o-${o.key}`}
+        href={`/objects/${o.key}`}
+        onClick={(e) => {
+          e.preventDefault();
+          navigate("objects", o.key);
+        }}
+        aria-current={on && loc.id === o.key ? "page" : undefined}
+        className={`flex h-8 items-center gap-2.5 rounded-md px-2.5 text-[13px] font-medium ${on ? "bg-panel text-ink ring-1 ring-line" : "text-body hover:bg-hover hover:text-ink"}`}
+      >
+        <span className={on ? "text-ink" : "text-muted"}>{ICONS.objects}</span>
+        <span className="truncate">{o.plural}</span>
+      </a>
+    );
+  });
   const navLinks = navFor(ws.features).map((n) => [
     n.group !== undefined ? (
       <p key={`g-${n.route}`} className={`hidden px-2.5 font-mono text-[10px] tracking-[0.12em] text-faint uppercase md:block ${n.group ? "mt-3 mb-1" : "mt-3 border-t border-line pt-3"}`}>
@@ -235,6 +282,7 @@ export function ClientApp({ config }: { config: SupaConfig }) {
       {n.label}
       {n.route === "approvals" && waiting ? <span className="ml-auto bg-brand px-1.5 font-mono text-[10px] leading-4 text-white">{waiting}</span> : null}
     </a>,
+    n.route === "companies" ? objectLinks : null,
   ]);
 
   return (
@@ -271,7 +319,7 @@ export function ClientApp({ config }: { config: SupaConfig }) {
             <ErrorNote message={error} />
           </div>
         ) : null}
-        {route === "visitors" ? <VisitorsView {...props} /> : route === "accounts" ? <AccountsView {...props} /> : route === "journeys" ? <JourneysView /> : route === "pages" ? <PagesView /> : route === "reports" ? <ReportsView /> : route === "tests" ? <TestsView {...props} /> : route === "blocks" ? <BlocksView {...props} /> : route === "map" ? <MapView {...props} /> : route === "runs" ? <RunsView {...props} /> : route === "approvals" ? <ApprovalsView {...props} /> : route === "environments" ? <EnvironmentsView {...props} /> : route === "schedules" ? <SchedulesView {...props} /> : route === "insights" ? <InsightsView {...props} /> : <SettingsView {...props} />}
+        {route === "contacts" ? <ContactsView {...props} /> : route === "leads" ? <LeadsView {...props} /> : route === "companies" ? <CompaniesView {...props} /> : route === "segments" ? <SegmentsView {...props} /> : route === "objects" ? <ObjectsView key={loc.id.split("/")[0]} {...props} /> : route === "visitors" ? <VisitorsView {...props} /> : route === "accounts" ? <AccountsView {...props} /> : route === "journeys" ? <JourneysView /> : route === "pages" ? <PagesView /> : route === "reports" ? <ReportsView /> : route === "tests" ? <TestsView {...props} /> : route === "blocks" ? <BlocksView {...props} /> : route === "map" ? <MapView {...props} /> : route === "runs" ? <RunsView {...props} /> : route === "approvals" ? <ApprovalsView {...props} /> : route === "environments" ? <EnvironmentsView {...props} /> : route === "schedules" ? <SchedulesView {...props} /> : route === "insights" ? <InsightsView {...props} /> : <SettingsView {...props} />}
       </main>
     </div>
   );

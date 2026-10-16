@@ -35,7 +35,7 @@ async function evidenceNaming(db: Db, ws: string, ids: { kind: string; value_cle
   );
 }
 
-export type EraseCounts = { identifiers: number; evidence: number; devices: number; sessions: number; events: number; persons: number };
+export type EraseCounts = { identifiers: number; evidence: number; devices: number; sessions: number; events: number; persons: number; contacts: number };
 
 export async function erasePerson(pool: Pool, ws: string, personId: string): Promise<EraseCounts> {
   const c = await pool.connect();
@@ -44,7 +44,7 @@ export async function erasePerson(pool: Pool, ws: string, personId: string): Pro
     await workspaceLock(c, ws, true);
     const p = await current(c, personId);
     if (!p) throw new Error("Person not found");
-    const counts: EraseCounts = { identifiers: 0, evidence: 0, devices: 0, sessions: 0, events: 0, persons: 0 };
+    const counts: EraseCounts = { identifiers: 0, evidence: 0, devices: 0, sessions: 0, events: 0, persons: 0, contacts: 0 };
     const ids = (await c.query(`select id, kind, value_clean, value_raw, value_hash from identifiers where workspace_id = $1 and person_id = $2`, [ws, p])).rows as {
       id: string;
       kind: string;
@@ -75,6 +75,9 @@ export async function erasePerson(pool: Pool, ws: string, personId: string): Pro
     ).rowCount ?? 0;
     await c.query(`delete from device_links where workspace_id = $1 and (person_id = $2 or device_id = any($3))`, [ws, p, alone]);
     counts.devices = (await c.query(`delete from devices where workspace_id = $1 and id = any($2)`, [ws, alone])).rowCount ?? 0;
+    // Contacts with any of the person's emails go too, with their consent, field history and events.
+    const emails = ids.filter((i) => i.kind === "email").map((i) => i.value_clean);
+    counts.contacts = (await c.query(`delete from contacts where workspace_id = $1 and (person_id = $2 or email_clean = any($3))`, [ws, p, emails])).rowCount ?? 0;
     counts.identifiers = (await c.query(`delete from identifiers where workspace_id = $1 and person_id = $2`, [ws, p])).rowCount ?? 0;
     await c.query(`delete from merge_proposals where workspace_id = $1 and (person_a = $2 or person_b = $2)`, [ws, p]);
     const aliased = (await c.query(`select old_id from person_aliases where workspace_id = $1 and new_id = $2`, [ws, p])).rows.map((r) => r.old_id as string);
@@ -96,6 +99,7 @@ export type PersonExport = {
   identifiers: { kind: string; value: string; class: string | null }[];
   evidence: { source: string; level: string; at: string }[];
   sessions: { started_at: string; ended_at: string; landing_path: string | null; pages: string[] }[];
+  contacts: { email: string | null; first_name: string | null; last_name: string | null; title: string | null; phone: string | null; country: string | null; fields: Record<string, unknown>; consents: { basis: string; status: string; at: string }[] }[];
 };
 
 export async function exportPerson(db: Db, ws: string, personId: string): Promise<PersonExport> {
@@ -112,11 +116,21 @@ export async function exportPerson(db: Db, ws: string, personId: string): Promis
       [ws, p],
     )
   ).rows;
+  const emails = ids.filter((i) => i.kind === "email").map((i) => i.value_clean);
+  const contacts = (
+    await db.query(
+      `select c.email, c.first_name, c.last_name, c.title, c.phone, c.country, c.fields,
+              coalesce((select jsonb_agg(jsonb_build_object('basis', k.basis, 'status', k.status, 'at', k.at) order by k.at) from consents k where k.contact_id = c.id), '[]') as consents
+       from contacts c where c.workspace_id = $1 and (c.person_id = $2 or c.email_clean = any($3)) order by c.created_at`,
+      [ws, p, emails],
+    )
+  ).rows;
   const iso = (d: unknown) => new Date(d as string).toISOString();
   return {
     person: { id: person.id, created_at: iso(person.created_at), primary_email: person.primary_email },
     identifiers: ids.map((i) => ({ kind: i.kind, value: i.value_clean, class: i.class })),
     evidence: evidence.map((e) => ({ source: e.source, level: e.level, at: iso(e.server_at) })).sort((a, b) => a.at.localeCompare(b.at)),
     sessions: sessions.map((s) => ({ started_at: iso(s.started_at), ended_at: iso(s.ended_at), landing_path: s.landing_path, pages: s.pages })),
+    contacts: contacts.map((c) => ({ email: c.email, first_name: c.first_name, last_name: c.last_name, title: c.title, phone: c.phone, country: c.country, fields: c.fields, consents: c.consents })),
   };
 }

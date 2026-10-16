@@ -174,3 +174,51 @@ export const Link = (p: P) => (
     <path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1" />
   </Svg>
 );
+
+export const Contact = (p: P) => (
+  <Svg {...p}>
+    <circle cx="12" cy="8" r="4" />
+    <path d="M4 21v-1a6 6 0 0 1 6-6h4a6 6 0 0 1 6 6v1" />
+  </Svg>
+);
+
+export const Upload = (p: P) => (
+  <Svg {...p}>
+    <path d="M12 15V3M7 8l5-5 5 5" />
+    <path d="M4 15v4a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-4" />
+  </Svg>
+);
+
+export const Download = (p: P) => (
+  <Svg {...p}>
+    <path d="M12 3v12M7 10l5 5 5-5" />
+    <path d="M4 15v4a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-4" />
+  </Svg>
+);
+
+export const Target = (p: P) => (
+  <Svg {...p}>
+    <circle cx="12" cy="12" r="9" />
+    <circle cx="12" cy="12" r="5" />
+    <circle cx="12" cy="12" r="1" />
+  </Svg>
+);
+
+export const Refresh = (p: P) => (
+  <Svg {...p}>
+    <path d="M20 11a8 8 0 0 0-14.9-3.5M4 4v4h4" />
+    <path d="M4 13a8 8 0 0 0 14.9 3.5M20 20v-4h-4" />
+  </Svg>
+);
+
+export const Pause = (p: P) => (
+  <Svg {...p}>
+    <path d="M9 5v14M15 5v14" />
+  </Svg>
+);
+
+export const Plug = (p: P) => (
+  <Svg {...p}>
+    <path d="M9 3v5M15 3v5M6 8h12v3a6 6 0 0 1-12 0V8zM12 17v4" />
+  </Svg>
+);

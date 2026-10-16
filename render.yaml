@@ -21,3 +21,28 @@ services:
         sync: false
       - key: STRIPE_SECRET_KEY
         sync: false
+      # Sources (docs/sources-setup.md). APP_URL only when the app isn't at https://app.tryclaritia.com.
+      - key: APP_URL
+        sync: false
+      - key: OMNISCIENT_URL
+        sync: false
+      - key: HUBSPOT_CLIENT_ID
+        sync: false
+      - key: HUBSPOT_CLIENT_SECRET
+        sync: false
+      - key: SALESFORCE_CLIENT_ID
+        sync: false
+      - key: SALESFORCE_CLIENT_SECRET
+        sync: false
+      - key: PIPEDRIVE_CLIENT_ID
+        sync: false
+      - key: PIPEDRIVE_CLIENT_SECRET
+        sync: false
+      - key: ATTIO_CLIENT_ID
+        sync: false
+      - key: ATTIO_CLIENT_SECRET
+        sync: false
+      - key: MAILCHIMP_CLIENT_ID
+        sync: false
+      - key: MAILCHIMP_CLIENT_SECRET
+        sync: false
