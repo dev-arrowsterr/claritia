@@ -852,6 +852,23 @@ Records (custom objects and rich fields from week 8, pulled forward so imports a
 - **Left for later weeks:** per-contact segment refresh on change (hourly and on save for now); Segment, PostHog, Mixpanel, Amplitude, Shopify and the other product connectors; the Data model screen; a Snowflake and BigQuery account test (both are tested against recorded answers until then, check).
 - **Running cost:** no new paid service and no Claude calls; warehouse queries run on the customer's warehouse. Hourly segment refresh and warehouse pulls: Supabase compute within the current plan at Beta, one size up at Growth, about $25 (check); `claritia-intel` within the machines from Part 21c. **Total: $0 at Beta, about $25 at Growth.**
 
+## Part 21e. Week 9 status: sending built
+
+Setup steps and the full list of files: `docs/sending-setup.md`.
+
+| Piece | Where |
+|---|---|
+| Sending domains with DKIM, MAIL FROM (SPF) and DMARC records, each Verified, Waiting or Wrong; sending blocked until all three pass | `supabase/migrations/039_email.sql`, `src/lib/email/domains.ts` |
+| The guard at the moment each message leaves: suppressions, erasures, lawful basis by region, topics, frequency cap, quiet hours in the contact's time zone, physical address, verified domain, pause | `email_guard` in `039_email.sql` |
+| SES v2 sending with AWS signing; one-click unsubscribe headers; footer; tracked links with signed tokens; scanner clicks filtered | `src/lib/email/` |
+| SES events through SNS with signature check; hard bounces, 3 soft bounces and complaints suppress; complaints over 0.2% pause the workspace | `src/app/api/ses/route.ts`, `ses_event_apply` |
+| Unsubscribe page (topic or all) and RFC 8058 one-click endpoint | `src/app/u/[token]/route.ts` |
+| Settings › Sending: domains, sender, cap, quiet hours, topics, recent sends, test email | `src/components/app/views/SendingSettings.tsx` |
+
+- **Flaky and hostile cases tested:** listed in `docs/sending-setup.md`. A message that may have reached SES is never sent again.
+- **Left for later weeks:** branded link host, per-workspace configuration sets and dedicated IPs, Omniscient activity on send, the identity link token.
+- **Running cost:** about $253 at Beta and $2,780 at Growth, nearly all SES (check). No Claude calls.
+
 ---
 
 ## Part 22. Rollout

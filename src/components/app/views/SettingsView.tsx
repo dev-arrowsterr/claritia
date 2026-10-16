@@ -9,6 +9,7 @@ import { AlertsPanel } from "./AlertsPanel";
 import { GitHubPanel } from "./GitHubPanel";
 import { AccountAlertsPanel } from "./AccountAlertsPanel";
 import { IdentityPanel } from "./IdentityPanel";
+import { SendingSettings } from "./SendingSettings";
 import { IcpPanel, SitesPanel } from "./SitesPanel";
 import { settingsGroups, type SettingsTab } from "@/lib/settingsTabs";
 import { FieldsSettings, ObjectsSettings } from "./FieldsSettings";
@@ -249,6 +250,7 @@ export function SettingsView({ sb, session, ws, role, project, projectsChanged, 
     sources: <SourcesSettings sb={sb} session={session} ws={ws} role={role} />,
     imports: <ImportsSettings sb={sb} ws={ws} />,
     sync_log: <SyncLog sb={sb} ws={ws} navigate={navigate} />,
+    sending: <SendingSettings sb={sb} session={session} ws={ws} role={role} />,
     sites: <SitesPanel sb={sb} ws={ws} role={role} />,
     identity: <IdentityPanel sb={sb} session={session} ws={ws} role={role} />,
     icp: <IcpPanel sb={sb} ws={ws} />,

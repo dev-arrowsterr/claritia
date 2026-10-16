@@ -912,6 +912,69 @@ select pg_temp.check((select name from segments where id = '5e000000-0000-0000-0
 select set_config('request.jwt.claim.sub', '', false);
 delete from jobs;
 
+-- Sending (039): Ben (a member) reads Acme's sending but can't change it; nobody reads Cat's; the send pipeline is
+-- server only.
+insert into sending_domains (id, workspace_id, domain, mail_from, tracking_host, status) values
+  ('5f000000-0000-0000-0000-0000000000a1', '11111111-0000-0000-0000-000000000000', 'mail.acme.com', 'bounce.mail.acme.com', 't.mail.acme.com', 'verified'),
+  ('5f000000-0000-0000-0000-0000000000c1', '22222222-0000-0000-0000-000000000000', 'mail.other.com', 'bounce.mail.other.com', 't.mail.other.com', 'verified');
+insert into send_settings (workspace_id, from_email, address) values
+  ('11111111-0000-0000-0000-000000000000', 'news@mail.acme.com', '1 Main St'),
+  ('22222222-0000-0000-0000-000000000000', 'news@mail.other.com', '2 Side St');
+insert into emails (id, workspace_id, name, kind, subject, html, text) values
+  ('5f100000-0000-0000-0000-0000000000c1', '22222222-0000-0000-0000-000000000000', 'Cat news', 'broadcast', 'Cat news', '<p>x</p>', 'x');
+insert into email_messages (id, workspace_id, email_id, to_email, dedupe, status, ses_message_id) values
+  ('5f200000-0000-0000-0000-0000000000c1', '22222222-0000-0000-0000-000000000000', '5f100000-0000-0000-0000-0000000000c1', 'cat-friend@x.com', 'c1', 'sent', 'ses-cat-1');
+insert into topics (id, workspace_id, name) values ('5f300000-0000-0000-0000-0000000000c1', '22222222-0000-0000-0000-000000000000', 'Cat topic');
+select pg_temp.as_user('b0000000-0000-0000-0000-000000000000');
+set role authenticated;
+select pg_temp.check((select count(*) from sending_domains) = 1, 'Ben sees a sending domain outside Acme');
+select pg_temp.check((select count(*) from send_settings) = 1, 'Ben sees Cat''s sending settings');
+select pg_temp.check((select count(*) from emails) = 0, 'Ben sees Cat''s emails');
+select pg_temp.check((select count(*) from email_messages) = 0, 'Ben sees Cat''s messages');
+select pg_temp.check((select count(*) from email_events) = 0, 'Ben sees Cat''s email events');
+select pg_temp.fails($$select sending_domain_add('11111111-0000-0000-0000-000000000000', 'news.acme.com')$$, 'Ben (a member) adds a sending domain');
+select pg_temp.fails($$select sending_domain_remove('5f000000-0000-0000-0000-0000000000a1')$$, 'Ben removes a sending domain');
+select pg_temp.fails($$select sending_domain_check_now('5f000000-0000-0000-0000-0000000000c1')$$, 'Ben checks Cat''s domain');
+select pg_temp.fails($$select send_settings_save('11111111-0000-0000-0000-000000000000', '{"address":"x"}')$$, 'Ben changes sending settings');
+select pg_temp.fails($$select send_resume('11111111-0000-0000-0000-000000000000')$$, 'Ben resumes sending');
+select pg_temp.fails($$select topic_save('11111111-0000-0000-0000-000000000000', null, 'x', true)$$, 'Ben adds a topic');
+select pg_temp.fails($$select topic_delete('5f300000-0000-0000-0000-0000000000c1')$$, 'Ben deletes Cat''s topic');
+select pg_temp.fails($$select email_guard('5f200000-0000-0000-0000-0000000000c1')$$, 'Ben runs the guard');
+select pg_temp.fails($$select send_claim('22222222-0000-0000-0000-000000000000', 10)$$, 'Ben claims Cat''s messages');
+select pg_temp.fails($$select send_done('5f200000-0000-0000-0000-0000000000c1', 'ok', 'x', null)$$, 'Ben records a send');
+select pg_temp.fails($$select email_create('11111111-0000-0000-0000-000000000000', 'b0000000-0000-0000-0000-000000000000', '{}')$$, 'Ben creates an email directly');
+select pg_temp.fails($$select email_queue('5f100000-0000-0000-0000-0000000000c1', '{}')$$, 'Ben queues Cat''s email');
+select pg_temp.fails($$select email_queue_test('5f100000-0000-0000-0000-0000000000c1', 'b0000000-0000-0000-0000-000000000000')$$, 'Ben queues a test');
+select pg_temp.fails($$select ses_event_apply('{"kind":"complained","ses_message_id":"ses-cat-1","sns_id":"x"}')$$, 'Ben fakes a complaint');
+select pg_temp.fails($$select email_click('5f200000-0000-0000-0000-0000000000c1', 0, true, '{}')$$, 'Ben fakes a click');
+select pg_temp.fails($$select email_unsubscribe('5f200000-0000-0000-0000-0000000000c1', 'all')$$, 'Ben unsubscribes Cat''s contact');
+select pg_temp.fails($$select email_unsubscribe_info('5f200000-0000-0000-0000-0000000000c1')$$, 'Ben reads unsubscribe info');
+select pg_temp.fails($$select sending_domain_update('5f000000-0000-0000-0000-0000000000c1', null, '[]', 'failed')$$, 'Ben updates Cat''s domain');
+select pg_temp.fails($$select sending_domain_load('5f000000-0000-0000-0000-0000000000c1')$$, 'Ben loads Cat''s domain');
+select pg_temp.fails($$select sends_due()$$, 'Ben starts sends');
+select pg_temp.fails($$select domain_checks_due()$$, 'Ben starts domain checks');
+select pg_temp.fails($$select complaints_check('22222222-0000-0000-0000-000000000000')$$, 'Ben pauses Cat''s sending');
+select pg_temp.fails($$insert into emails (workspace_id, name, kind, subject, html, text) values ('11111111-0000-0000-0000-000000000000', 'x', 'broadcast', 'x', 'x', 'x')$$, 'Ben inserts an email');
+select pg_temp.fails($$update send_settings set paused = false$$, 'Ben writes sending settings');
+reset role;
+select pg_temp.as_user('a0000000-0000-0000-0000-000000000000');
+set role authenticated;
+select pg_temp.fails($$select sending_domain_add('22222222-0000-0000-0000-000000000000', 'evil.other.com')$$, 'Ann adds a domain to Cat''s workspace');
+select pg_temp.fails($$select sending_domain_add('11111111-0000-0000-0000-000000000000', 'mail.other.com')$$, 'Ann takes Cat''s domain');
+select pg_temp.fails($$select sending_domain_remove('5f000000-0000-0000-0000-0000000000c1')$$, 'Ann removes Cat''s domain');
+select pg_temp.fails($$select send_settings_save('22222222-0000-0000-0000-000000000000', '{}')$$, 'Ann changes Cat''s sending');
+select pg_temp.fails($$select send_settings_save('11111111-0000-0000-0000-000000000000', '{"timezone":"Mars/Olympus"}')$$, 'Ann saves an unknown time zone');
+select sending_domain_add('11111111-0000-0000-0000-000000000000', 'news.acme.com');
+select send_settings_save('11111111-0000-0000-0000-000000000000', '{"from_email":"news@mail.acme.com","address":"1 Main St","quiet_start":22,"quiet_end":7,"timezone":"Asia/Tokyo"}');
+reset role;
+select pg_temp.check((select count(*) from sending_domains where workspace_id = '11111111-0000-0000-0000-000000000000') = 2, 'Ann (an owner) can''t add her own domain');
+select pg_temp.check((select count(*) from jobs where kind = 'domain_check') = 1, 'Adding a domain doesn''t queue its check');
+select pg_temp.check((select quiet_start = 22 and timezone = 'Asia/Tokyo' from send_settings where workspace_id = '11111111-0000-0000-0000-000000000000'), 'Ann can''t save sending settings');
+select pg_temp.check((select status from email_messages where id = '5f200000-0000-0000-0000-0000000000c1') = 'sent', 'Cat''s message changed');
+select pg_temp.check((select count(*) from topics where id = '5f300000-0000-0000-0000-0000000000c1') = 1, 'Cat''s topic was deleted');
+select set_config('request.jwt.claim.sub', '', false);
+delete from jobs;
+
 -- Cloud minutes: once Acme has used its 2,000, nobody there can start a run.
 insert into runs (workspace_id, project_id, test_name, test_version, environment_name, base_url, lock, status, duration_ms)
 values ('11111111-0000-0000-0000-000000000000', 'a1000000-0000-0000-0000-000000000000', 'long', 1, 'staging', 'https://x.com', '', 'passed', 2000 * 60000);

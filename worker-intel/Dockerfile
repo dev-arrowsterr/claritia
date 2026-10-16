@@ -16,6 +16,7 @@ COPY src/lib/contacts/ ./src/lib/contacts/
 COPY src/lib/records/ ./src/lib/records/
 COPY src/lib/filters.ts ./src/lib/
 COPY src/lib/sources/ ./src/lib/sources/
+COPY src/lib/email/ ./src/lib/email/
 USER node
 EXPOSE 8080
 CMD ["node", "worker-intel/index.ts"]
