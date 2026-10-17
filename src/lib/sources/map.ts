@@ -6,14 +6,19 @@ import type { ContactInput } from "../contacts/import.ts";
 import { guessTarget, type CustomField, type Target } from "../contacts/fields.ts";
 import type { CompanyTarget, Connector, RawRecord } from "./types.ts";
 
-export type Col = { col: string; target: string; valueMap: Record<string, string> };
-export type SavedMapping = { object: "contact" | "company"; col: string; target: string; value_map: Record<string, string> };
+export type Wins = "claritia" | "crm" | "newest";
+export type Col = { col: string; target: string; valueMap: Record<string, string>; wins?: Wins };
+export type SavedMapping = { object: "contact" | "company"; col: string; target: string; value_map: Record<string, string>; wins?: Wins };
+
+/** Targets that only go out: the CRM never overwrites them here. */
+export const OUT_ONLY = new Set(["score", "score_band"]);
+export const outOnly = (t: string) => OUT_ONLY.has(t);
 
 /** The columns that map, for one object. */
 export function effectiveMapping(c: Connector, object: "contact" | "company", saved: SavedMapping[], seen: string[], custom: CustomField[]): Col[] {
   const mine = saved.filter((m) => m.object === object);
   const vm = c.defaults.valueMaps ?? {};
-  if (mine.length) return mine.map((m) => ({ col: m.col, target: m.target, valueMap: { ...(vm[m.col] ?? {}), ...m.value_map } }));
+  if (mine.length) return mine.map((m) => ({ col: m.col, target: m.target, valueMap: { ...(vm[m.col] ?? {}), ...m.value_map }, wins: m.wins ?? "claritia" }));
   const defaults = (object === "contact" ? c.defaults.contact : (c.defaults.company ?? {})) as Record<string, string>;
   const out: Col[] = Object.entries(defaults).map(([col, target]) => ({ col, target, valueMap: vm[col] ?? {} }));
   if (c.guess && object === "contact") {
@@ -54,10 +59,12 @@ export function recordsToRows(records: RawRecord[], cols: Col[], consent: Connec
 
 type Local = Partial<Pick<ContactInput, "email_clean" | "first_name" | "last_name" | "title" | "phone" | "country" | "region" | "timezone" | "lifecycle" | "lead_status" | "company_name" | "company_domain">> & {
   fields?: Record<string, unknown> | null;
+  score?: number | null;
+  score_band?: string | null;
 };
 
 // Company and website stay as the tool has them: a contact's company on our side is a shared record.
-const PUSHABLE = new Set(["email", "first_name", "last_name", "title", "phone", "country", "region", "timezone", "lifecycle", "lead_status"]);
+const PUSHABLE = new Set(["email", "first_name", "last_name", "title", "phone", "country", "region", "timezone", "lifecycle", "lead_status", "score", "score_band"]);
 export const pushable = (t: string) => PUSHABLE.has(t) || t.startsWith("f.");
 
 function norm(v: unknown): unknown {
@@ -101,6 +108,51 @@ export function agreed(cols: Col[], c: Local): Record<string, unknown> {
 export const pushPart = (v: Record<string, unknown> | null | undefined) => Object.fromEntries(Object.entries(v ?? {}).filter(([k]) => pushable(k)));
 
 const same = (a: unknown, b: unknown) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
+
+// Which side wins -------------------------------------------------------------------------------------------
+// Three-way, against the values both sides last agreed on: a field changed on one side only goes across; a field
+// changed on both sides goes to the mapping's choice. 'newest' compares the CRM record's change time with the time
+// the value last changed here.
+
+const CONTACT_PROP: Record<string, string> = { company: "company_name", website: "company_domain" };
+
+/** The contact field a target lands in: a top-level key, or "fields.<key>" for a custom field. */
+export const propOf = (t: string) => (t.startsWith("f.") ? `fields.${t.slice(2)}` : (CONTACT_PROP[t] ?? t));
+
+export type Decision = { strip: string[]; force: Record<string, unknown> };
+
+export function decide(
+  cols: Col[],
+  remote: Record<string, unknown>,
+  last: Record<string, unknown> | null | undefined,
+  local: Record<string, unknown>,
+  remoteAt: number | null,
+  localAt: (target: string) => number | null,
+): Decision {
+  const out: Decision = { strip: [], force: {} };
+  const winsOf = new Map<string, Wins>();
+  for (const m of cols) for (const t of m.target === "name" ? ["first_name", "last_name"] : [m.target]) winsOf.set(t, m.wins ?? "claritia");
+  for (const t of compared(cols)) {
+    if (t === "email" || outOnly(t)) continue;
+    const rChanged = !same(remote[t], last?.[t]);
+    const lChanged = !same(local[t], last?.[t]);
+    if (!rChanged) {
+      // Nothing new from the CRM: what's here stays (and goes out if it changed).
+      out.strip.push(t);
+      continue;
+    }
+    if (same(remote[t], local[t])) continue;
+    let crm = !lChanged;
+    if (lChanged) {
+      const w = winsOf.get(t) ?? "claritia";
+      const at = localAt(t);
+      crm = w === "crm" || (w === "newest" && remoteAt != null && at != null && remoteAt > at);
+    }
+    if (crm) out.force[t] = remote[t] ?? null;
+    else out.strip.push(t);
+  }
+  return out;
+}
 
 /** Targets whose values differ. */
 export function changedKeys(before: Record<string, unknown> | null | undefined, after: Record<string, unknown>): string[] {

@@ -23,13 +23,15 @@ type Source = {
   name: string;
   account: string | null;
   status: string;
-  settings: { objects?: Record<string, string>; every_min?: number; basis?: Basis; push_new?: string; follow_deletes?: boolean; query?: WhQuery };
+  settings: { objects?: Record<string, string>; every_min?: number; basis?: Basis; push_new?: string; follow_deletes?: boolean; activity?: boolean; query?: WhQuery };
   last_run_at: string | null;
   last_error: string | null;
   created_at: string;
 };
 type Run = { id: string; object: string; direction: string; started_at: string; finished_at: string | null; pulled: number; written: number; skipped: number; errors: number; error: string | null };
-type MapRow = { col: string; sample: string; target: string };
+type Wins = "claritia" | "crm" | "newest";
+type MapRow = { col: string; sample: string; target: string; wins: Wins };
+const OUT_ONLY = new Set(["score", "score_band"]);
 
 const STATE: Record<string, [string, Tone]> = { active: ["Active", "green"], paused: ["Paused", "gray"], error: ["Error", "red"], disconnected: ["Disconnected", "gray"] };
 const EVERY = [
@@ -395,6 +397,19 @@ function SourcePanel({ sb, session, wsId, source, owner, onClose, changed }: { s
                   />
                 </Field>
               ) : null}
+              {e?.twoWay && objects.contacts === "both" ? (
+                <Field label={`Email and form activity to ${source.name}`}>
+                  <Select
+                    className={SEL}
+                    value={settings.activity === false ? "off" : "on"}
+                    onChange={(v) => setSettings({ ...settings, activity: v === "on" })}
+                    options={[
+                      { value: "on", label: "On" },
+                      { value: "off", label: "Off" },
+                    ]}
+                  />
+                </Field>
+              ) : null}
               {!e?.hook && !e?.warehouse ? (
                 <Field label="When a contact is deleted there">
                   <Select
@@ -427,7 +442,9 @@ function SourcePanel({ sb, session, wsId, source, owner, onClose, changed }: { s
 
         {e?.warehouse && source.status !== "disconnected" ? <QueryPanel sb={sb} session={session} wsId={wsId} source={source} owner={owner} changed={changed} /> : null}
 
-        {source.status !== "disconnected" && (!e?.warehouse || (source.settings.query && ["contacts", "companies"].includes(source.settings.query.target))) ? <MappingPanel sb={sb} session={session} wsId={wsId} source={source} owner={owner} hasCompanies={!!e?.objects.includes("companies")} /> : null}
+        {source.status !== "disconnected" && (!e?.warehouse || (source.settings.query && ["contacts", "companies"].includes(source.settings.query.target))) ? (
+          <MappingPanel sb={sb} session={session} wsId={wsId} source={source} owner={owner} hasCompanies={!!e?.objects.includes("companies")} twoWay={!!e?.twoWay && source.settings.objects?.contacts === "both"} />
+        ) : null}
 
         <Panel>
           <CardHead label="Runs" count={runs.data?.length} />
@@ -603,17 +620,30 @@ const COMPANY_TARGETS = [
   { value: "country", label: "Country" },
 ];
 
-function MappingPanel({ sb, session, wsId, source, owner, hasCompanies }: { sb: ViewProps["sb"]; session: ViewProps["session"]; wsId: string; source: Source; owner: boolean; hasCompanies: boolean }) {
+const WINS: { value: Wins; label: string }[] = [
+  { value: "claritia", label: "Claritia" },
+  { value: "crm", label: "CRM" },
+  { value: "newest", label: "Newest" },
+];
+
+function MappingPanel({ sb, session, wsId, source, owner, hasCompanies, twoWay }: { sb: ViewProps["sb"]; session: ViewProps["session"]; wsId: string; source: Source; owner: boolean; hasCompanies: boolean; twoWay: boolean }) {
   const [object, setObject] = useState<"contact" | "company">("contact");
   const data = useLoad(async () => getJson<{ contact: MapRow[]; company: MapRow[] }>(session, `/api/sources/mapping?id=${source.id}`), source.id);
   const custom = useLoad(async () => must(await sb.from("fields").select("key, label").eq("workspace_id", wsId).eq("object", "contact").order("position")) as { key: string; label: string }[], wsId);
   const [edits, setEdits] = useState<Record<string, Record<string, string>>>({});
+  const [winEdits, setWinEdits] = useState<Record<string, Wins>>({});
   const [error, setError] = useState("");
-  const rows = (data.data?.[object] ?? []).map((r) => ({ ...r, target: edits[object]?.[r.col] ?? r.target }));
+  const rows = (data.data?.[object] ?? []).map((r) => ({ ...r, target: edits[object]?.[r.col] ?? r.target, wins: (object === "contact" ? winEdits[r.col] : undefined) ?? r.wins ?? "claritia" }));
   const options =
     object === "contact"
-      ? [...TARGETS.filter((t) => t.value !== "basis"), ...(custom.data ?? []).map((f) => ({ value: `f.${f.key}` as Target, label: f.label }))]
+      ? [
+          ...TARGETS.filter((t) => t.value !== "basis"),
+          ...(twoWay ? [{ value: "score", label: "Claritia score" }, { value: "score_band", label: "Claritia band" }] : []),
+          ...(custom.data ?? []).map((f) => ({ value: `f.${f.key}` as Target, label: f.label })),
+        ]
       : COMPANY_TARGETS;
+  const showWins = twoWay && object === "contact";
+  const dirty = Object.keys(edits[object] ?? {}).length > 0 || (object === "contact" && Object.keys(winEdits).length > 0);
   const choose = (col: string, t: string) => {
     const mine = { ...(edits[object] ?? {}), [col]: t };
     // One column per field.
@@ -623,8 +653,9 @@ function MappingPanel({ sb, session, wsId, source, owner, hasCompanies }: { sb: 
   const save = async () => {
     setError("");
     try {
-      must(await sb.rpc("mapping_save", { p_source: source.id, p_object: object, p_rows: rows.filter((r) => r.target !== "skip").map((r) => ({ col: r.col, target: r.target })) }));
+      must(await sb.rpc("mapping_save", { p_source: source.id, p_object: object, p_rows: rows.filter((r) => r.target !== "skip").map((r) => ({ col: r.col, target: r.target, wins: r.wins })) }));
       setEdits({ ...edits, [object]: {} });
+      if (object === "contact") setWinEdits({});
       data.reload();
     } catch (e) {
       setError(errorText(e));
@@ -655,6 +686,7 @@ function MappingPanel({ sb, session, wsId, source, owner, hasCompanies }: { sb: 
               <Th>{source.name}</Th>
               <Th>Sample</Th>
               <Th>Field</Th>
+              {showWins ? <Th>Wins</Th> : null}
             </tr>
           </thead>
           <tbody>
@@ -665,12 +697,21 @@ function MappingPanel({ sb, session, wsId, source, owner, hasCompanies }: { sb: 
                 <Td className="w-56">
                   <Select className={`${SEL} h-8 ${r.target === "skip" ? "text-faint" : ""}`} value={r.target} onChange={(v) => choose(r.col, v)} options={options as { value: string; label: string }[]} disabled={!owner} />
                 </Td>
+                {showWins ? (
+                  <Td className="w-36">
+                    {r.target === "skip" || r.target === "email" ? null : OUT_ONLY.has(r.target) ? (
+                      <Badge>Out only</Badge>
+                    ) : (
+                      <Select className={`${SEL} h-8`} value={r.wins} onChange={(v) => setWinEdits({ ...winEdits, [r.col]: v })} options={WINS} disabled={!owner} ariaLabel={`Who wins ${r.col}`} />
+                    )}
+                  </Td>
+                ) : null}
               </tr>
             ))}
           </tbody>
         </table>
       )}
-      {owner && Object.keys(edits[object] ?? {}).length ? (
+      {owner && dirty ? (
         <div className="border-t border-line px-4 py-3">
           <Button onClick={save}>Save fields</Button>
         </div>

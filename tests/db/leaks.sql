@@ -975,6 +975,23 @@ select pg_temp.check((select count(*) from topics where id = '5f300000-0000-0000
 select set_config('request.jwt.claim.sub', '', false);
 delete from jobs;
 
+-- Sync, part 2 (040): activity claims are server only; nobody reads another workspace's activity rows.
+insert into activity_out (workspace_id, source_id, event_id, kind, status) values
+  ('22222222-0000-0000-0000-000000000000', '5c000000-0000-0000-0000-0000000000c1', '60000000-0000-0000-0000-0000000000c1', 'email.sent', 'sent');
+select pg_temp.as_user('b0000000-0000-0000-0000-000000000000');
+set role authenticated;
+select pg_temp.check((select count(*) from activity_out) = 0, 'Ben sees Cat''s activity');
+select pg_temp.fails($$select activity_candidates('5c000000-0000-0000-0000-0000000000c1', 10)$$, 'Ben reads Cat''s activity candidates');
+select pg_temp.fails($$select activity_claim('5c000000-0000-0000-0000-0000000000c1', '[]')$$, 'Ben claims activity');
+select pg_temp.fails($$select activity_done('5c000000-0000-0000-0000-0000000000c1', '[]')$$, 'Ben finishes activity');
+select pg_temp.fails($$select mapping_save('5c000000-0000-0000-0000-0000000000c1', 'contact', '[{"col":"email","target":"email","wins":"crm"}]')$$, 'Ben sets who wins on Cat''s source');
+reset role;
+select pg_temp.as_user('a0000000-0000-0000-0000-000000000000');
+set role authenticated;
+select pg_temp.fails($$select mapping_save('5a000000-0000-0000-0000-0000000000a1', 'contact', '[{"col":"email","target":"email","wins":"everyone"}]')$$, 'Ann saves a made-up winner');
+reset role;
+select set_config('request.jwt.claim.sub', '', false);
+
 -- Cloud minutes: once Acme has used its 2,000, nobody there can start a run.
 insert into runs (workspace_id, project_id, test_name, test_version, environment_name, base_url, lock, status, duration_ms)
 values ('11111111-0000-0000-0000-000000000000', 'a1000000-0000-0000-0000-000000000000', 'long', 1, 'staging', 'https://x.com', '', 'passed', 2000 * 60000);

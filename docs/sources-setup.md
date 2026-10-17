@@ -83,7 +83,14 @@ https://app.tryclaritia.com/api/sources/callback
 4. HubSpot signs each webhook with the client secret (v3 signature). Claritia checks it, and refuses anything older than 5 minutes or signed for another address. Webhooks are optional: without them, changes still arrive with each pull, every 15 minutes.
 5. Test with a HubSpot test account (developer account → Test accounts) before the app goes to the Marketplace.
 
-On connect, Claritia makes three contact properties in the customer's HubSpot: `claritia_score`, `claritia_band` and `claritia_source`.
+On connect, Claritia makes three contact properties in the customer's HubSpot: `claritia_score`, `claritia_band` and `claritia_source`. The score and band go out every few minutes and are never read back.
+
+**Email and form activity on the HubSpot timeline (optional):**
+1. Auth tab → add `timeline` as an **optional** scope. Claritia asks for it as optional, so customers who already connected keep working.
+2. Make Claritia's event template once: `HUBSPOT_APP_ID=… HUBSPOT_DEVELOPER_KEY=… node scripts/hubspot-timeline.mjs`. It prints `HUBSPOT_TIMELINE_TEMPLATE=…`.
+3. `fly secrets set HUBSPOT_TIMELINE_TEMPLATE='…' --app claritia-intel`.
+
+Without the template, each email sent, click, unsubscribe and form answer goes in as a note on the contact.
 
 ### Salesforce (two-way)
 
@@ -96,6 +103,14 @@ On connect, Claritia makes three contact properties in the customer's HubSpot: `
 3. Copy the Consumer Key and Consumer Secret into `SALESFORCE_CLIENT_ID` and `SALESFORCE_CLIENT_SECRET`.
 4. Policies: "All users may self-authorize". Refresh token policy: "valid until revoked".
 5. A Developer Edition org (developer.salesforce.com/signup) is for testing.
+
+**Score fields (one time per customer org):** Setup → Object Manager → Lead → Fields & Relationships → New:
+- `Claritia Score` (Number, 3 digits, 0 decimals) → API name `Claritia_Score__c`
+- `Claritia Band` (Text, 20) → API name `Claritia_Band__c`
+
+Repeat on Contact. Give the connecting user edit access to all four. Until they exist, everything else still syncs and the score is left out.
+
+Email and form activity goes in as completed Tasks on the Lead or Contact. Nothing to set up.
 
 Limits for now:
 - Sign-in goes to `login.salesforce.com`, so sandboxes (`test.salesforce.com`) can't connect yet.
@@ -132,6 +147,15 @@ Nothing to register. Omniscient already knows Claritia (`src/lib/apps.ts` there)
 1. Omniscient's migration `032_connect.sql` must be live, with `SUPABASE_SECRET_KEY` set on Omniscient's Render.
 2. "Connect Omniscient" in Claritia opens Omniscient's approve page. An Omniscient owner or admin clicks Allow. Claritia trades the one-time code for a key, then registers its own webhook with Omniscient (contact created and updated).
 3. Omniscient's own "Connect Claritia" button sends people to `/settings/suite?connect=omniscient`. That address opens the same connect panel in Claritia.
+
+### Who wins a field
+
+On a two-way source's page, the Fields table has a **Wins** column for each field:
+- A field changed on one side only always goes across, whatever the setting.
+- When both sides changed it since they last matched, the setting decides: **Claritia** (the default), **CRM**, or **Newest** (the later change).
+- The score and band are **Out only**.
+
+Pulls run every 5 minutes for new CRM sources (HubSpot changes also arrive within seconds by webhook). Changes made in Claritia go out within a minute.
 
 ## 6. Tools that need nothing from us
 

@@ -3,8 +3,9 @@
 // changes within seconds through the app's webhooks, writes through batch create and update. Scopes are in oauth.ts.
 
 import { createHmac, timingSafeEqual } from "node:crypto";
+import { activityHtml, activityText } from "./activity.ts";
 import { readCursor } from "./ctx.ts";
-import type { Connector, Ctx, HookEvent, HookRequest, Page, PushChange, PushResult, RawRecord } from "./types.ts";
+import type { ActivityItem, ActivityResult, Connector, Ctx, HookEvent, HookRequest, Page, PushChange, PushResult, RawRecord } from "./types.ts";
 
 const BASE = "https://api.hubapi.com";
 const OVERLAP_MS = 5 * 60_000;
@@ -122,8 +123,9 @@ export const hubspot: Connector = {
     }
     return out;
   },
+  activity: (ctx, items) => (process.env.HUBSPOT_TIMELINE_TEMPLATE?.trim() ? timeline(ctx, items, process.env.HUBSPOT_TIMELINE_TEMPLATE.trim()) : notes(ctx, items)),
   async setup(ctx) {
-    // Our own properties on HubSpot contacts, so reps see the score where they work (filled from week 16).
+    // Our own properties on HubSpot contacts, so reps see the score where they work.
     const props = [
       { name: "claritia_score", label: "Claritia score", type: "number", fieldType: "number" },
       { name: "claritia_band", label: "Claritia band", type: "string", fieldType: "text" },
@@ -148,7 +150,7 @@ export const hubspot: Connector = {
     return null;
   },
   defaults: {
-    contact: { email: "email", firstname: "first_name", lastname: "last_name", jobtitle: "title", phone: "phone", company: "company", website: "website", country: "country", state: "region", lifecyclestage: "lifecycle", hs_lead_status: "lead_status" },
+    contact: { email: "email", firstname: "first_name", lastname: "last_name", jobtitle: "title", phone: "phone", company: "company", website: "website", country: "country", state: "region", lifecyclestage: "lifecycle", hs_lead_status: "lead_status", claritia_score: "score", claritia_band: "score_band" },
     company: { name: "name", domain: "domain", industry: "industry", numberofemployees: "size", country: "country" },
     valueMaps: {
       lifecyclestage: { subscriber: "subscriber", lead: "lead", marketingqualifiedlead: "mql", salesqualifiedlead: "sql", opportunity: "opportunity", customer: "customer", evangelist: "evangelist", other: "other" },
@@ -186,4 +188,62 @@ async function batch(ctx: Ctx, mode: "update" | "upsert", part: PushChange[]): P
     for (const c of part) out.push(...(await batch(ctx, mode, [c])));
     return out;
   }
+}
+
+// Activity: timeline events when Claritia's event template is set up (HUBSPOT_TIMELINE_TEMPLATE, made once by
+// scripts/hubspot-timeline.mjs), else a note on the contact. A timeline event carries our event id, so HubSpot
+// refuses a second copy.
+async function timeline(ctx: Ctx, items: ActivityItem[], template: string): Promise<ActivityResult[]> {
+  const out: ActivityResult[] = [];
+  for (let i = 0; i < items.length; i += 100) {
+    const part = items.slice(i, i + 100);
+    const inputs = part.map((x) => {
+      const t = activityText(x);
+      return { eventTemplateId: template, objectId: x.external_id, id: x.id, timestamp: x.at, tokens: { action: t.action, title: t.title.slice(0, 250), detail: t.detail.slice(0, 1000) } };
+    });
+    try {
+      const d = await ctx.api<{ results?: { id: string }[]; errors?: { message: string; context?: { id?: string[] } }[] }>(`${BASE}/crm/v3/timeline/events/batch/create`, { method: "POST", body: JSON.stringify({ inputs }) });
+      const ok = new Set((d.results ?? []).map((r) => String(r.id)));
+      for (const x of part) {
+        if (ok.has(x.id)) {
+          out.push({ id: x.id, status: "sent", external_id: x.id });
+          continue;
+        }
+        const err = d.errors?.find((e) => e.context?.id?.includes(x.id) || e.message.includes(x.id));
+        // Already there from an earlier try: that's the one copy.
+        if (err && /already exists|duplicate|conflict/i.test(err.message)) out.push({ id: x.id, status: "sent", external_id: x.id });
+        else out.push({ id: x.id, status: err ? "failed" : "unknown", error: err?.message ?? "HubSpot didn't answer for this event." });
+      }
+    } catch (e) {
+      if (/rate limit|Stopped|Sign in again/i.test(String((e as Error).message))) throw e;
+      for (const x of part) out.push({ id: x.id, status: "failed", error: String((e as Error).message).slice(0, 300) });
+    }
+  }
+  return out;
+}
+
+async function notes(ctx: Ctx, items: ActivityItem[]): Promise<ActivityResult[]> {
+  const out: ActivityResult[] = [];
+  for (const x of items) {
+    try {
+      const d = await ctx.api<{ id: string }>(`${BASE}/crm/v3/objects/notes`, {
+        method: "POST",
+        body: JSON.stringify({
+          properties: { hs_timestamp: x.at, hs_note_body: activityHtml(x) },
+          associations: [{ to: { id: x.external_id }, types: [{ associationCategory: "HUBSPOT_DEFINED", associationTypeId: 202 }] }],
+        }),
+      });
+      out.push({ id: x.id, status: "sent", external_id: String(d.id) });
+    } catch (e) {
+      const msg = String((e as Error).message);
+      if (/rate limit|Stopped|Sign in again/i.test(msg)) {
+        // What was written stays written; this one and the rest are left as unknown by the caller.
+        out.push({ id: x.id, status: "unknown", error: msg.slice(0, 300) });
+        for (const y of items.slice(items.indexOf(x) + 1)) out.push({ id: y.id, status: "unknown", error: "Stopped before this event." });
+        return out;
+      }
+      out.push({ id: x.id, status: "failed", error: msg.slice(0, 300) });
+    }
+  }
+  return out;
 }

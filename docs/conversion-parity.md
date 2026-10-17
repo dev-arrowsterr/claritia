@@ -869,6 +869,21 @@ Setup steps and the full list of files: `docs/sending-setup.md`.
 - **Left for later weeks:** branded link host, per-workspace configuration sets and dedicated IPs, Omniscient activity on send, the identity link token.
 - **Running cost:** about $253 at Beta and $2,780 at Growth, nearly all SES (check). No Claude calls.
 
+## Part 21f. Two-way sync, part 2: who wins, score and activity written back
+
+| Piece | Where |
+|---|---|
+| A **Wins** choice per field (Claritia, CRM, Newest). Three-way against the values both sides last matched: a change on one side goes across; a change on both sides follows the choice | `supabase/migrations/040_sync.sql`, `decide` in `src/lib/sources/map.ts`, `applyContacts` in `src/lib/sources/sync.ts` |
+| Score and band out only: HubSpot `claritia_score` and `claritia_band`; Salesforce `Claritia_Score__c` and `Claritia_Band__c` when the org has them | `src/lib/sources/hubspot.ts`, `src/lib/sources/salesforce.ts` |
+| Email sent, clicked, unsubscribed and form answers written to HubSpot (timeline events, or notes) and Salesforce (completed Tasks), each claimed before the call and never written twice | `pushActivity` in `sync.ts`, `crm_activity` job, `src/lib/sources/activity.ts` |
+| CRM pulls every 5 minutes by default; HubSpot webhooks within seconds | `src/lib/sources/server.ts` |
+| Fields table with the Wins column, score targets and the activity switch | `src/components/app/views/SourcesSettings.tsx` |
+| Tests | `tests/sync.test.ts`, `tests/pg/sync.pg.ts`, sync block in `tests/db/leaks.sql`; the 1,000-change HubSpot test still passes |
+
+- **Flaky cases tested:** a rep's HubSpot change lands over an older edit here and isn't pushed back over; a dead worker's claim turns unknown and is never written; HubSpot refusing a copy it already has counts as written; a rate limit mid-batch leaves the rest unknown; a Salesforce org without the score fields still syncs everything else; a settled round writes nothing.
+- **Left for later:** Salesforce sandboxes and Change Data Capture; deals and companies written back; per-field direction (in only, out only) beyond the score.
+- **Running cost:** no new paid service and no Claude calls. CRM APIs are free on the customer's plan. Pulls every 5 minutes instead of 15 add Supabase and `claritia-intel` load inside what's already paid at Beta; about $10 at Growth (check). **Total: $0 at Beta, about $10 at Growth.**
+
 ---
 
 ## Part 22. Rollout
