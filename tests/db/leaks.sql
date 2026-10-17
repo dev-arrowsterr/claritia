@@ -1015,6 +1015,30 @@ select pg_temp.check((select count(*) from forms where workspace_id = '11111111-
 select pg_temp.check((select status from forms where id = '61000000-0000-0000-0000-0000000000c1') = 'live', 'Cat''s form changed');
 select set_config('request.jwt.claim.sub', '', false);
 
+-- Nurture (042): members build in their own workspace only; enrolling, advancing and the AI cache are server only.
+insert into nurtures (id, workspace_id, name, trigger) values ('63000000-0000-0000-0000-0000000000c1', '22222222-0000-0000-0000-000000000000', 'Cat nurture', '{}');
+insert into emails (id, workspace_id, name, kind, subject, html, text) values ('63100000-0000-0000-0000-0000000000c1', '22222222-0000-0000-0000-000000000000', 'Cat step', 'journey', 'Hi', 'x', 'x');
+insert into nurture_steps (id, workspace_id, nurture_id, position, email_id) values ('63200000-0000-0000-0000-0000000000c1', '22222222-0000-0000-0000-000000000000', '63000000-0000-0000-0000-0000000000c1', 0, '63100000-0000-0000-0000-0000000000c1');
+insert into ai_cache (workspace_id, kind, key, output, model) values ('22222222-0000-0000-0000-000000000000', 'nurture_draft', repeat('a', 64), '{"secret":"cat"}', 'm');
+select pg_temp.as_user('b0000000-0000-0000-0000-000000000000');
+set role authenticated;
+select pg_temp.check((select count(*) from nurtures) = 0, 'Ben sees Cat''s nurtures');
+select pg_temp.check((select count(*) from nurture_steps) = 0, 'Ben sees Cat''s steps');
+select pg_temp.fails($$select * from ai_cache$$, 'Ben reads the AI cache');
+select pg_temp.fails($$select nurture_step_approve('63200000-0000-0000-0000-0000000000c1')$$, 'Ben approves Cat''s step');
+select pg_temp.fails($$select nurture_step_save('63000000-0000-0000-0000-0000000000c1', '63200000-0000-0000-0000-0000000000c1', 1, 'mine', '', 'x', 'x', '{}')$$, 'Ben rewrites Cat''s step');
+select pg_temp.fails($$select nurture_step_change('63200000-0000-0000-0000-0000000000c1', 'delete')$$, 'Ben deletes Cat''s step');
+select pg_temp.fails($$select nurture_set_status('63000000-0000-0000-0000-0000000000c1', 'paused')$$, 'Ben pauses Cat''s nurture');
+select pg_temp.fails($$select nurture_delete('63000000-0000-0000-0000-0000000000c1')$$, 'Ben deletes Cat''s nurture');
+select pg_temp.fails($$select nurture_save('22222222-0000-0000-0000-000000000000', null, 'x', '{"kind":"segment"}', null, '', '{}')$$, 'Ben makes a nurture in Cat''s workspace');
+select pg_temp.fails($$select nurture_enroll(null)$$, 'Ben enrolls people');
+select pg_temp.fails($$select nurture_advance(10)$$, 'Ben sends nurture steps');
+select pg_temp.fails($$select ai_cache_get('22222222-0000-0000-0000-000000000000', 'nurture_draft', repeat('a', 64))$$, 'Ben reads Cat''s AI cache');
+select pg_temp.fails($$select ai_cache_put('22222222-0000-0000-0000-000000000000', 'nurture_draft', repeat('b', 64), '{}', 'm', 0, 0)$$, 'Ben writes the AI cache');
+reset role;
+select pg_temp.check((select approved_at is null from nurture_steps where id = '63200000-0000-0000-0000-0000000000c1'), 'Cat''s step was approved');
+select set_config('request.jwt.claim.sub', '', false);
+
 -- Cloud minutes: once Acme has used its 2,000, nobody there can start a run.
 insert into runs (workspace_id, project_id, test_name, test_version, environment_name, base_url, lock, status, duration_ms)
 values ('11111111-0000-0000-0000-000000000000', 'a1000000-0000-0000-0000-000000000000', 'long', 1, 'staging', 'https://x.com', '', 'passed', 2000 * 60000);

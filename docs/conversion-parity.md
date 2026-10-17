@@ -898,6 +898,22 @@ Setup steps and the full list of files: `docs/sending-setup.md`.
 - **Left for later:** country from the visitor's IP (so notice forms work without a country field), file uploads, multi-step forms, progressive fields for known visitors, native (no frame) rendering.
 - **Running cost:** Turnstile is free (check). No Claude calls. Answers and pages run on the web app. **Total: $0 at Beta, about $5 at Growth** for storage of answers (check).
 
+## Part 21h. Nurture emails built
+
+| Piece | Where |
+|---|---|
+| Nurtures with steps and waits; each step points at its own email, and editing makes a new email and clears approval so mail in line keeps the approved words | `supabase/migrations/042_nurture.sql` |
+| Live only with every step approved, a verified sender and a physical address; people join from a segment or a form (after it goes live); leave at a stage, on topic unsubscribe or suppression; paused holds everyone | `nurture_set_status`, `nurture_enroll`, `nurture_advance` |
+| Steps go out through the send pipeline (039), so consent, the cap and quiet hours apply; a repeated step adds no second email | `nurture_advance` (dedupe per enrollment and step) |
+| AI drafts with Claude Opus 5.5 from the brief only, links limited to the workspace's domains, review notes for claims to check; answers cached by their inputs | `src/lib/nurture/draft.ts`, `src/app/api/nurture/draft/route.ts`, `ai_cache` |
+| Nurture screen: setup and brief, Write with AI, edit, rewrite, approve, order, people and why they left | `src/components/app/views/NurtureView.tsx` |
+| Tests | `tests/nurture.test.ts`, `tests/pg/nurture.pg.ts`, nurture block in `tests/db/leaks.sql` |
+
+- **Flaky and hostile cases tested:** nothing goes live unapproved or without sending set up; a repeat advance after a crash adds no second email; a live edit holds the step and leaves queued mail on the approved words; a repeat draft request never calls the model; a link off the workspace's domains is dropped and flagged; typed text is escaped in the email.
+- **Setup:** `ANTHROPIC_API_KEY` on Render (already used by the GitHub flow).
+- **Left for later:** branches and AI agent steps (weeks 11 to 14), the Brand Brain as the source in place of the brief (M5), personalization tokens (week 10), per-step reports.
+- **Running cost:** Claude Opus 5.5 at $4 per million input and $20 per million output tokens. A 3-email draft is about 2,000 tokens in and 3,000 out with thinking, about $0.07. At 20 drafts a team a month: about $70 at Beta and $700 at Growth (check). Sending is already counted in Part 21e. **Total: about $70 at Beta, about $700 at Growth.**
+
 ---
 
 ## Part 22. Rollout

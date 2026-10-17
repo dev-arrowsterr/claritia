@@ -54,3 +54,6 @@ services:
         sync: false
       - key: TURNSTILE_SECRET_KEY
         sync: false
+      # AI: nurture drafts and the GitHub flow.
+      - key: ANTHROPIC_API_KEY
+        sync: false
