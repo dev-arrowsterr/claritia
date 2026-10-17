@@ -86,7 +86,7 @@ https://app.tryclaritia.com/api/sources/callback
 On connect, Claritia makes three contact properties in the customer's HubSpot: `claritia_score`, `claritia_band` and `claritia_source`. The score and band go out every few minutes and are never read back.
 
 **Email and form activity on the HubSpot timeline (optional):**
-1. Auth tab → add `timeline` and `crm.objects.owners.read` as **optional** scopes (the second lets lead routing list HubSpot owners). Claritia asks for it as optional, so customers who already connected keep working.
+1. Auth tab → add `timeline.read`, `timeline.write` and `crm.objects.owners.read` as **optional** scopes (the second lets lead routing list HubSpot owners). Claritia asks for it as optional, so customers who already connected keep working.
 2. Make Claritia's event template once: `HUBSPOT_APP_ID=… HUBSPOT_DEVELOPER_KEY=… node scripts/hubspot-timeline.mjs`. It prints `HUBSPOT_TIMELINE_TEMPLATE=…`.
 3. `fly secrets set HUBSPOT_TIMELINE_TEMPLATE='…' --app claritia-intel`.
 
