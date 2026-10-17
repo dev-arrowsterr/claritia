@@ -3,7 +3,7 @@
 // First screens for the marketing platform's tools, shown until each one has data
 // (docs/marketing-platform.md). Each tool replaces its intro with the working screen when it ships.
 
-import { BarChart, Branch, Eye, FileText, FormIcon, Mail, Megaphone } from "../../Icons";
+import { BarChart, Eye, FileText, Mail, Megaphone } from "../../Icons";
 import { SampleBars, SampleRows, SampleStats, SampleTags, ToolIntro } from "../ToolIntro";
 import { Page } from "../ui";
 
@@ -60,29 +60,6 @@ export function TemplatesView() {
   );
 }
 
-export function WorkflowsView() {
-  return (
-    <Page icon={<Branch size={14} />} title="Workflows">
-      <ToolIntro
-        title="Workflows that think for each contact"
-        lead="Start from a segment, a form or a visit. Agent steps pick the next move for each contact and write each email. You approve before anything sends."
-        features={[
-          {
-            title: "Agent decides",
-            text: "Picks one of the paths you defined, with the reason, from what the contact did.",
-            visual: <SampleRows rows={[["Sales-ready", 7, "7"], ["Keep nurturing", 18, "18"], ["Not now", 4, "4"]]} />,
-          },
-          {
-            title: "You stay in charge",
-            text: "Review every email at first. Trust grows with each approval, one workflow at a time.",
-            visual: <SampleTags rows={[["Guide follow-up", "Review all"], ["Webinar no-shows", "Sample"], ["Trial nudge", "Auto"]]} />,
-          },
-        ]}
-      />
-    </Page>
-  );
-}
-
 export function AnalyticsView() {
   return (
     <Page icon={<BarChart size={14} />} title="Analytics">
@@ -99,29 +76,6 @@ export function AnalyticsView() {
             title: "Every send",
             text: "Delivered, opened, clicked and replied, by template and by step.",
             visual: <SampleBars values={[12, 18, 15, 22, 27, 25, 31, 36, 33, 40, 44, 48]} />,
-          },
-        ]}
-      />
-    </Page>
-  );
-}
-
-export function FormsView() {
-  return (
-    <Page icon={<FormIcon size={14} />} title="Forms">
-      <ToolIntro
-        title="Forms that fill your CRM"
-        lead="Every submit creates or updates a contact, starts a workflow and reaches your CRM."
-        features={[
-          {
-            title: "Smart forms",
-            text: "Known contacts aren't asked twice. Consent wording follows the visitor's region.",
-            visual: <SampleStats items={[["views", "3,420"], ["submits", "312"], ["booked", "41"]]} />,
-          },
-          {
-            title: "Checked in a real browser",
-            text: "Every form is tested before launch and on a schedule after.",
-            visual: <SampleTags rows={[["Demo form → HubSpot", "Passing"], ["Newsletter", "Passing"], ["Guide download", "Broken"]]} />,
           },
         ]}
       />

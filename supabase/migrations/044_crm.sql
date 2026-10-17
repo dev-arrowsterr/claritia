@@ -1,6 +1,6 @@
--- Claritia migration 039: the CRM (Contacts, Companies, Opportunities), the team and sending domains.
+-- Claritia migration 044: the CRM (Contacts, Companies, Opportunities) and the team.
 -- Opportunities are a built-in object on the records tables: every workspace has one, it can't be removed, and its
--- standard fields can't be deleted. CRMs fill it through opportunities_ingest. Run after 038. Safe to run more than once.
+-- standard fields can't be deleted. CRMs fill it through opportunities_ingest. Run after 043. Safe to run more than once.
 
 alter table public.objects add column if not exists system boolean not null default false;
 alter table public.fields add column if not exists system boolean not null default false;
@@ -200,6 +200,7 @@ language sql immutable set search_path = public as $$
     and coalesce(p->'objects'->>'suppressions', 'in') in ('in', 'off')
     and coalesce(p->>'push_new', 'lifecycle') in ('all', 'lifecycle', 'none')
     and coalesce(p->>'basis', 'none') in ('opt_in', 'soft_opt_in', 'legitimate_interest', 'none')
+    and coalesce(jsonb_typeof(p->'activity'), 'boolean') = 'boolean'
     and coalesce((p->>'every_min')::int, 60) between 2 and 1440;
 $$;
 
@@ -345,60 +346,6 @@ begin
 end;
 $$;
 
--- Sending domains ------------------------------------------------------------------------------------------------
--- The domains email goes out from. Checking DNS comes with the send pipeline; until then a domain is unverified.
-
-create table if not exists public.sending_domains (
-  id uuid primary key default gen_random_uuid(),
-  workspace_id uuid not null references public.workspaces (id) on delete cascade,
-  domain text not null check (domain ~ '^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$' and length(domain) <= 253),
-  status text not null default 'unverified' check (status in ('unverified', 'verified', 'failed')),
-  checked_at timestamptz,
-  created_at timestamptz not null default now(),
-  unique (workspace_id, domain)
-);
-alter table public.sending_domains enable row level security;
-drop policy if exists "members read" on public.sending_domains;
-create policy "members read" on public.sending_domains for select using (is_member(workspace_id));
-revoke all on public.sending_domains from anon;
-revoke insert, update, delete on public.sending_domains from authenticated;
-
-create or replace function public.sending_domain_add(p_ws uuid, p_domain text) returns uuid
-language plpgsql security definer set search_path = public as $$
-declare
-  d text := lower(trim(both '.' from regexp_replace(trim(coalesce(p_domain, '')), '^(https?://)?(www\.)?([^/]+).*$', '\3', 'i')));
-  v_id uuid;
-begin
-  if not is_owner(p_ws) then
-    raise exception 'Only the workspace owner can add domains';
-  end if;
-  if d !~ '^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$' then
-    raise exception 'Enter a domain like mail.example.com';
-  end if;
-  insert into sending_domains (workspace_id, domain) values (p_ws, d) on conflict (workspace_id, domain) do nothing returning sending_domains.id into v_id;
-  if v_id is null then
-    raise exception '% is already added', d;
-  end if;
-  insert into audit_log (workspace_id, actor, action, target) values (p_ws, auth.uid(), 'domain.add', d);
-  return v_id;
-end;
-$$;
-
-create or replace function public.sending_domains_delete(p_ws uuid, p_ids uuid[]) returns int
-language plpgsql security definer set search_path = public as $$
-declare
-  n int;
-begin
-  if not is_owner(p_ws) then
-    raise exception 'Only the workspace owner can remove domains';
-  end if;
-  delete from sending_domains where workspace_id = p_ws and id = any(p_ids);
-  get diagnostics n = row_count;
-  insert into audit_log (workspace_id, actor, action, target, data) values (p_ws, auth.uid(), 'domain.delete', 'sending_domains', jsonb_build_object('count', n));
-  return n;
-end;
-$$;
-
 -- Grants ---------------------------------------------------------------------------------------------------------
 
 revoke execute on function public.crm_seed(uuid) from public, anon, authenticated;
@@ -413,11 +360,7 @@ revoke execute on function public.invite_member(uuid, text) from public, anon;
 revoke execute on function public.cancel_invite(uuid) from public, anon;
 revoke execute on function public.member_remove(uuid, uuid) from public, anon;
 revoke execute on function public.team(uuid) from public, anon;
-revoke execute on function public.sending_domain_add(uuid, text) from public, anon;
-revoke execute on function public.sending_domains_delete(uuid, uuid[]) from public, anon;
 grant execute on function public.invite_member(uuid, text) to authenticated;
 grant execute on function public.cancel_invite(uuid) to authenticated;
 grant execute on function public.member_remove(uuid, uuid) to authenticated;
 grant execute on function public.team(uuid) to authenticated;
-grant execute on function public.sending_domain_add(uuid, text) to authenticated;
-grant execute on function public.sending_domains_delete(uuid, uuid[]) to authenticated;

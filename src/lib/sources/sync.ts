@@ -11,9 +11,9 @@ import { prepareImport, type Ctx as CleanCtx, type ContactInput } from "../conta
 import { cleanEmail, isRejected } from "../identity/clean.ts";
 import { writeContacts } from "../contacts/contacts.ts";
 import type { Rpc } from "../jobs.ts";
-import { agreed, changedKeys, compared, effectiveMapping, pushable, recordsToCompanies, recordsToRows, toRemote, type Col, type SavedMapping } from "./map.ts";
+import { agreed, cellOf, changedKeys, compared, decide, effectiveMapping, outOnly, OWNER, propOf, pushable, recordsToCompanies, recordsToRows, toRemote, type Col, type SavedMapping } from "./map.ts";
 import { toOpportunityRows } from "./opportunities.ts";
-import type { Connector, Ctx, HookEvent, ObjectKind, PushChange, RawRecord } from "./types.ts";
+import type { ActivityItem, ActivityResult, Connector, Ctx, HookEvent, ObjectKind, PushChange, RawRecord } from "./types.ts";
 
 export type Deps = { rpc: Rpc; connector: Connector; ctx: Ctx; clean: CleanCtx; saved: SavedMapping[]; now?: () => number };
 export type Counts = { pulled: number; written: number; skipped: number; errors: number };
@@ -68,7 +68,10 @@ export async function applyContacts(d: Deps, records: RawRecord[]): Promise<Coun
 
   const cols = effectiveMapping(d.connector, "contact", d.saved, await seen(d, "contact", live), d.clean.custom);
   if (!cols.some((m) => m.target === "email")) throw new Error("Map a column to Email for this source.");
-  const { targets, rows } = recordsToRows(live, cols, d.connector.consent);
+  // The score only goes out.
+  const inCols = cols.filter((m) => !outOnly(m.target) && m.target !== OWNER);
+  const ownerCol = cols.find((m) => m.target === OWNER);
+  const { targets, rows } = recordsToRows(live, inCols, d.connector.consent);
   const p = prepareImport(rows, { columns: targets, source: "crm_export", basis: src.settings.basis ?? null, list: "contacts" }, d.clean);
   c.skipped += rows.length - p.contacts.length;
 
@@ -85,7 +88,14 @@ export async function applyContacts(d: Deps, records: RawRecord[]): Promise<Coun
   for (const x of p.contacts) {
     const link = links[x.source_id ?? ""];
     const held = link && !link.deleted ? link : undefined;
-    const values = withMissing(cols, agreed(cols, x), raw.get(x.source_id ?? ""), held?.values);
+    const values = withMissing(inCols, agreed(inCols, x), raw.get(x.source_id ?? ""), held?.values);
+    // Out-only values stay as last agreed, so a pull never looks like a change to them.
+    for (const t of compared(cols)) if (outOnly(t) && held?.values?.[t] !== undefined) values[t] = held.values[t];
+    if (ownerCol) {
+      const o = cellOf(raw.get(x.source_id ?? "")?.data[ownerCol.col]);
+      if (o) values[OWNER] = o;
+      else delete values[OWNER];
+    }
     if (held && held.email_clean === x.email_clean && changedKeys(held.values, values).length === 0) {
       c.skipped++;
       continue;
@@ -99,9 +109,50 @@ export async function applyContacts(d: Deps, records: RawRecord[]): Promise<Coun
     meta.push({ x, values, before: held });
   }
   if (!write.length) return c;
+
+  // Linked contacts: which side wins each field (map.ts decide). Values that stay here are left out of the write;
+  // values the CRM wins are set afterwards even where field order would hold them back.
+  const force = new Map<string, Record<string, unknown>>();
+  const linkedMeta = meta.filter((m) => m.before);
+  if (linkedMeta.length) {
+    const here = await call<Candidate[]>(d.rpc, "push_candidates", { p_source: src.id, p_after: null, p_limit: 1000, p_ids: linkedMeta.map((m) => m.before!.local_id) });
+    const byLocal = new Map(here.map((h) => [h.id, h]));
+    for (const m of linkedMeta) {
+      const h = byLocal.get(m.before!.local_id);
+      if (!h) continue;
+      const remoteAt = Date.parse(raw.get(m.x.source_id ?? "")?.updatedAt ?? "") || null;
+      const r = decide(inCols, m.values, m.before!.values, agreed(inCols, plain(h)), remoteAt, (t) => Date.parse(h.sources?.[t]?.at ?? "") || null);
+      for (const t of r.strip) {
+        const prop = propOf(t);
+        if (prop.startsWith("fields.")) delete m.x.fields?.[prop.slice(7)];
+        else delete (m.x as Record<string, unknown>)[prop];
+      }
+      if (Object.keys(r.force).length) force.set(h.id, r.force);
+    }
+  }
   await writeContacts(d.rpc, src.workspace_id, src.kind, write);
+  const forceErrors: LogRow[] = [];
+  for (const [localId, f] of force) {
+    const values: Record<string, unknown> = {};
+    for (const [t, v] of Object.entries(f)) {
+      const prop = propOf(t);
+      if (prop.startsWith("fields.")) values.fields = { ...((values.fields as Record<string, unknown>) ?? {}), [prop.slice(7)]: v };
+      else values[prop] = v;
+    }
+    const { error } = await d.rpc("contact_update", { p_id: localId, p_source: src.kind, p_values: values });
+    if (error) forceErrors.push({ direction: "in", object: "contact", local_id: localId, action: "error", fields: Object.keys(f), error: error.message });
+  }
+  if (forceErrors.length) await log(d, forceErrors);
   const ids = await call<Record<string, string>>(d.rpc, "contact_ids_by_email", { p_ws: src.workspace_id, p_emails: write.map((x) => x.email_clean) });
   const put = meta.filter((m) => ids[m.x.email_clean]).map((m) => ({ external_id: m.x.source_id, local_id: ids[m.x.email_clean], values: m.values }));
+  // The CRM owns the owner: a change there lands here. A first link takes the CRM's owner only when it has one.
+  if (ownerCol) {
+    const owners = meta
+      .filter((m) => ids[m.x.email_clean])
+      .filter((m) => (m.before ? (m.values[OWNER] ?? null) !== (m.before.values?.[OWNER] ?? null) : !!m.values[OWNER]))
+      .map((m) => ({ id: ids[m.x.email_clean], owner: (m.values[OWNER] as string | undefined) ?? null }));
+    if (owners.length) await call(d.rpc, "contacts_owner_crm_set", { p_ws: src.workspace_id, p_rows: owners });
+  }
   await call(d.rpc, "source_links_put", { p_source: src.id, p_object: "contact", p_rows: put });
   await log(
     d,
@@ -268,6 +319,8 @@ export async function pull(d: Deps, budgetMs = 240_000): Promise<{ more: boolean
   const chosen = d.connector.objectsFor?.(d.ctx.source);
   for (const object of order) {
     if (chosen ? !chosen.includes(object) : !d.connector.objects.includes(object) || !enabled(d, object)) continue;
+    // Webhook-only tools (forms, Calendly, Cal.com) have nothing to pull; their records arrive by hook.
+    if (object === "lists" ? !d.connector.lists : !d.connector.pull) continue;
     const total = (counts[object] = zero());
     for (;;) {
       if (d.ctx.signal?.aborted) throw new Error("Stopped");
@@ -356,6 +409,10 @@ type Candidate = {
   fields: Record<string, unknown>;
   company_name: string | null;
   company_domain: string | null;
+  score: number | null;
+  score_band: string | null;
+  owner_crm: string | null;
+  sources: Record<string, { s?: string; at?: string }> | null;
   external_id: string | null;
   last: Record<string, unknown> | null;
   suppressed: boolean;
@@ -432,6 +489,50 @@ export async function push(d: Deps, opts: { ids?: string[]; budgetMs?: number; b
       src.push_cursor = saved;
     }
     if (cands.length < (opts.batch ?? 200)) break;
+    if (now() - start > (opts.budgetMs ?? 240_000)) {
+      c.more = true;
+      break;
+    }
+  }
+  return c;
+}
+
+// Activity out -------------------------------------------------------------------------------------------------
+
+/**
+ * Email and form activity for linked contacts, written to the CRM. Each event is claimed before the call, so a
+ * crash or a second worker never writes it twice; an unclear answer is marked unknown and left.
+ */
+export async function pushActivity(d: Deps, opts: { budgetMs?: number; batch?: number } = {}): Promise<Counts & { more: boolean }> {
+  const c = { ...zero(), more: false };
+  const src = d.ctx.source;
+  if (!d.connector.activity || src.settings.activity === false) return c;
+  const now = d.now ?? Date.now;
+  const start = now();
+  for (;;) {
+    if (d.ctx.signal?.aborted) throw new Error("Stopped");
+    const cands = await call<ActivityItem[]>(d.rpc, "activity_candidates", { p_source: src.id, p_limit: opts.batch ?? 100 });
+    if (!cands.length) break;
+    const claimed = new Set(await call<string[]>(d.rpc, "activity_claim", { p_source: src.id, p_events: cands.map((x) => ({ id: x.id, kind: x.kind, contact_id: x.contact_id })) }));
+    const items = cands.filter((x) => claimed.has(x.id));
+    if (!items.length) break;
+    c.pulled += items.length;
+    let results: ActivityResult[];
+    try {
+      results = await d.connector.activity(d.ctx, items);
+    } catch (e) {
+      const error = String((e as Error).message ?? e).slice(0, 300);
+      await call(d.rpc, "activity_done", { p_source: src.id, p_rows: items.map((x) => ({ id: x.id, status: "unknown", error })) });
+      throw e;
+    }
+    const byId = new Map(results.map((r) => [r.id, r]));
+    const rows = items.map((x) => byId.get(x.id) ?? { id: x.id, status: "unknown" as const, error: "The tool didn't answer for this event." });
+    await call(d.rpc, "activity_done", { p_source: src.id, p_rows: rows });
+    for (const r of rows) {
+      if (r.status === "sent") c.written++;
+      else c.errors++;
+    }
+    if (cands.length < (opts.batch ?? 100)) break;
     if (now() - start > (opts.budgetMs ?? 240_000)) {
       c.more = true;
       break;

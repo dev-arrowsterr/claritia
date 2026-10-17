@@ -41,6 +41,9 @@ export class FakeHubspot {
   calls = 0;
   throttled = 0;
   events: Record<string, unknown>[] = [];
+  /** Timeline events by our id, and notes, as written. */
+  timeline = new Map<string, { objectId: string; tokens: Record<string, string> }>();
+  notes: { body: string; contact: string }[] = [];
   token = "t1";
   private seq = 1000;
   private clock = Date.now() - 86_400_000;
@@ -50,6 +53,11 @@ export class FakeHubspot {
   constructor(random: () => number, opts: { rate429?: number; portal?: number } = {}) {
     this.random = random;
     this.opts = opts;
+  }
+
+  /** Move HubSpot's clock (for "newest wins" cases). */
+  setClock(ms: number) {
+    this.clock = ms;
   }
 
   private tick() {
@@ -245,6 +253,24 @@ export class FakeHubspot {
         out.push(c);
       }
       return json(200, { results: out.map((c) => ({ id: c.id, properties: { ...c.properties } })) });
+    }
+    if (p === "/crm/v3/timeline/events/batch/create") {
+      const results: { id: string }[] = [];
+      const errors: { message: string; context: { id: string[] } }[] = [];
+      for (const i of body.inputs as { id: string; objectId: string; tokens: Record<string, string> }[]) {
+        if (this.timeline.has(i.id)) errors.push({ message: `Event ${i.id} already exists`, context: { id: [i.id] } });
+        else if (!this.contacts.get(String(i.objectId))) errors.push({ message: `Object ${i.objectId} not found`, context: { id: [i.id] } });
+        else {
+          this.timeline.set(i.id, { objectId: String(i.objectId), tokens: i.tokens });
+          results.push({ id: i.id });
+        }
+      }
+      return json(errors.length ? 207 : 200, { results, errors });
+    }
+    if (p === "/crm/v3/objects/notes" && method === "POST") {
+      const contact = String(body.associations?.[0]?.to?.id ?? "");
+      this.notes.push({ body: String(body.properties?.hs_note_body ?? ""), contact });
+      return json(201, { id: String(this.seq++) });
     }
     return json(404, { message: `No fake for ${method} ${p}` });
   };

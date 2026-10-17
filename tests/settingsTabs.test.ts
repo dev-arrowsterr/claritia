@@ -7,7 +7,7 @@ test("settings lead with the CRM connection, sending domains and the team", () =
     SETTINGS_GROUPS.slice(0, 3).map((g) => [g.label, g.tabs[0].id]),
     [
       ["CRM", "sources"],
-      ["Email", "domains"],
+      ["Email", "sending"],
       ["Team", "team"],
     ],
   );
@@ -19,6 +19,7 @@ test("settings lead with the CRM connection, sending domains and the team", () =
 test("old and unknown settings addresses land on a real page", () => {
   assert.equal(settingsTab("team"), "team");
   assert.equal(settingsTab("suite"), "sources");
+  assert.equal(settingsTab("domains"), "sending");
   assert.equal(settingsTab("github"), "sources");
   assert.equal(settingsTab(""), "sources");
 });

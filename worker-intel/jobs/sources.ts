@@ -3,7 +3,7 @@
 
 import type pg from "pg";
 import { enqueueJob, JobError, type Handler, type Job, type Rpc } from "../../src/lib/jobs.ts";
-import { runHooks, runPull, runPush, type RunOpts } from "../../src/lib/sources/run.ts";
+import { runActivity, runHooks, runPull, runPush, type RunOpts } from "../../src/lib/sources/run.ts";
 import { AuthError, RateLimited } from "../../src/lib/sources/types.ts";
 import { ctxFor } from "./imports.ts";
 
@@ -40,6 +40,14 @@ export const crmPush =
     const id = idOf(job);
     const r = await guarded(() => runPush(opts(pool, rpc, signal, extra), id));
     if (r?.more) await enqueueJob(rpc, { workspaceId: job.workspace_id, kind: "crm_push", key: id, payload: { source_id: id } });
+  };
+
+export const crmActivity =
+  (pool: pg.Pool, rpc: Rpc, extra: Partial<RunOpts> = {}): Handler =>
+  async (job, signal) => {
+    const id = idOf(job);
+    const r = await guarded(() => runActivity(opts(pool, rpc, signal, extra), id));
+    if (r?.more) await enqueueJob(rpc, { workspaceId: job.workspace_id, kind: "crm_activity", key: id, payload: { source_id: id } });
   };
 
 export const sourceHook =

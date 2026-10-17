@@ -222,23 +222,25 @@ What shipped and what's left: the plan's Part 21b (custom objects) and Part 21d.
 
 ---
 
-## Week 9. Sending
+## Week 9. Sending (built)
+
+What shipped and what's left: the plan's Part 21e and `docs/sending-setup.md`. The build used `039_email.sql` (segments and warehouses took 037 and 038), one shared configuration set at Beta, and applies SES events in the `/api/ses` route itself in place of an `ses_event` job. Templates and brand kits move to week 10 with the editor.
 
 **Goal:** a verified domain sends with every guard on.
 
 **Database: `037_email.sql`** with `sending_domains`, `templates`, `emails`, `email_messages`, `send_limits`, `brand_kits`, `email_stats` (from `docs/marketing-platform.md` M3).
 
-**Code:** `src/lib/email/ses.ts`, `domains.ts` (DNS records and checks), `guard.ts` (consent, suppression, frequency cap, quiet hours by time zone), `track.ts` (link rewrite, click tokens, scanner filter), SNS route `src/app/api/ses/route.ts` with signature check; jobs `send`, `ses_event`, `domain_check`.
+**Code:** `src/lib/email/resend.ts`, `domains.ts` (Resend domains API, DNS records and checks), `guard.ts` (consent, suppression, frequency cap, quiet hours by time zone), `track.ts` (link rewrite, click tokens, scanner filter), webhook route `src/app/api/email/events/route.ts` with Svix signature check; jobs `send`, `email_event`, `domain_check`.
 
 **Screens:** Settings › Sending: domain wizard with record tags (Verified, Waiting, Wrong), topics, frequency cap, quiet hours.
 
-**Tests:** SNS signature; suppressed address never sent even from a queued step; one-click unsubscribe (RFC 8058 headers); complaint storm pauses the workspace; cap and quiet hours.
+**Tests:** webhook signature; suppressed address never sent even from a queued step; one-click unsubscribe (RFC 8058 headers); complaint storm pauses the workspace; cap and quiet hours.
 
-**Founder:** SES production access in ap-northeast-1, sending rate raised.
+**Founder:** Resend volume plan, rate raised, webhook secret in `RESEND_WEBHOOK_SECRET`.
 
 **Done when:** a test domain verifies and an email sends with one-click unsubscribe.
 
-**Cost:** SES $5 per team per month at 50,000 emails: $250 Beta, $2,500 Growth (check). Dedicated IPs $50 Beta, $250 Growth (check).
+**Cost:** Resend at 50,000 emails per team: $1,150 Beta, $5,000 Growth (check). Dedicated IPs $50 Beta, $250 Growth (check).
 
 ---
 
@@ -429,10 +431,10 @@ What shipped and what's left: the plan's Part 21b (custom objects) and Part 21d.
 | Weeks | Theme | Adds to the bill (Beta / Growth) |
 |---|---|---|
 | 1–8 | Contacts from everywhere, sync, data model | About $40 / $260 (Supabase, Fly, Haiku titles) |
-| 9–10 | Email | About $300 / $2,750 |
+| 9–10 | Email | About $1,200 / $5,250 |
 | 11–14 | Workflows and AI | About $1,500 / $15,000 |
 | 15–18 | Pages, scoring, ABM, ads, attribution | About $155 / $1,540 |
 | 19–21 | Agents, migration, API | About $950 / $8,000 |
-| **All** | | **About $3,000 / $27,750** (plan Part 20; Claude lines there include per-team rounding) |
+| **All** | | **About $3,900 / $30,250** (plan Part 20; Claude lines there include per-team rounding) |
 
 All prices not confirmed on the vendor's own page are marked "check" in the plan.

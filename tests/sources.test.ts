@@ -7,6 +7,7 @@ import { test } from "node:test";
 import { makeCtx } from "../src/lib/sources/ctx.ts";
 import { effectiveMapping, recordsToRows } from "../src/lib/sources/map.ts";
 import { connectorFor } from "../src/lib/sources/registry.ts";
+import { pull } from "../src/lib/sources/sync.ts";
 import type { Creds, Page, RawRecord, SourceRow } from "../src/lib/sources/types.ts";
 import { CATALOG } from "../src/lib/sources/catalog.ts";
 
@@ -355,4 +356,15 @@ test("REST warehouses: the query is wrapped, the cursor goes as a parameter, and
 test("a warehouse host on a private network is refused", async () => {
   const ctx = makeCtx({ source: row("clickhouse"), creds: key({ url: "https://127.0.0.1:8443", user: "u", password: "p" }), fetcher: async () => Response.json({}) });
   await assert.rejects(runQuery(ctx, { ...q0, sql: "select email, updated_at from t" }, "x"), /private network/);
+});
+
+test("a webhook-only tool's scheduled pull does nothing and doesn't fail", async () => {
+  for (const kind of ["calendly", "calcom", "typeform", "tally"]) {
+    const c = connectorFor(kind);
+    if (!c) continue;
+    const ctx = makeCtx({ source: row(kind), creds: { type: "hook" }, fetcher: async () => new Response("{}"), sleep: async () => {} });
+    const rpc = async () => ({ data: null, error: { message: "no rpc expected" } });
+    const out = await pull({ rpc, connector: c, ctx, clean: {} as never, saved: [] } as never);
+    assert.equal(out.more, false, kind);
+  }
 });

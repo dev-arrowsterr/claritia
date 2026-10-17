@@ -12,7 +12,9 @@ import { Avatar, ErrorNote, errorText, mayLeave, must, type Role, type Route, ty
 import { ContactsView } from "./views/ContactsView";
 import { CompaniesView, ObjectsView, OpportunitiesView } from "./views/RecordsViews";
 import { SegmentsView } from "./views/SegmentsView";
-import { AdsView, AnalyticsView, FormsView, PagesView, TemplatesView, WorkflowsView } from "./views/MarketingIntros";
+import { AdsView, AnalyticsView, PagesView, TemplatesView } from "./views/MarketingIntros";
+import { FormsView } from "./views/FormsView";
+import { NurtureView } from "./views/NurtureView";
 import { SettingsView } from "./views/SettingsView";
 
 // One icon per screen. The sidebar's groups are in src/lib/nav.ts.
@@ -32,7 +34,7 @@ const ICONS: Record<NavRoute, React.ReactNode> = {
 };
 
 type Loc = { route: Route; id: string };
-const WITH_ID = new Set<Route>(["contacts", "companies", "opportunities", "segments"]);
+const WITH_ID = new Set<Route>(["contacts", "companies", "opportunities", "segments", "forms", "workflows"]);
 
 const readLoc = (): Loc => {
   const [, first = "", id = "", rest = ""] = window.location.pathname.split("/");
@@ -43,7 +45,7 @@ const readLoc = (): Loc => {
   if (r.route === "objects") return { route: r.route, id: /^[a-z][a-z0-9_]{0,39}$/.test(a) ? (uuid(b) ? `${a}/${b}` : a) : "" };
   // Settings pages: /settings/<page>.
   if (r.route === "settings") return { route: r.route, id: /^[a-z_]{2,30}$/.test(a) ? a : "" };
-  if (r.route === "segments" && a === "new") return { route: r.route, id: a };
+  if ((r.route === "segments" || r.route === "forms" || r.route === "workflows") && a === "new") return { route: r.route, id: a };
   // Companies: the live visit feed, and an old account link that finds its company.
   if (r.route === "companies" && a === "visits") return { route: r.route, id: a };
   if (r.route === "companies" && a === "account" && uuid(b)) return { route: r.route, id: `account/${b}` };
@@ -221,11 +223,11 @@ export function ClientApp({ config }: { config: SupaConfig }) {
         ) : route === "templates" ? (
           <TemplatesView />
         ) : route === "workflows" ? (
-          <WorkflowsView />
+          <NurtureView {...props} />
         ) : route === "analytics" ? (
           <AnalyticsView />
         ) : route === "forms" ? (
-          <FormsView />
+          <FormsView {...props} />
         ) : route === "pages" ? (
           <PagesView />
         ) : route === "ads" ? (

@@ -12,8 +12,9 @@ export const OAUTH: Record<string, OauthCfg> = {
     authorize: "https://app.hubspot.com/oauth/authorize",
     token: "https://api.hubapi.com/oauth/v1/token",
     scope: "oauth crm.objects.contacts.read crm.objects.contacts.write crm.objects.companies.read crm.lists.read crm.schemas.contacts.read crm.schemas.contacts.write",
-    // Deals are optional: portals that don't grant them still connect, and the opportunities step is skipped.
-    extra: { optional_scope: "crm.objects.deals.read" },
+    // Optional: timeline events for email and form activity (without it, activity goes in as notes), and deals for
+    // Opportunities (without it, that step is skipped).
+    extra: { optional_scope: "timeline.read timeline.write crm.objects.owners.read crm.objects.deals.read" },
   },
   salesforce: { env: "SALESFORCE", authorize: "https://login.salesforce.com/services/oauth2/authorize", token: "https://login.salesforce.com/services/oauth2/token", scope: "api refresh_token", pkce: true },
   pipedrive: { env: "PIPEDRIVE", authorize: "https://oauth.pipedrive.com/oauth/authorize", token: "https://oauth.pipedrive.com/oauth/token", basic: true },

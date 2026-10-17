@@ -2,7 +2,7 @@
 
 The agentic marketing platform: Claritia turns website visitors into leads and leads into meetings, with AI agents running the journeys, writing the emails, building the pages and proving what made revenue. It sits between Arrowsterr (SEO and AI search) and Omniscient (`dev-omniscient/omniscient`, CRM and deal rooms), on the same stack and brand system. The original product, AI end-to-end testing, stays for existing workspaces and powers Funnel QA.
 
-Setup for imports, sources and warehouses: `docs/sources-setup.md`. Start with `docs/marketing-platform.md` (the plan), `docs/m1-website-intelligence.md` (the module being built), `docs/identity.md` and `docs/account-intelligence.md` (specs), and `docs/brand.md` (look and copy). `docs/vision.md` and `docs/plan.md` describe the testing product.
+Setup for imports, sources and warehouses: `docs/sources-setup.md`, then `docs/connect-guide.md` for each tool. Setup for sending: `docs/sending-setup.md`. Start with `docs/lock-in-plan.md` (the next six weeks), `docs/marketing-platform.md` (the full plan), `docs/m1-website-intelligence.md` (the module being built), `docs/identity.md` and `docs/account-intelligence.md` (specs), and `docs/brand.md` (look and copy). `docs/vision.md` and `docs/plan.md` describe the testing product.
 
 The sidebar is in `src/lib/nav.ts`: CRM (Contacts, Companies, Opportunities), Email (Segments, Templates, Workflows, Analytics), Site (Forms, Pages), Ads, Settings. The CRM is in `docs/crm.md`. The testing screens are gone from the app. Background work goes through the jobs queue (`supabase/migrations/020_foundation.sql`, `src/lib/jobs.ts`).
 

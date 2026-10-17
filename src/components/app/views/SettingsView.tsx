@@ -6,9 +6,11 @@ import { APP_URL } from "@/lib/site";
 import { askConfirm, askText } from "../Dialogs";
 import { AccountAlertsPanel } from "./AccountAlertsPanel";
 import { IdentityPanel } from "./IdentityPanel";
+import { LeadScoringPanel } from "./LeadScoringPanel";
+import { SendingSettings } from "./SendingSettings";
 import { IcpPanel, SitesPanel } from "./SitesPanel";
 import { SETTINGS_GROUPS, settingsTab, type SettingsTab } from "@/lib/settingsTabs";
-import { DomainsPanel, TeamPanel } from "./TeamSettings";
+import { TeamPanel } from "./TeamSettings";
 import { FieldsSettings, ObjectsSettings } from "./FieldsSettings";
 import { ImportsSettings } from "./ImportsSettings";
 import { SourcesSettings, SyncLog } from "./SourcesSettings";
@@ -160,11 +162,12 @@ export function SettingsView({ sb, session, ws, role, navigate, id }: ViewProps)
     sources: <SourcesSettings sb={sb} session={session} ws={ws} role={role} />,
     imports: <ImportsSettings sb={sb} ws={ws} />,
     sync_log: <SyncLog sb={sb} ws={ws} navigate={navigate} />,
+    sending: <SendingSettings sb={sb} session={session} ws={ws} role={role} />,
     sites: <SitesPanel sb={sb} ws={ws} role={role} />,
     identity: <IdentityPanel sb={sb} session={session} ws={ws} role={role} />,
     icp: <IcpPanel sb={sb} ws={ws} />,
+    lead_scoring: <LeadScoringPanel sb={sb} session={session} ws={ws} role={role} />,
     account_alerts: <AccountAlertsPanel sb={sb} session={session} ws={ws} />,
-    domains: <DomainsPanel sb={sb} ws={ws} role={role} />,
     team: <TeamPanel sb={sb} ws={ws} role={role} session={session} />,
     workspace: (
         <Panel>

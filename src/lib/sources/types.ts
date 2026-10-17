@@ -53,7 +53,14 @@ export type Settings = {
   basis?: "opt_in" | "soft_opt_in" | "legitimate_interest" | "none";
   push_new?: "all" | "lifecycle" | "none";
   follow_deletes?: boolean;
+  /** Two-way CRMs: write email and form activity to the CRM (on unless false). */
+  activity?: boolean;
 };
+
+/** A contact event a CRM hears about (supabase/migrations/040_sync.sql activity_candidates). */
+export type ActivityItem = { id: string; kind: string; at: string; contact_id: string; external_id: string; data: Record<string, unknown>; subject: string | null };
+/** sent: the CRM has it. failed: the CRM said no. unknown: no clear answer, so it isn't sent again. */
+export type ActivityResult = { id: string; status: "sent" | "failed" | "unknown"; external_id?: string; error?: string };
 
 export type Ctx = {
   source: SourceRow;
@@ -74,7 +81,7 @@ export type Ctx = {
 export type HookRequest = { headers: Headers; body: string; url: string; method: string };
 
 export type CompanyTarget = "skip" | "name" | "domain" | "industry" | "size" | "country" | `f.${string}`;
-export type ContactMap = Record<string, Target>;
+export type ContactMap = Record<string, Target | "score" | "score_band" | "owner_crm">;
 
 export type Connector = {
   kind: string;
@@ -99,6 +106,10 @@ export type Connector = {
   /** For one webhook URL shared by every account (HubSpot): which account it's for. */
   hookAccount?(body: unknown): string | null;
   push?(ctx: Ctx, changes: PushChange[]): Promise<PushResult[]>;
+  /** Write email and form activity to the CRM, one result per item. */
+  activity?(ctx: Ctx, items: ActivityItem[]): Promise<ActivityResult[]>;
+  /** The CRM's users who can own a contact, for routing rules. */
+  owners?(ctx: Ctx): Promise<{ id: string; label: string }[]>;
   /** The tool's columns a push can set, when it takes fewer than it sends us. */
   writable?: string[];
   /** Done once after connect: custom properties, webhook subscriptions. */

@@ -40,6 +40,7 @@ const MOVED: Record<string, { route: Route; id?: string; keepId?: boolean }> = {
   accounts: { route: "companies", id: "account", keepId: true },
   visitors: { route: "companies", id: "visits" },
   journeys: { route: "workflows" },
+  nurture: { route: "workflows", keepId: true },
   reports: { route: "analytics" },
 };
 
