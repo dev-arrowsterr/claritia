@@ -23,7 +23,7 @@ export function defaultSettings(kind: string): Settings {
   const e = entryOf(kind);
   const objects: Settings["objects"] = {};
   for (const o of e?.objects ?? []) objects[o] = o === "contacts" && e?.twoWay ? "both" : "in";
-  return { objects, every_min: e?.group === "crm" ? 15 : 60, push_new: "lifecycle", basis: e?.group === "form" || e?.group === "event" ? "opt_in" : kind === "stripe" ? "soft_opt_in" : "legitimate_interest" };
+  return { objects, every_min: e?.group === "crm" ? 5 : 60, push_new: "lifecycle", basis: e?.group === "form" || e?.group === "event" ? "opt_in" : kind === "stripe" ? "soft_opt_in" : "legitimate_interest" };
 }
 
 const fakeRow = (ws: string, kind: string): SourceRow => ({ id: "", workspace_id: ws, kind, name: kind, account: null, status: "active", settings: {}, cursors: {}, push_cursor: null });
