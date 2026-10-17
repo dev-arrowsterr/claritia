@@ -1,40 +1,59 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { allowedRoute, defaultRoute, navFor, showsProjectPicker } from "../src/lib/nav.ts";
+import { NAV, resolveRoute } from "../src/lib/nav.ts";
 
-const routes = (f: string[]) => navFor(f).map((n) => n.route);
-
-test("a testing-only workspace sees the app exactly as before", () => {
-  assert.deepEqual(routes(["testing"]), ["tests", "blocks", "map", "runs", "environments", "schedules", "approvals", "insights", "settings"]);
-  assert.equal(defaultRoute(["testing"]), "tests");
-  assert.equal(allowedRoute(["testing"], "visitors"), "tests");
-  assert.ok(showsProjectPicker(["testing"], "tests"));
+test("the sidebar is CRM, Email, Site, Ads and Settings, in that order", () => {
+  const groups: [string, string[]][] = [];
+  for (const n of NAV) {
+    if (n.group !== undefined) groups.push([n.group, []]);
+    groups[groups.length - 1][1].push(n.route);
+  }
+  assert.deepEqual(groups, [
+    ["CRM", ["contacts", "companies", "opportunities"]],
+    ["Email", ["segments", "templates", "workflows", "analytics"]],
+    ["Site", ["forms", "pages"]],
+    ["", ["ads"]],
+    ["", ["settings"]],
+  ]);
 });
 
-test("a marketing-only workspace sees no testing screens and no project picker", () => {
-  assert.deepEqual(routes(["marketing"]), ["contacts", "leads", "companies", "segments", "accounts", "visitors", "journeys", "pages", "reports", "settings"]);
-  assert.equal(defaultRoute(["marketing"]), "visitors");
-  assert.equal(allowedRoute(["marketing"], "runs"), "visitors");
-  assert.ok(!showsProjectPicker(["marketing"], "settings"));
+test("old addresses open their new home", () => {
+  assert.deepEqual(resolveRoute("leads", ""), { route: "contacts", id: "" });
+  assert.deepEqual(resolveRoute("leads", "abc"), {
+    route: "contacts",
+    id: "abc",
+  });
+  assert.deepEqual(resolveRoute("accounts", ""), {
+    route: "companies",
+    id: "",
+  });
+  assert.deepEqual(resolveRoute("accounts", "abc"), {
+    route: "companies",
+    id: "account/abc",
+  });
+  assert.deepEqual(resolveRoute("visitors", ""), {
+    route: "companies",
+    id: "visits",
+  });
+  assert.deepEqual(resolveRoute("journeys", ""), {
+    route: "workflows",
+    id: "",
+  });
+  assert.deepEqual(resolveRoute("reports", ""), { route: "analytics", id: "" });
 });
 
-test("with both, testing sits under one Testing group after the marketing screens", () => {
-  const nav = navFor(["testing", "marketing"]);
-  assert.deepEqual(nav.map((n) => n.route).slice(0, 10), ["contacts", "leads", "companies", "segments", "accounts", "visitors", "journeys", "pages", "reports", "tests"]);
-  assert.equal(nav.find((n) => n.route === "tests")!.group, "Testing");
-  assert.equal(nav.find((n) => n.route === "runs")!.group, undefined);
-  assert.equal(allowedRoute(["testing", "marketing"], "runs"), "runs");
-  assert.ok(showsProjectPicker(["testing", "marketing"], "runs"));
-  assert.ok(!showsProjectPicker(["testing", "marketing"], "visitors"));
+test("the testing screens and unknown addresses open Contacts", () => {
+  for (const old of ["tests", "blocks", "map", "runs", "environments", "schedules", "approvals", "insights", "nope", ""])
+    assert.deepEqual(resolveRoute(old, "x"), { route: "contacts", id: "" });
 });
 
-test("no features falls back to the testing product", () => {
-  assert.equal(defaultRoute([]), "tests");
-  assert.ok(routes([]).includes("tests"));
-});
-
-test("the person page opens from marketing screens only", () => {
-  assert.equal(allowedRoute(["marketing"], "people"), "people");
-  assert.equal(allowedRoute(["testing"], "people"), "tests");
-  assert.ok(!routes(["marketing"]).includes("people"), "it isn't in the sidebar");
+test("current addresses keep their record", () => {
+  assert.deepEqual(resolveRoute("opportunities", "abc"), {
+    route: "opportunities",
+    id: "abc",
+  });
+  assert.deepEqual(resolveRoute("objects", "deal/abc"), {
+    route: "objects",
+    id: "deal/abc",
+  });
 });

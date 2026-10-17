@@ -16,10 +16,8 @@ export type ViewProps = {
   session: Session;
   ws: Workspace;
   role: Role;
-  project: Project | null;
-  projectsChanged: (select?: string) => void;
   navigate: (r: Route, id?: string) => void;
-  /** The record in the address, like a test's id in /tests/<id>. */
+  /** The record in the address, like a contact's id in /contacts/<id>. */
   id: string;
 };
 

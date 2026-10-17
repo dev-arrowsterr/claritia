@@ -5,6 +5,7 @@
 // then the pull runs every few minutes.
 
 import { readCursor } from "./ctx.ts";
+import { dealRecord, day, num } from "./opportunities.ts";
 import type { Connector, Ctx, Page, PushChange, PushResult, RawRecord } from "./types.ts";
 
 const V = "v61.0";
@@ -61,6 +62,35 @@ async function pullAccounts(ctx: Ctx, cursor: string | null): Promise<Page> {
   const d = await query(ctx, `SELECT ${ACCOUNT} FROM Account WHERE SystemModstamp >= ${soqlTime(c.since)} ORDER BY SystemModstamp ASC`, c.next);
   const records = d.records.map((r) => ({ id: r.Id, updatedAt: r.SystemModstamp, deleted: !!r.IsDeleted, data: { Name: r.Name, Website: r.Website, Industry: r.Industry, NumberOfEmployees: r.NumberOfEmployees, BillingCountry: r.BillingCountry } }));
   const max = records.reduce((m, r) => (r.updatedAt > m ? r.updatedAt : m), c.max);
+  if (!d.done && d.nextRecordsUrl) return { records, cursor: JSON.stringify({ ...c, next: d.nextRecordsUrl, max }), more: true };
+  const since = max ? new Date(Math.max(Date.parse(c.since), Date.parse(max) - OVERLAP_MS)).toISOString() : c.since;
+  return { records, cursor: JSON.stringify({ since, next: null, max: "" }), more: false };
+}
+
+// Opportunities with their account and contact roles, deleted ones included.
+const OPPORTUNITY = "Id, Name, Amount, StageName, CloseDate, Probability, IsClosed, IsWon, NextStep, Owner.Name, AccountId, IsDeleted, SystemModstamp, (SELECT ContactId FROM OpportunityContactRoles)";
+
+async function pullOpportunities(ctx: Ctx, cursor: string | null): Promise<Page> {
+  const c = readCursor<{ since: string; next: string | null; max: string }>(cursor, { since: "1970-01-01T00:00:00.000Z", next: null, max: "" });
+  const d = await query(ctx, `SELECT ${OPPORTUNITY} FROM Opportunity WHERE SystemModstamp >= ${soqlTime(c.since)} ORDER BY SystemModstamp ASC`, c.next);
+  const records = d.records.map((r) => {
+    const roles = ((r.OpportunityContactRoles as { records?: { ContactId: string }[] } | null)?.records ?? []).map((x) => x.ContactId).filter(Boolean);
+    return dealRecord(r.Id, r.SystemModstamp, !!r.IsDeleted, {
+      name: (r.Name as string) ?? null,
+      amount: num(r.Amount),
+      stage: (r.StageName as string) ?? null,
+      stageKind: r.IsClosed ? (r.IsWon ? "won" : "lost") : "open",
+      closeDate: day(r.CloseDate),
+      probability: num(r.Probability),
+      owner: (r.Owner as { Name?: string } | null)?.Name ?? null,
+      pipeline: null,
+      nextStep: (r.NextStep as string) ?? null,
+      url: `${ctx.secret("instance_url")}/lightning/r/Opportunity/${r.Id}/view`,
+      company: (r.AccountId as string) ?? null,
+      contacts: roles,
+    });
+  });
+  const max = records.reduce((m, r) => ((r.updatedAt ?? "") > m ? (r.updatedAt as string) : m), c.max);
   if (!d.done && d.nextRecordsUrl) return { records, cursor: JSON.stringify({ ...c, next: d.nextRecordsUrl, max }), more: true };
   const since = max ? new Date(Math.max(Date.parse(c.since), Date.parse(max) - OVERLAP_MS)).toISOString() : c.since;
   return { records, cursor: JSON.stringify({ since, next: null, max: "" }), more: false };
@@ -128,7 +158,7 @@ async function pushAll(ctx: Ctx, changes: PushChange[]): Promise<PushResult[]> {
 
 export const salesforce: Connector = {
   kind: "salesforce",
-  objects: ["companies", "contacts"],
+  objects: ["companies", "contacts", "opportunities"],
   twoWay: true,
   gapMs: 200,
   async account(ctx) {
@@ -136,7 +166,7 @@ export const salesforce: Connector = {
     const org = d.records[0] ?? ({} as Row);
     return { id: String(org.Id ?? ""), label: String(org.Name ?? "Salesforce") };
   },
-  pull: (ctx, object, cursor) => (object === "companies" ? pullAccounts(ctx, cursor) : pullPeople(ctx, cursor)),
+  pull: (ctx, object, cursor) => (object === "companies" ? pullAccounts(ctx, cursor) : object === "opportunities" ? pullOpportunities(ctx, cursor) : pullPeople(ctx, cursor)),
   push: pushAll,
   consent(r) {
     if (r.data.EmailBouncedReason) return "bounced";

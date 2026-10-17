@@ -4,7 +4,7 @@ The agentic marketing platform: Claritia turns website visitors into leads and l
 
 Setup for imports, sources and warehouses: `docs/sources-setup.md`. Start with `docs/marketing-platform.md` (the plan), `docs/m1-website-intelligence.md` (the module being built), `docs/identity.md` and `docs/account-intelligence.md` (specs), and `docs/brand.md` (look and copy). `docs/vision.md` and `docs/plan.md` describe the testing product.
 
-Workspaces see screens by `workspaces.features` (`src/lib/nav.ts`): `testing`, `marketing`, or both. Background work goes through the jobs queue (`supabase/migrations/020_foundation.sql`, `src/lib/jobs.ts`).
+The sidebar is in `src/lib/nav.ts`: CRM (Contacts, Companies, Opportunities), Email (Segments, Templates, Workflows, Analytics), Site (Forms, Pages), Ads, Settings. The CRM is in `docs/crm.md`. The testing screens are gone from the app. Background work goes through the jobs queue (`supabase/migrations/020_foundation.sql`, `src/lib/jobs.ts`).
 
 ## Rule: every build includes its running cost
 - Every build plan, feature or milestone states what it adds to the monthly bill: servers plus every paid service, Claude tokens included. Give monthly totals at two stages: Beta (50 teams) and Growth (500 teams).

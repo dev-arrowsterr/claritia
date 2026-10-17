@@ -1,8 +1,8 @@
 "use client";
 
-// Contacts, Leads and the contact page (docs/conversion-parity.md Parts 4 and 17). The lists run on the shared
+// Contacts and the contact page (docs/conversion-parity.md Parts 4 and 17). The lists run on the shared
 // records list (src/components/app/records): views, filters, table or board, columns, inline edits and bulk
-// actions. The add and edit forms live here.
+// actions. Leads are a view on Contacts (contacts with a lead status). The add and edit forms live here.
 
 import { useState } from "react";
 import { BASES, BASIS_LABEL, type Basis } from "@/lib/contacts/consent";
@@ -21,6 +21,7 @@ import { ImportPanel } from "../records/ImportPanel";
 import { RecordsList, type Preset, type ViewState } from "../records/RecordsList";
 import { SidePanel } from "../records/SidePanel";
 import { DEFAULT_WIDTH, type Row } from "../records/RecordTable";
+import { OpportunitiesPanel } from "./RecordsViews";
 import { activeTime } from "./VisitorsView";
 
 const LIFECYCLE_LABEL = Object.fromEntries(LIFECYCLES.map((l) => [l.value, l.label]));
@@ -39,22 +40,12 @@ const CONTACTS_BASE: ViewState = {
   group: "lifecycle",
 };
 const CONTACT_PRESETS: Preset[] = [
+  { name: "Leads", filters: [{ field: "lead_status", op: "not_empty", values: [] }], layout: "board", group: "lead_status" },
+  { name: "Open leads", filters: [{ field: "lead_status", op: "is", values: ["new", "attempting", "connected"] }], layout: "table" },
   { name: "Customers", filters: [{ field: "lifecycle", op: "is", values: ["customer"] }] },
   { name: "Seen on site", filters: [{ field: "known", op: "is", values: ["true"] }] },
   { name: "New this week", filters: [{ field: "created_at", op: "within", values: ["7"] }] },
   { name: "By lifecycle", layout: "board", group: "lifecycle" },
-];
-const LEADS_BASE: ViewState = {
-  filters: [{ field: "lead_status", op: "not_empty", values: [] }],
-  columns: cols("lead_status", "company", "title", "owner", "score", "fit", "updated_at"),
-  sort: { key: "updated_at", desc: true },
-  layout: "board",
-  group: "lead_status",
-};
-const LEAD_PRESETS: Preset[] = [
-  { name: "Open", filters: [{ field: "lead_status", op: "is", values: ["new", "attempting", "connected"] }], layout: "table" },
-  { name: "No owner", filters: [{ field: "lead_status", op: "not_empty", values: [] }, { field: "owner", op: "empty", values: [] }], layout: "table" },
-  { name: "Fit 70+", filters: [{ field: "lead_status", op: "not_empty", values: [] }, { field: "fit", op: "gte", values: ["70"] }], layout: "table" },
 ];
 
 export function ContactsView(props: ViewProps) {
@@ -62,16 +53,10 @@ export function ContactsView(props: ViewProps) {
   return <ContactsList {...props} />;
 }
 
-export function LeadsView(props: ViewProps) {
-  if (props.id) return <ContactPage {...props} back="leads" />;
-  return <ContactsList {...props} leads />;
-}
-
-function ContactsList({ sb, ws, session, navigate, leads = false }: ViewProps & { leads?: boolean }) {
+function ContactsList({ sb, ws, session, navigate }: ViewProps) {
   const [panel, setPanel] = useState<"import" | "add" | null>(null);
   const [tick, setTick] = useState(0);
   const custom = useMeta(sb, ws.id, "contact");
-  const route = leads ? "leads" : "contacts";
   const actions = (
     <>
       <Button variant="ghost" onClick={() => setPanel("import")}>
@@ -92,15 +77,15 @@ function ContactsList({ sb, ws, session, navigate, leads = false }: ViewProps & 
         session={session}
         ws={ws}
         object="contact"
-        screen={route}
-        title={leads ? "Leads" : "Contacts"}
+        screen="contacts"
+        title="Contacts"
         icon={<Contact size={14} />}
-        base={leads ? LEADS_BASE : CONTACTS_BASE}
-        presets={leads ? LEAD_PRESETS : CONTACT_PRESETS}
+        base={CONTACTS_BASE}
+        presets={CONTACT_PRESETS}
         actions={actions}
-        onOpen={(r) => navigate(route, r.id)}
+        onOpen={(r) => navigate("contacts", r.id)}
         nameExtra={(r) => (r.person_id ? <Badge tone="brand">On site</Badge> : null)}
-        intro={leads ? undefined : <ContactsIntro action={actions} />}
+        intro={<ContactsIntro action={actions} />}
         bulkExtra={(ids, done, meta) => <ContactBulk sb={sb} wsId={ws.id} ids={ids} done={done} meta={meta} />}
       />
       {panel === "import" ? (
@@ -123,7 +108,7 @@ function ContactsList({ sb, ws, session, navigate, leads = false }: ViewProps & 
           custom={custom.data?.custom ?? []}
           onClose={(id) => {
             setPanel(null);
-            if (id) navigate(route, id);
+            if (id) navigate("contacts", id);
           }}
         />
       ) : null}
@@ -365,15 +350,15 @@ type Detail = {
 
 const EVENT_LABEL: Record<string, string> = { "contact.created": "Added" };
 
-function ContactPage({ sb, ws, session, id, navigate, back: backRoute = "contacts" }: ViewProps & { back?: "contacts" | "leads" }) {
+function ContactPage({ sb, ws, session, id, navigate }: ViewProps) {
   const detail = useLoad(async () => must(await sb.rpc("contact_detail", { p_id: id })) as Detail, id);
   const meta = useMeta(sb, ws.id, "contact");
   const [editing, setEditing] = useState(false);
   const [error, setError] = useState("");
-  const back = { label: backRoute === "leads" ? "Leads" : "Contacts", onClick: () => navigate(backRoute) };
+  const back = { label: "Contacts", onClick: () => navigate("contacts") };
 
   if (detail.data?.moved_to) {
-    navigate(backRoute, detail.data.moved_to);
+    navigate("contacts", detail.data.moved_to);
     return null;
   }
   if (detail.error || meta.error || !detail.data || !meta.data) {
@@ -395,7 +380,7 @@ function ContactPage({ sb, ws, session, id, navigate, back: backRoute = "contact
     if (!(await askConfirm(`Remove ${name}?`, { ok: "Remove", danger: true }))) return;
     try {
       must(await sb.rpc("contacts_delete", { p_ws: ws.id, p_ids: [id] }));
-      navigate(backRoute);
+      navigate("contacts");
     } catch (e) {
       setError(errorText(e));
     }
@@ -524,17 +509,14 @@ function ContactPage({ sb, ws, session, id, navigate, back: backRoute = "contact
               onCustomize={() => navigate("settings", "fields")}
             />
 
+            <OpportunitiesPanel sb={sb} ws={ws} object="contact" id={id} navigate={navigate} />
+
             {d.company ? (
               <Panel>
                 <CardHead label="Company">
                   <Button variant="plain" className="h-7 px-2" onClick={() => navigate("companies", d.company!.id)}>
                     Open
                   </Button>
-                  {d.company.account_id ? (
-                    <Button variant="plain" className="h-7 px-2" onClick={() => navigate("accounts", d.company!.account_id!)}>
-                      Intent
-                    </Button>
-                  ) : null}
                 </CardHead>
                 <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 px-4 py-3 text-[13px]">
                   {[

@@ -1,14 +1,24 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { settingsGroups } from "../src/lib/settingsTabs.ts";
+import { SETTINGS_GROUPS, settingsTab } from "../src/lib/settingsTabs.ts";
 
-const ids = (f: string[], p = true) => settingsGroups(f, p).flatMap((g) => g.tabs.map((t) => t.id));
-
-test("marketing workspaces see website and scoring pages and no testing pages", () => {
-  assert.deepEqual(ids(["marketing"]), ["fields", "objects", "sources", "imports", "sync_log", "sites", "identity", "icp", "account_alerts", "workspace", "keys", "profile"]);
+test("settings lead with the CRM connection, sending domains and the team", () => {
+  assert.deepEqual(
+    SETTINGS_GROUPS.slice(0, 3).map((g) => [g.label, g.tabs[0].id]),
+    [
+      ["CRM", "sources"],
+      ["Email", "domains"],
+      ["Team", "team"],
+    ],
+  );
+  const ids = SETTINGS_GROUPS.flatMap((g) => g.tabs.map((t) => t.id));
+  assert.equal(new Set(ids).size, ids.length, "each page once");
+  for (const gone of ["project", "github", "test_alerts", "plan"]) assert.ok(!(ids as string[]).includes(gone), `${gone} is gone`);
 });
 
-test("testing workspaces see the testing pages and plan", () => {
-  assert.deepEqual(ids(["testing"]), ["project", "github", "test_alerts", "workspace", "keys", "plan", "profile"]);
-  assert.ok(!ids(["testing"], false).includes("project"), "no project, no project pages");
+test("old and unknown settings addresses land on a real page", () => {
+  assert.equal(settingsTab("team"), "team");
+  assert.equal(settingsTab("suite"), "sources");
+  assert.equal(settingsTab("github"), "sources");
+  assert.equal(settingsTab(""), "sources");
 });

@@ -4,6 +4,7 @@
 
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { readCursor } from "./ctx.ts";
+import { dealRecord, day, num, type StageKind } from "./opportunities.ts";
 import type { Connector, Ctx, HookEvent, HookRequest, Page, PushChange, PushResult, RawRecord } from "./types.ts";
 
 const BASE = "https://api.hubapi.com";
@@ -43,9 +44,96 @@ async function search(ctx: Ctx, object: "contacts" | "companies", cursor: string
   return { records, cursor: JSON.stringify({ since, after: null, max }), more: !!after };
 }
 
+// Deals: the same search on hs_lastmodifieddate, stage names from the pipelines, companies and contacts from the
+// v4 associations. Deals need the optional crm.objects.deals.read scope; without it the step is skipped.
+const DEAL_PROPS = ["dealname", "amount", "dealstage", "closedate", "pipeline", "hs_deal_stage_probability", "hs_next_step", "hubspot_owner_id", "hs_lastmodifieddate"];
+type Stages = Map<string, { label: string; pipeline: string; kind: StageKind; probability: number | null }>;
+
+async function dealStages(ctx: Ctx): Promise<Stages> {
+  const d = await ctx.api<{ results: { id: string; label: string; stages: { id: string; label: string; metadata?: { isClosed?: string; probability?: string } }[] }[] }>(`${BASE}/crm/v3/pipelines/deals`);
+  const out: Stages = new Map();
+  for (const p of d.results ?? [])
+    for (const s of p.stages ?? []) {
+      const prob = num(s.metadata?.probability);
+      const closed = s.metadata?.isClosed === "true";
+      out.set(s.id, { label: s.label, pipeline: p.label, kind: closed ? (prob != null && prob >= 1 ? "won" : "lost") : "open", probability: prob == null ? null : prob * 100 });
+    }
+  return out;
+}
+
+async function associations(ctx: Ctx, to: "companies" | "contacts", ids: string[]) {
+  const out = new Map<string, string[]>(ids.map((id) => [id, []]));
+  if (!ids.length) return out;
+  const d = await ctx.api<{ results: { from: { id: string }; to: { toObjectId: number | string }[] }[] }>(`${BASE}/crm/v4/associations/deals/${to}/batch/read`, {
+    method: "POST",
+    body: JSON.stringify({ inputs: ids.map((id) => ({ id })) }),
+  });
+  for (const r of d.results ?? []) out.set(String(r.from.id), (r.to ?? []).map((t) => String(t.toObjectId)));
+  return out;
+}
+
+type DealCur = Cur & { phase?: "search" | "archived"; archivedAfter?: string | null };
+
+async function pullDeals(ctx: Ctx, cursor: string | null): Promise<Page> {
+  const c = readCursor<DealCur>(cursor, { since: 0, after: null, max: 0, phase: "search", archivedAfter: null });
+  // Search never returns deleted deals, so each run ends with a read of the archived list.
+  if (c.phase === "archived") {
+    const d = await ctx.api<{ results: Obj[]; paging?: { next?: { after?: string } } }>(
+      `${BASE}/crm/v3/objects/deals?archived=true&limit=100&properties=hs_lastmodifieddate${c.archivedAfter ? `&after=${encodeURIComponent(c.archivedAfter)}` : ""}`,
+    );
+    const records = (d.results ?? []).map((o) => ({ id: String(o.id), updatedAt: o.updatedAt ?? null, deleted: true, data: {} }));
+    const next = d.paging?.next?.after ?? null;
+    return next
+      ? { records, cursor: JSON.stringify({ ...c, archivedAfter: next }), more: true }
+      : { records, cursor: JSON.stringify({ ...c, phase: "search", archivedAfter: null }), more: false };
+  }
+  const prop = "hs_lastmodifieddate";
+  const body = {
+    filterGroups: c.since ? [{ filters: [{ propertyName: prop, operator: "GTE", value: String(c.since) }] }] : [],
+    sorts: [{ propertyName: prop, direction: "ASCENDING" }],
+    properties: DEAL_PROPS,
+    limit: 100,
+    ...(c.after ? { after: c.after } : {}),
+  };
+  const d = await ctx.api<SearchOut>(`${BASE}/crm/v3/objects/deals/search`, { method: "POST", body: JSON.stringify(body) });
+  const found = d.results ?? [];
+  const stages = found.length ? await dealStages(ctx) : (new Map() as Stages);
+  const ids = found.map((o) => String(o.id));
+  const [companies, contacts] = await Promise.all([associations(ctx, "companies", ids), associations(ctx, "contacts", ids)]);
+  const portal = ctx.source.account;
+  const records = found.map((o) => {
+    const p = o.properties;
+    const st = stages.get(String(p.dealstage ?? ""));
+    const id = String(o.id);
+    const prob = num(p.hs_deal_stage_probability);
+    return dealRecord(id, o.updatedAt ?? p.hs_lastmodifieddate ?? null, !!o.archived, {
+      name: p.dealname ?? null,
+      amount: num(p.amount),
+      stage: st?.label ?? p.dealstage ?? null,
+      stageKind: st?.kind ?? "open",
+      closeDate: day(p.closedate),
+      probability: prob != null ? prob * 100 : (st?.probability ?? null),
+      owner: null,
+      pipeline: st?.pipeline ?? null,
+      nextStep: p.hs_next_step ?? null,
+      url: portal ? `https://app.hubspot.com/contacts/${portal}/record/0-3/${id}` : null,
+      company: companies.get(id)?.[0] ?? null,
+      contacts: contacts.get(id) ?? [],
+    });
+  });
+  let max = c.max;
+  for (const r of records) max = Math.max(max, Date.parse(r.updatedAt ?? "") || 0);
+  const after = d.paging?.next?.after ?? null;
+  if (after && Number(after) < CAP) return { records, cursor: JSON.stringify({ ...c, after, max }), more: true };
+  const since = Math.max(c.since, max - OVERLAP_MS);
+  // Near the cap: a new window from the newest change. Caught up: on to the archived list.
+  if (after) return { records, cursor: JSON.stringify({ ...c, since, after: null, max }), more: true };
+  return { records, cursor: JSON.stringify({ since, after: null, max, phase: "archived", archivedAfter: null }), more: true };
+}
+
 export const hubspot: Connector = {
   kind: "hubspot",
-  objects: ["companies", "contacts", "lists"],
+  objects: ["companies", "contacts", "opportunities", "lists"],
   twoWay: true,
   // 110 calls per 10 seconds per account; search 5 a second. Half of that.
   gapMs: 400,
@@ -53,7 +141,7 @@ export const hubspot: Connector = {
     const d = await ctx.api<{ portalId?: number; uiDomain?: string }>(`${BASE}/account-info/v3/details`);
     return { id: String(d.portalId ?? ""), label: d.uiDomain ? `${d.uiDomain} · ${d.portalId}` : `Portal ${d.portalId}` };
   },
-  pull: (ctx, object, cursor) => search(ctx, object === "companies" ? "companies" : "contacts", cursor),
+  pull: (ctx, object, cursor) => (object === "opportunities" ? pullDeals(ctx, cursor) : search(ctx, object === "companies" ? "companies" : "contacts", cursor)),
   async lists(ctx, cursor) {
     // Static lists come over as static segments; active lists are rebuilt as segments by the migration agent.
     const c = readCursor<{ offset: number }>(cursor, { offset: 0 });

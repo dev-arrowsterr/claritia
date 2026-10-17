@@ -15,7 +15,7 @@ export const OBJECT_LABELS: Record<string, ObjectDef> = {
 
 export async function loadMeta(sb: SupabaseClient, wsId: string, object: string): Promise<Meta> {
   const [custom, settings, people, lists, obj, layout] = await Promise.all([
-    sb.from("fields").select("key, label, type, options, config, required, group_name, position").eq("workspace_id", wsId).eq("object", object).order("position"),
+    sb.from("fields").select("key, label, type, options, config, required, group_name, position, system").eq("workspace_id", wsId).eq("object", object).order("position"),
     sb.from("field_settings").select("key, label, hidden, options").eq("workspace_id", wsId).eq("object", object),
     sb.rpc("workspace_people", { p_ws: wsId }),
     object === "contact" ? sb.from("segments").select("id, name").eq("workspace_id", wsId).order("name") : Promise.resolve({ data: [], error: null }),

@@ -40,7 +40,7 @@ const EVERY = [
   { value: 1440, label: "Every day" },
 ];
 const SEL = "h-9 w-full rounded-md border border-line bg-panel px-2.5 text-[13px] hover:border-line-strong";
-const OBJECT_LABEL: Record<string, string> = { contacts: "Contacts", companies: "Companies", lists: "Lists", suppressions: "Unsubscribes", events: "Activity", records: "Records" };
+const OBJECT_LABEL: Record<string, string> = { contacts: "Contacts", companies: "Companies", opportunities: "Opportunities", opportunity: "Opportunities", lists: "Lists", suppressions: "Unsubscribes", events: "Activity", records: "Records" };
 
 async function getJson<T>(session: ViewProps["session"], path: string): Promise<T> {
   const res = await fetch(path, { headers: { Authorization: `Bearer ${session.access_token}` } });

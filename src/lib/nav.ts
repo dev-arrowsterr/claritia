@@ -1,76 +1,58 @@
-// Which screens a workspace sees, from its features (workspaces.features, supabase/migrations/020_foundation.sql).
-// 'testing' is the testing product; 'marketing' is the marketing platform (docs/marketing-platform.md).
-// A workspace with only testing sees the app exactly as before.
+// The sidebar (docs/marketing-platform.md): CRM, Email, Site, Ads and Settings. The testing screens are gone; their
+// old addresses land on Contacts.
 
 export type Route =
   | "contacts"
-  | "leads"
   | "companies"
-  | "segments"
+  | "opportunities"
   | "objects"
-  | "visitors"
-  | "accounts"
-  | "people"
-  | "journeys"
+  | "segments"
+  | "templates"
+  | "workflows"
+  | "analytics"
+  | "forms"
   | "pages"
-  | "reports"
-  | "tests"
-  | "blocks"
-  | "map"
-  | "runs"
-  | "environments"
-  | "schedules"
-  | "approvals"
-  | "insights"
+  | "ads"
   | "settings";
 
 export type NavItem = { route: Route; label: string; group?: string };
 
-const MARKETING: NavItem[] = [
-  { route: "contacts", label: "Contacts", group: "Audience" },
-  { route: "leads", label: "Leads" },
+export const NAV: NavItem[] = [
+  { route: "contacts", label: "Contacts", group: "CRM" },
   { route: "companies", label: "Companies" },
-  { route: "segments", label: "Segments" },
-  { route: "accounts", label: "Accounts" },
-  { route: "visitors", label: "Visitors" },
-  { route: "journeys", label: "Journeys", group: "Engage" },
+  { route: "opportunities", label: "Opportunities" },
+  { route: "segments", label: "Segments", group: "Email" },
+  { route: "templates", label: "Templates" },
+  { route: "workflows", label: "Workflows" },
+  { route: "analytics", label: "Analytics" },
+  { route: "forms", label: "Forms", group: "Site" },
   { route: "pages", label: "Pages" },
-  { route: "reports", label: "Reports", group: "Prove" },
+  { route: "ads", label: "Ads", group: "" },
+  { route: "settings", label: "Settings", group: "" },
 ];
 
-// The testing product's own groups, as before.
-const TESTING: NavItem[] = [
-  { route: "tests", label: "Tests", group: "Authoring" },
-  { route: "blocks", label: "Blocks" },
-  { route: "map", label: "Map" },
-  { route: "runs", label: "Runs", group: "Execution" },
-  { route: "environments", label: "Environments" },
-  { route: "schedules", label: "Schedules", group: "Management" },
-  { route: "approvals", label: "Approvals" },
-  { route: "insights", label: "Insights", group: "Analytics" },
-];
+const ROUTES = new Set<string>([...NAV.map((n) => n.route), "objects"]);
 
-// Screens reached from other screens, never from the sidebar.
-const LINKED: Partial<Record<Route, string>> = { people: "marketing", objects: "marketing" };
+/** Old addresses and where they open now: the route, and the record or page inside it. */
+const MOVED: Record<string, { route: Route; id?: string; keepId?: boolean }> = {
+  leads: { route: "contacts", keepId: true },
+  people: { route: "contacts" },
+  accounts: { route: "companies", id: "account", keepId: true },
+  visitors: { route: "companies", id: "visits" },
+  journeys: { route: "workflows" },
+  reports: { route: "analytics" },
+};
 
-export const TESTING_ROUTES = new Set<Route>(TESTING.map((n) => n.route));
+export const defaultRoute: Route = "contacts";
 
-const SETTINGS: NavItem = { route: "settings", label: "Settings", group: "" };
-
-export function navFor(features: readonly string[]): NavItem[] {
-  const marketing = features.includes("marketing");
-  const testing = features.includes("testing");
-  if (!marketing) return [...TESTING, SETTINGS];
-  // Both: the testing screens sit together under one Testing group, after the marketing ones.
-  const testingGroup = testing ? TESTING.map((n, i) => ({ route: n.route, label: n.label, ...(i === 0 ? { group: "Testing" } : {}) })) : [];
-  return [...MARKETING, ...testingGroup, SETTINGS];
+/**
+ * The screen for an address's first two parts. Unknown and old testing addresses open Contacts; moved ones open
+ * their new home. An account id opens through /companies/account/<id>, which finds its company.
+ */
+export function resolveRoute(first: string, id: string): { route: Route; id: string } {
+  if (ROUTES.has(first)) return { route: first as Route, id };
+  const m = MOVED[first];
+  if (!m) return { route: defaultRoute, id: "" };
+  if (m.keepId && id) return { route: m.route, id: m.id ? `${m.id}/${id}` : id };
+  return { route: m.route, id: m.id && !m.keepId ? m.id : "" };
 }
-
-export const defaultRoute = (features: readonly string[]): Route => (features.includes("marketing") ? "visitors" : "tests");
-
-/** The route to show: the one asked for if this workspace has it, otherwise its first screen. */
-export const allowedRoute = (features: readonly string[], route: Route): Route =>
-  navFor(features).some((n) => n.route === route) || (LINKED[route] && features.includes(LINKED[route])) ? route : defaultRoute(features);
-
-/** The project picker belongs to the testing product's screens. */
-export const showsProjectPicker = (features: readonly string[], route: Route) => features.includes("testing") && (!features.includes("marketing") || TESTING_ROUTES.has(route) || route === "settings");

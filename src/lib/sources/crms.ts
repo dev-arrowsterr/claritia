@@ -2,6 +2,7 @@
 // limits are from each tool's docs and are rechecked against a real account before launch (marked "check").
 
 import { qs, readCursor } from "./ctx.ts";
+import { dealRecord, day, num, type StageKind } from "./opportunities.ts";
 import type { Connector, Ctx, Page, RawRecord } from "./types.ts";
 
 const first = <T>(xs: T[] | undefined | null) => (Array.isArray(xs) && xs.length ? xs[0] : undefined);
@@ -43,15 +44,74 @@ async function pdPull(ctx: Ctx, object: "contacts" | "companies", cursor: string
   return { records, cursor: JSON.stringify({ start: 0, since, max: "" }), more: false };
 }
 
+// Deals: the same full read then recents feed, stage names from /stages (check).
+type PdDeal = {
+  id: number;
+  title: string;
+  value: number | null;
+  status: "open" | "won" | "lost" | "deleted";
+  stage_id: number;
+  pipeline_id: number;
+  expected_close_date: string | null;
+  probability: number | null;
+  owner_name?: string;
+  org_id: number | { value: number } | null;
+  person_id: number | { value: number } | null;
+  update_time: string;
+  active?: boolean;
+};
+const pdRef = (v: number | { value: number } | null) => (v == null ? null : String(typeof v === "object" ? v.value : v));
+
+async function pdDeals(ctx: Ctx, cursor: string | null): Promise<Page> {
+  const c = readCursor<{ start: number; since: string | null; max: string }>(cursor, { start: 0, since: null, max: "" });
+  const d = c.since
+    ? await pdGet<PdList<{ item: string; data: PdDeal }>>(ctx, "/recents", { since_timestamp: c.since, items: "deal", start: c.start, limit: 500 })
+    : await pdGet<PdList<PdDeal>>(ctx, "/deals", { start: c.start, limit: 500, sort: "update_time ASC", status: "all_not_deleted" });
+  const rows = ((d.data ?? []) as unknown[]).map((x) => (c.since ? (x as { data: PdDeal }).data : (x as PdDeal))).filter(Boolean);
+  const stages = new Map<number, { name: string; pipeline: string }>();
+  if (rows.length) {
+    const [st, pl] = await Promise.all([
+      pdGet<{ data: { id: number; name: string; pipeline_id: number }[] | null }>(ctx, "/stages", {}),
+      pdGet<{ data: { id: number; name: string }[] | null }>(ctx, "/pipelines", {}),
+    ]);
+    const pipes = new Map((pl.data ?? []).map((p) => [p.id, p.name]));
+    for (const x of st.data ?? []) stages.set(x.id, { name: x.name, pipeline: pipes.get(x.pipeline_id) ?? "" });
+  }
+  const domain = ctx.creds.type === "oauth" ? ctx.secret("api_domain") : "";
+  const records = rows.map((r) => {
+    const st = stages.get(r.stage_id);
+    const person = pdRef(r.person_id);
+    return dealRecord(String(r.id), r.update_time, r.status === "deleted" || r.active === false, {
+      name: r.title ?? null,
+      amount: num(r.value),
+      stage: st?.name ?? null,
+      stageKind: r.status === "won" || r.status === "lost" ? r.status : "open",
+      closeDate: day(r.expected_close_date),
+      probability: num(r.probability),
+      owner: r.owner_name ?? null,
+      pipeline: st?.pipeline || null,
+      nextStep: null,
+      url: /^https:\/\//.test(domain) ? `${domain}/deal/${r.id}` : null,
+      company: pdRef(r.org_id),
+      contacts: person ? [person] : [],
+    });
+  });
+  const max = records.reduce((m, r) => ((r.updatedAt ?? "") > m ? (r.updatedAt as string) : m), c.max);
+  const page = d.additional_data?.pagination;
+  if (page?.more_items_in_collection) return { records, cursor: JSON.stringify({ ...c, start: page.next_start, max }), more: true };
+  const since = max ? new Date(Date.parse(`${max.replace(" ", "T")}Z`) - 300_000).toISOString().slice(0, 19).replace("T", " ") : c.since;
+  return { records, cursor: JSON.stringify({ start: 0, since, max: "" }), more: false };
+}
+
 export const pipedrive: Connector = {
   kind: "pipedrive",
-  objects: ["companies", "contacts"],
+  objects: ["companies", "contacts", "opportunities"],
   gapMs: 250,
   async account(ctx) {
     const d = await pdGet<{ data: { company_id: number; company_name: string; company_domain: string } }>(ctx, "/users/me", {});
     return { id: String(d.data.company_id), label: d.data.company_name || d.data.company_domain };
   },
-  pull: (ctx, object, cursor) => pdPull(ctx, object === "companies" ? "companies" : "contacts", cursor),
+  pull: (ctx, object, cursor) => (object === "opportunities" ? pdDeals(ctx, cursor) : pdPull(ctx, object === "companies" ? "companies" : "contacts", cursor)),
   consent(r) {
     const s = String(r.data.marketing_status ?? "");
     return s === "subscribed" ? "opt_in" : s === "unsubscribed" ? "unsubscribed" : s === "no_consent" ? "none" : null;
@@ -96,15 +156,47 @@ async function attioQuery(ctx: Ctx, object: "people" | "companies", cursor: stri
   return { records, cursor: more ? JSON.stringify({ offset: c.offset + 500 }) : null, more };
 }
 
+// Deals: Attio's standard deals object (check). Stages are statuses; won and lost are read from their titles.
+const attioKind = (title: string | null): StageKind => (!title ? "open" : /\bwon\b/i.test(title) ? "won" : /\blost\b/i.test(title) ? "lost" : "open");
+const refs = (r: AttioRecord, key: string) => (r.values?.[key] ?? []).map((v) => v.target_record_id as string | undefined).filter((x): x is string => !!x);
+
+async function attioDeals(ctx: Ctx, cursor: string | null): Promise<Page> {
+  const c = readCursor<{ offset: number }>(cursor, { offset: 0 });
+  const d = await ctx.api<{ data: AttioRecord[] }>("https://api.attio.com/v2/objects/deals/records/query", {
+    method: "POST",
+    body: JSON.stringify({ limit: 500, offset: c.offset, sorts: [{ attribute: "created_at", direction: "asc" }] }),
+  });
+  const records = (d.data ?? []).map((r) => {
+    const status = first(r.values?.stage) as { status?: { title?: string } } | undefined;
+    const title = status?.status?.title ?? null;
+    return dealRecord(r.id.record_id, null, false, {
+      name: av(r, "name", "value"),
+      amount: num(av(r, "value", "currency_value")),
+      stage: title,
+      stageKind: attioKind(title),
+      closeDate: null,
+      probability: null,
+      owner: null,
+      pipeline: null,
+      nextStep: null,
+      url: null,
+      company: refs(r, "associated_company")[0] ?? null,
+      contacts: refs(r, "associated_people"),
+    });
+  });
+  const more = records.length === 500;
+  return { records, cursor: more ? JSON.stringify({ offset: c.offset + 500 }) : null, more };
+}
+
 export const attio: Connector = {
   kind: "attio",
-  objects: ["companies", "contacts"],
+  objects: ["companies", "contacts", "opportunities"],
   gapMs: 250,
   async account(ctx) {
     const d = await ctx.api<{ workspace_id: string; workspace_name: string }>("https://api.attio.com/v2/self");
     return { id: d.workspace_id, label: d.workspace_name };
   },
-  pull: (ctx, object, cursor) => attioQuery(ctx, object === "companies" ? "companies" : "people", cursor),
+  pull: (ctx, object, cursor) => (object === "opportunities" ? attioDeals(ctx, cursor) : attioQuery(ctx, object === "companies" ? "companies" : "people", cursor)),
   defaults: {
     contact: { email: "email", first_name: "first_name", last_name: "last_name", job_title: "title", phone: "phone", country: "country" },
     company: { name: "name", domain: "domain" },

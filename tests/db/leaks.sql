@@ -744,12 +744,22 @@ insert into saved_views (workspace_id, screen, name, filters, created_by) values
 create temp table cat_contact as select id from contacts where email_clean = 'spy@secret-co.com';
 create temp table ben_contact as select id from contacts where email_clean = 'jane@globex.com';
 grant select on cat_contact, ben_contact to authenticated;
+insert into invites (workspace_id, email) values ('22222222-0000-0000-0000-000000000000', 'friend@other.com');
+insert into sending_domains (workspace_id, domain) values ('22222222-0000-0000-0000-000000000000', 'mail.other.com');
 select pg_temp.as_user('b0000000-0000-0000-0000-000000000000');
 set role authenticated;
 select pg_temp.check((select count(*) from contacts) = 1 and (select count(*) from companies) = 1, 'Ben sees another workspace''s contacts or companies');
 select pg_temp.check((select count(*) from consents) = 1 and (select count(*) from field_writes w join contacts c on c.id = w.contact_id) = (select count(*) from field_writes), 'Ben sees another workspace''s consent or field history');
 select pg_temp.check((select count(*) from contact_events) = 1, 'Ben sees another workspace''s contact events');
-select pg_temp.check((select count(*) from topics) = 0 and (select count(*) from fields) = 0 and (select count(*) from saved_views) = 0, 'Ben sees Cat''s topics, fields or views');
+-- Every workspace has the built-in Opportunity fields; Ben sees only his own.
+select pg_temp.check((select count(*) from topics) = 0 and (select count(*) from fields where object <> 'opportunity') = 0 and (select count(*) from saved_views) = 0, 'Ben sees Cat''s topics, fields or views');
+select pg_temp.check((select count(*) from fields where object = 'opportunity') = 10 and (select count(*) from objects) = 1, 'Ben sees Cat''s built-in objects');
+select pg_temp.check((select count(*) from invites) = 0 and (select count(*) from sending_domains) = 0, 'Ben sees Cat''s invites or sending domains');
+select pg_temp.check((select count(*) from team('22222222-0000-0000-0000-000000000000')) = 0, 'Ben reads Cat''s team');
+select pg_temp.fails($$select invite_member('22222222-0000-0000-0000-000000000000', 'mole@evil.com')$$, 'Ben invites himself a friend into Cat''s workspace');
+select pg_temp.fails($$select sending_domain_add('22222222-0000-0000-0000-000000000000', 'evil.com')$$, 'Ben adds a sending domain to Cat''s workspace');
+select pg_temp.fails($$select opportunities_ingest((select id from sources limit 1), '[]')$$, 'Ben calls the opportunity sync');
+select pg_temp.fails($$insert into sending_domains (workspace_id, domain) values ('11111111-0000-0000-0000-000000000000', 'x.com')$$, 'Ben writes sending domains directly');
 select pg_temp.check(pg_temp.visible($$select count(*) from partitions.contact_events_$$ || to_char(now(), 'YYYY_MM')) = 0, 'Ben reads an event month directly');
 select pg_temp.fails($$update contacts set title = 'x'$$, 'Ben edits contacts directly');
 select pg_temp.fails($$insert into contacts (workspace_id, email, email_clean) values ('11111111-0000-0000-0000-000000000000', 'a@b.com', 'a@b.com')$$, 'Ben plants a contact');
@@ -792,7 +802,7 @@ insert into saved_views (workspace_id, screen, name, filters, created_by, owner_
   ('11111111-0000-0000-0000-000000000000', 'contacts', 'Ann only', '[]', 'a0000000-0000-0000-0000-000000000000', 'a0000000-0000-0000-0000-000000000000');
 select pg_temp.as_user('b0000000-0000-0000-0000-000000000000');
 set role authenticated;
-select pg_temp.check((select count(*) from objects) = 0 and (select count(*) from records) = 0 and (select count(*) from field_history where object = 'deal_room') = 0, 'Ben sees Cat''s objects, records or history');
+select pg_temp.check((select count(*) from objects where not system) = 0 and (select count(*) from records) = 0 and (select count(*) from field_history where object = 'deal_room') = 0, 'Ben sees Cat''s objects, records or history');
 select pg_temp.check((select count(*) from suppressions) = 0 and (select count(*) from field_order) = 0, 'Ben sees Cat''s suppressions or field order');
 select pg_temp.check((select count(*) from saved_views where name = 'Ann only') = 0, 'Ben sees Ann''s personal view');
 select pg_temp.check(pg_temp.touched($$update saved_views set name = 'mine' where name = 'Ann only'$$) = 0, 'Ben renames Ann''s personal view');
