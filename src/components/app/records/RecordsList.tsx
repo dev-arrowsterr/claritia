@@ -70,6 +70,7 @@ export function RecordsList({
   nameExtra,
   intro,
   bulkExtra,
+  sum,
 }: Pick<ViewProps, "sb" | "session" | "ws"> & {
   object: string;
   screen: string;
@@ -85,6 +86,8 @@ export function RecordsList({
   /** Shown instead of an empty table when there's nothing at all yet. */
   intro?: React.ReactNode;
   bulkExtra?: (ids: () => Promise<string[]>, done: () => void, meta: Meta) => React.ReactNode;
+  /** A field key to total in each board lane. */
+  sum?: string;
 }) {
   const meta = useMeta(sb, ws.id, object);
   const [view, setView] = useStoredView(`claritia:view:${ws.id}:${screen}`, base);
@@ -439,6 +442,7 @@ export function RecordsList({
           cardFields={cardFields}
           onOpen={onOpen}
           onMove={(r, v) => void save(r, groupField, v)}
+          sum={sum ? fields.find((f) => f.key === sum) : undefined}
         />
       ) : board ? (
         <Empty icon={icon} title="Pick a field to group by" />

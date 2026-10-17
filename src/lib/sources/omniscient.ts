@@ -4,9 +4,11 @@
 
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { readCursor } from "./ctx.ts";
+import { dealRecord, day, num } from "./opportunities.ts";
 import type { Connector, Ctx, Page, PushResult, RawRecord } from "./types.ts";
 
 type Contact = { id: string; email: string | null; name: string | null; title: string | null; phone: string | null; lifecycle: string | null; account_id: string | null; created_at: string };
+type Opportunity = { id: string; name: string | null; account_id: string | null; stage_name: string | null; stage_kind: string; amount: number | null; close_date: string | null; updated_at: string };
 type Account = { id: string; name: string | null; domain: string | null; fields: Record<string, unknown>; created_at: string };
 
 const url = (ctx: Ctx) => {
@@ -27,7 +29,7 @@ async function page<T>(ctx: Ctx, path: string, cursor: string | null) {
 
 export const omniscient: Connector = {
   kind: "omniscient",
-  objects: ["companies", "contacts"],
+  objects: ["companies", "contacts", "opportunities"],
   twoWay: true,
   gapMs: 100,
   // Its contact upsert sets these; the stage moves in Omniscient only.
@@ -40,6 +42,25 @@ export const omniscient: Connector = {
     if (object === "companies") {
       const p = await page<Account>(ctx, "/api/v1/accounts", cursor);
       return { records: p.rows.map((a) => ({ id: a.id, data: { name: a.name, domain: a.domain } })), cursor: p.cursor, more: p.more };
+    }
+    if (object === "opportunities") {
+      const p = await page<Opportunity>(ctx, "/api/v1/opportunities", cursor);
+      const records = p.rows.map((o) =>
+        dealRecord(o.id, o.updated_at, false, {
+          name: o.name,
+          amount: num(o.amount),
+          stage: o.stage_name,
+          stageKind: o.stage_kind === "won" || o.stage_kind === "lost" ? o.stage_kind : "open",
+          closeDate: day(o.close_date),
+          probability: null,
+          owner: null,
+          pipeline: null,
+          nextStep: null,
+          url: null,
+          company: o.account_id,
+        }),
+      );
+      return { records, cursor: p.cursor, more: p.more };
     }
     const p = await page<Contact>(ctx, "/api/v1/contacts", cursor);
     return { records: p.rows.map(rec), cursor: p.cursor, more: p.more };

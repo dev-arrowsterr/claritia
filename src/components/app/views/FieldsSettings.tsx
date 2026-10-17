@@ -23,7 +23,7 @@ const CLASSES: { value: string; label: string }[] = [
 const DEFAULT_ORDER = CLASSES.map((c) => c.value);
 
 function useObjects(sb: ViewProps["sb"], wsId: string) {
-  return useLoad(async () => must(await sb.from("objects").select("key, label, plural, icon").eq("workspace_id", wsId).order("created_at")) as { key: string; label: string; plural: string; icon: string }[], wsId);
+  return useLoad(async () => must(await sb.from("objects").select("key, label, plural, icon, system").eq("workspace_id", wsId).order("created_at")) as { key: string; label: string; plural: string; icon: string; system: boolean }[], wsId);
 }
 
 /** Options as lines: "value" or "Label" per line; stages also take ": won" or ": lost". */
@@ -165,16 +165,18 @@ export function FieldsSettings({ sb, ws, role }: Pick<ViewProps, "sb" | "ws" | "
                     <Button variant="ghost" className="h-7 px-2.5" onClick={() => setEditing(f.key)}>
                       Edit
                     </Button>
-                    <Button
-                      variant="danger"
-                      className="h-7 px-2.5"
-                      onClick={async () => {
-                        if (!(await askConfirm(`Delete "${f.label}"?`, { body: "Its values go from every record.", ok: "Delete", danger: true }))) return;
-                        void run(async () => must(await sb.rpc("field_delete", { p_ws: ws.id, p_object: object, p_key: f.key })));
-                      }}
-                    >
-                      Delete
-                    </Button>
+                    {f.system ? null : (
+                      <Button
+                        variant="danger"
+                        className="h-7 px-2.5"
+                        onClick={async () => {
+                          if (!(await askConfirm(`Delete "${f.label}"?`, { body: "Its values go from every record.", ok: "Delete", danger: true }))) return;
+                          void run(async () => must(await sb.rpc("field_delete", { p_ws: ws.id, p_object: object, p_key: f.key })));
+                        }}
+                      >
+                        Delete
+                      </Button>
+                    )}
                   </span>
                 </li>
               ),
@@ -458,7 +460,7 @@ export function ObjectsSettings({ sb, ws, role, navigate }: Pick<ViewProps, "sb"
                 <span className="font-medium">{o.plural}</span>
                 <span className="font-mono text-[11px] text-faint">{o.key}</span>
                 <span className="ml-auto flex gap-1">
-                  <Button variant="ghost" className="h-7 px-2.5" onClick={() => navigate("objects", o.key)}>
+                  <Button variant="ghost" className="h-7 px-2.5" onClick={() => (o.system ? navigate("opportunities") : navigate("objects", o.key))}>
                     Open
                   </Button>
                   <Button
@@ -472,7 +474,7 @@ export function ObjectsSettings({ sb, ws, role, navigate }: Pick<ViewProps, "sb"
                   >
                     Rename
                   </Button>
-                  {role === "owner" ? (
+                  {role === "owner" && !o.system ? (
                     <Button
                       variant="danger"
                       className="h-7 px-2.5"

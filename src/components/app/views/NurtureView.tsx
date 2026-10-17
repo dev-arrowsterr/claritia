@@ -33,12 +33,12 @@ export function NurtureView({ sb, session, ws, id, navigate }: ViewProps) {
 function NurtureList({ sb, ws, navigate }: Pick<ViewProps, "sb" | "ws" | "navigate">) {
   const list = useLoad(async () => must(await sb.from("nurtures").select("id, name, status, updated_at").eq("workspace_id", ws.id).order("updated_at", { ascending: false })) as Nurture[], ws.id);
   const add = (
-    <Button onClick={() => navigate("nurture", "new")}>
+    <Button onClick={() => navigate("workflows", "new")}>
       <Plus size={14} /> New nurture
     </Button>
   );
   return (
-    <Page icon={<Branch size={16} />} title="Nurture" count={list.data?.length} actions={list.data?.length ? add : undefined}>
+    <Page icon={<Branch size={16} />} title="Workflows" count={list.data?.length} actions={list.data?.length ? add : undefined}>
       <ErrorNote message={list.error} />
       {!list.data ? (
         <Loading />
@@ -58,7 +58,7 @@ function NurtureList({ sb, ws, navigate }: Pick<ViewProps, "sb" | "ws" | "naviga
           <ul className="divide-y divide-line">
             {list.data.map((n) => (
               <li key={n.id}>
-                <button type="button" onClick={() => navigate("nurture", n.id)} className="flex w-full items-center gap-3 px-4 py-3 text-left text-[13px] hover:bg-hover">
+                <button type="button" onClick={() => navigate("workflows", n.id)} className="flex w-full items-center gap-3 px-4 py-3 text-left text-[13px] hover:bg-hover">
                   <span className="font-medium">{n.name}</span>
                   <span className="ml-auto flex items-center gap-3">
                     <span className="text-[12px] text-faint">{timeAgo(n.updated_at)}</span>
@@ -85,8 +85,8 @@ function NurturePage({ sb, session, ws, id, navigate }: Pick<ViewProps, "sb" | "
     ]);
     return { segs: (segs.data ?? []) as { id: string; name: string }[], forms: (forms.data ?? []) as { id: string; name: string }[], topics: (topics.data ?? []) as { id: string; name: string }[] };
   }, `${ws.id}:nurture-opts`);
-  if ((!isNew && n.data === undefined) || !opts.data) return <Page icon={<Branch size={16} />} title="Nurture">{n.error ? <ErrorNote message={n.error} /> : <Loading />}</Page>;
-  if (!isNew && !n.data) return <Page icon={<Branch size={16} />} title="Nurture"><ErrorNote message="Nurture not found." /></Page>;
+  if ((!isNew && n.data === undefined) || !opts.data) return <Page icon={<Branch size={16} />} title="Workflows">{n.error ? <ErrorNote message={n.error} /> : <Loading />}</Page>;
+  if (!isNew && !n.data) return <Page icon={<Branch size={16} />} title="Workflows"><ErrorNote message="Nurture not found." /></Page>;
   return <Editor sb={sb} session={session} ws={ws} navigate={navigate} n={n.data ?? null} opts={opts.data} reload={n.reload} />;
 }
 
@@ -116,7 +116,7 @@ function Editor({ sb, session, ws, navigate, n, opts, reload }: Pick<ViewProps, 
       const [kind, ref] = who.split(":");
       if (!kind) throw new Error("Pick who joins.");
       const nid = must(await sb.rpc("nurture_save", { p_ws: ws.id, p_id: n?.id ?? null, p_name: name, p_trigger: { kind, [`${kind}_id`]: ref }, p_topic: topic || null, p_brief: brief, p_exit: exit })) as string;
-      if (!n) navigate("nurture", nid);
+      if (!n) navigate("workflows", nid);
       else reload();
     });
   const status = (s: Nurture["status"]) => run("status", async () => (must(await sb.rpc("nurture_set_status", { p_id: n!.id, p_status: s })), reload()));
@@ -147,7 +147,7 @@ function Editor({ sb, session, ws, navigate, n, opts, reload }: Pick<ViewProps, 
                 run("delete", async () => {
                   if (!(await askConfirm(`Delete ${n.name}?`, { body: "Everyone in it stops getting its emails.", ok: "Delete", danger: true }))) return;
                   must(await sb.rpc("nurture_delete", { p_id: n.id }));
-                  navigate("nurture");
+                  navigate("workflows");
                 })
               }
             >

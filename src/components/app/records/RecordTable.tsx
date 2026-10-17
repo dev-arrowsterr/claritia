@@ -5,7 +5,7 @@
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { useRef, useState } from "react";
-import { valueOf, type AnyField } from "@/lib/records/fields";
+import { shown, valueOf, type AnyField } from "@/lib/records/fields";
 import { Check } from "../../Icons";
 import { Avatar, Badge } from "../ui";
 import { FieldEditor, FieldValue, type Link } from "./FieldInput";
@@ -250,11 +250,14 @@ export function RecordBoard({
   cardFields,
   onOpen,
   onMove,
+  sum,
 }: {
   group: { key: string; label: string; options: { value: string; label: string; kind?: string }[] };
   rows: Row[];
   counts: Record<string, number>;
   cardFields: AnyField[];
+  /** A currency or number field to total in each lane's header, like a pipeline's amount per stage. */
+  sum?: AnyField;
   onOpen: (r: Row) => void;
   onMove: (r: Row, value: string | null) => void;
 }) {
@@ -267,6 +270,7 @@ export function RecordBoard({
     <div className="flex min-h-full gap-3 overflow-x-auto p-4 md:p-5">
       {lanes.map((lane) => {
         const items = rows.filter((r) => String(valueOf(r, group.key) ?? "") === lane.value);
+        const total = sum ? items.reduce((t, r) => t + (Number(valueOf(r, sum.key)) || 0), 0) : 0;
         return (
           <section
             key={lane.value || "__none"}
@@ -285,7 +289,8 @@ export function RecordBoard({
           >
             <header className="flex h-10 items-center gap-2 border-b border-line px-3">
               <Badge tone={"kind" in lane && lane.kind === "won" ? "green" : "kind" in lane && lane.kind === "lost" ? "red" : "gray"}>{lane.label}</Badge>
-              <span className="ml-auto font-mono text-[11px] text-faint tabular-nums">{(counts[lane.value] ?? items.length).toLocaleString("en-US")}</span>
+              {sum && total ? <span className="ml-auto font-mono text-[11.5px] text-body tabular-nums">{shown(sum, total)}</span> : null}
+              <span className={`${sum && total ? "" : "ml-auto "}font-mono text-[11px] text-faint tabular-nums`}>{(counts[lane.value] ?? items.length).toLocaleString("en-US")}</span>
             </header>
             <ul className="flex flex-col gap-2 p-2">
               {items.map((r) => (

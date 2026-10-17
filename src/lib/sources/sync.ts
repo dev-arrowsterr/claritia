@@ -12,6 +12,7 @@ import { cleanEmail, isRejected } from "../identity/clean.ts";
 import { writeContacts } from "../contacts/contacts.ts";
 import type { Rpc } from "../jobs.ts";
 import { agreed, cellOf, changedKeys, compared, decide, effectiveMapping, outOnly, OWNER, propOf, pushable, recordsToCompanies, recordsToRows, toRemote, type Col, type SavedMapping } from "./map.ts";
+import { toOpportunityRows } from "./opportunities.ts";
 import type { ActivityItem, ActivityResult, Connector, Ctx, HookEvent, ObjectKind, PushChange, RawRecord } from "./types.ts";
 
 export type Deps = { rpc: Rpc; connector: Connector; ctx: Ctx; clean: CleanCtx; saved: SavedMapping[]; now?: () => number };
@@ -277,6 +278,26 @@ export async function applyRecords(d: Deps, records: RawRecord[]): Promise<Count
   return c;
 }
 
+/** Deals from a CRM as opportunities, linked to the companies and contacts this source synced. */
+export async function applyOpportunities(d: Deps, records: RawRecord[]): Promise<Counts> {
+  const c = zero();
+  c.pulled = records.length;
+  const gone = records.filter((r) => r.deleted).map((r) => r.id);
+  if (gone.length) c.written += await call<number>(d.rpc, "opportunities_remove", { p_source: d.ctx.source.id, p_ids: gone });
+  const rows = toOpportunityRows(records);
+  for (let i = 0; i < rows.length; i += 1000) {
+    const out = await call<{ created: number; updated: number; skipped: number }>(d.rpc, "opportunities_ingest", { p_source: d.ctx.source.id, p_rows: rows.slice(i, i + 1000) });
+    c.written += out.created + out.updated;
+    c.skipped += out.skipped;
+  }
+  c.skipped += records.length - gone.length - rows.length;
+  return c;
+}
+
+/** A CRM that won't share deals (a scope not granted, a plan without them) shouldn't stop contacts from syncing. */
+const optional = (object: ObjectKind, e: unknown) =>
+  object === "opportunities" && /\b(401|403)\b|scope|permission|not authorized|insufficient|INVALID_TYPE|sObject type 'Opportunity'/i.test(String((e as Error)?.message ?? e));
+
 async function applyLists(d: Deps, cursor: string | null) {
   const page = await d.connector.lists!(d.ctx, cursor);
   for (const l of page.lists) {
@@ -294,7 +315,7 @@ async function applyLists(d: Deps, cursor: string | null) {
 export async function pull(d: Deps, budgetMs = 240_000): Promise<{ more: boolean; counts: Record<string, Counts> }> {
   const start = (d.now ?? Date.now)();
   const counts: Record<string, Counts> = {};
-  const order: ObjectKind[] = ["suppressions", "companies", "contacts", "lists", "events", "records"];
+  const order: ObjectKind[] = ["suppressions", "companies", "contacts", "opportunities", "lists", "events", "records"];
   const chosen = d.connector.objectsFor?.(d.ctx.source);
   for (const object of order) {
     if (chosen ? !chosen.includes(object) : !d.connector.objects.includes(object) || !enabled(d, object)) continue;
@@ -312,12 +333,22 @@ export async function pull(d: Deps, budgetMs = 240_000): Promise<{ more: boolean
         more = page.more;
         total.pulled += page.lists.length;
       } else {
-        const page = await d.connector.pull!(d.ctx, object, cursor);
+        let page;
+        try {
+          page = await d.connector.pull!(d.ctx, object, cursor);
+        } catch (e) {
+          if (!optional(object, e)) throw e;
+          total.errors += 1;
+          await log(d, [{ direction: "in", object: "opportunity", action: "error", error: String((e as Error).message ?? e).slice(0, 300) }]);
+          break;
+        }
         const got =
           object === "contacts"
             ? await applyContacts(d, page.records)
             : object === "companies"
               ? await applyCompanies(d, page.records)
+              : object === "opportunities"
+                ? await applyOpportunities(d, page.records)
               : object === "events"
                 ? await applyEvents(d, page.records)
                 : object === "records"

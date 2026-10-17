@@ -222,3 +222,30 @@ export const Plug = (p: P) => (
     <path d="M9 3v5M15 3v5M6 8h12v3a6 6 0 0 1-12 0V8zM12 17v4" />
   </Svg>
 );
+
+export const Dollar = (p: P) => (
+  <Svg {...p}>
+    <path d="M12 2v20M17 6.5c0-1.9-2.2-3-5-3s-5 1.3-5 3.3c0 4.7 10 2.6 10 7.4 0 2-2.2 3.3-5 3.3s-5-1.1-5-3" />
+  </Svg>
+);
+
+export const Mail = (p: P) => (
+  <Svg {...p}>
+    <rect x="3" y="5" width="18" height="14" rx="1" />
+    <path d="M3 7l9 6 9-6" />
+  </Svg>
+);
+
+export const FormIcon = (p: P) => (
+  <Svg {...p}>
+    <rect x="4" y="3" width="16" height="18" rx="1" />
+    <path d="M8 8h8M8 12h8M8 16h4" />
+  </Svg>
+);
+
+export const Megaphone = (p: P) => (
+  <Svg {...p}>
+    <path d="M3 10v4a1 1 0 0 0 1 1h3l6 4V5L7 9H4a1 1 0 0 0-1 1z" />
+    <path d="M17 9a4 4 0 0 1 0 6M7 15l1.5 5h2.5l-1.2-4.2" />
+  </Svg>
+);

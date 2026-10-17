@@ -53,6 +53,8 @@ export type CustomField = {
   group?: string | null;
   group_name?: string | null;
   position?: number;
+  /** Built in (an opportunity's amount or stage): it can be changed but not deleted. */
+  system?: boolean;
 };
 
 export type ObjectDef = { id?: string; key: string; label: string; plural: string; icon: string };

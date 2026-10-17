@@ -27,19 +27,19 @@ export type Entry = {
 const key = (label = "API key"): KeyField[] => [{ key: "api_key", label, secret: true }];
 
 export const CATALOG: Entry[] = [
-  { kind: "hubspot", label: "HubSpot", group: "crm", domain: "hubspot.com", oauth: true, keys: key("Private app token"), objects: ["companies", "contacts", "lists"], twoWay: true },
+  { kind: "hubspot", label: "HubSpot", group: "crm", domain: "hubspot.com", oauth: true, keys: key("Private app token"), objects: ["companies", "contacts", "opportunities", "lists"], twoWay: true },
   {
     kind: "salesforce",
     label: "Salesforce",
     group: "crm",
     domain: "salesforce.com",
     oauth: true,
-    objects: ["companies", "contacts"],
+    objects: ["companies", "contacts", "opportunities"],
     twoWay: true,
   },
-  { kind: "omniscient", label: "Omniscient", group: "crm", domain: "tryomniscient.com", objects: ["companies", "contacts"], twoWay: true },
-  { kind: "pipedrive", label: "Pipedrive", group: "crm", domain: "pipedrive.com", oauth: true, keys: key("API token"), objects: ["companies", "contacts"] },
-  { kind: "attio", label: "Attio", group: "crm", domain: "attio.com", oauth: true, keys: key("Access token"), objects: ["companies", "contacts"] },
+  { kind: "omniscient", label: "Omniscient", group: "crm", domain: "tryomniscient.com", objects: ["companies", "contacts", "opportunities"], twoWay: true },
+  { kind: "pipedrive", label: "Pipedrive", group: "crm", domain: "pipedrive.com", oauth: true, keys: key("API token"), objects: ["companies", "contacts", "opportunities"] },
+  { kind: "attio", label: "Attio", group: "crm", domain: "attio.com", oauth: true, keys: key("Access token"), objects: ["companies", "contacts", "opportunities"] },
   { kind: "close", label: "Close", group: "crm", domain: "close.com", keys: key(), objects: ["contacts"] },
   { kind: "mailchimp", label: "Mailchimp", group: "email", domain: "mailchimp.com", oauth: true, keys: key(), objects: ["contacts"] },
   { kind: "klaviyo", label: "Klaviyo", group: "email", domain: "klaviyo.com", keys: key("Private API key"), objects: ["contacts"] },

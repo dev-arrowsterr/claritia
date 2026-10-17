@@ -32,7 +32,7 @@ export function ruleText(r: AlertRule): string {
 
 export function slackAccountMessage(a: { id: string; name: string | null; domain: string; fit: number | null; intent: number | null; stage: string | null; why_now: string | null }, rule: AlertRule) {
   const title = `${a.name ?? a.domain} ${rule.when === "hot" ? "is hot" : rule.when === "evaluating" ? "is evaluating" : `passed intent ${rule.intent}`}`;
-  const url = `${APP_URL}/accounts/${a.id}`;
+  const url = `${APP_URL}/companies/account/${a.id}`;
   const facts = `Fit ${a.fit ?? "—"} · Intent ${a.intent ?? "—"} · ${a.stage ?? "unknown"}`;
   return {
     text: `${title}. ${a.why_now ?? ""} ${url}`.trim(),

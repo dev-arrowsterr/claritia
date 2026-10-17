@@ -139,19 +139,19 @@ export function VisitorsView({ sb, ws, navigate }: ViewProps) {
 
   if (sites.error || visits.error) {
     return (
-      <Page icon={<Eye size={14} />} title="Visitors">
+      <Page icon={<Eye size={14} />} title="Visits" back={{ label: "Companies", onClick: () => navigate("companies") }}>
         <ErrorNote message={sites.error || visits.error} />
       </Page>
     );
   }
   if (!sites.data || !visits.data) {
     return (
-      <Page icon={<Eye size={14} />} title="Visitors">
+      <Page icon={<Eye size={14} />} title="Visits" back={{ label: "Companies", onClick: () => navigate("companies") }}>
         <Loading />
       </Page>
     );
   }
-  if (!sites.data.length) return <VisitorsIntro action={<Button onClick={() => navigate("settings")}>Add your site</Button>} />;
+  if (!sites.data.length) return <VisitorsIntro action={<Button onClick={() => navigate("settings", "sites")}>Add your site</Button>} />;
 
   const all = visits.data;
   const rows = applyFilters(all, filters, VISIT_FIELDS);
@@ -165,7 +165,8 @@ export function VisitorsView({ sb, ws, navigate }: ViewProps) {
   return (
     <Page
       icon={<Eye size={14} />}
-      title="Visitors"
+      title="Visits"
+      back={{ label: "Companies", onClick: () => navigate("companies") }}
       count={rows.length}
       flush
     >
@@ -235,7 +236,7 @@ export function VisitorsView({ sb, ws, navigate }: ViewProps) {
           </table>
         </Panel>
       )}
-      {open ? <VisitPanel v={open} onClose={() => setOpenId(null)} onAccount={(id) => navigate("accounts", id)} /> : null}
+      {open ? <VisitPanel v={open} onClose={() => setOpenId(null)} onAccount={(id) => navigate("companies", `account/${id}`)} /> : null}
     </Page>
   );
 }
