@@ -638,7 +638,7 @@ function MappingPanel({ sb, session, wsId, source, owner, hasCompanies, twoWay }
     object === "contact"
       ? [
           ...TARGETS.filter((t) => t.value !== "basis"),
-          ...(twoWay ? [{ value: "score", label: "Claritia score" }, { value: "score_band", label: "Claritia band" }] : []),
+          ...(twoWay ? [{ value: "score", label: "Claritia score" }, { value: "score_band", label: "Claritia band" }, { value: "owner_crm", label: "Owner" }] : []),
           ...(custom.data ?? []).map((f) => ({ value: `f.${f.key}` as Target, label: f.label })),
         ]
       : COMPANY_TARGETS;
@@ -701,6 +701,8 @@ function MappingPanel({ sb, session, wsId, source, owner, hasCompanies, twoWay }
                   <Td className="w-36">
                     {r.target === "skip" || r.target === "email" ? null : OUT_ONLY.has(r.target) ? (
                       <Badge>Out only</Badge>
+                    ) : r.target === "owner_crm" ? (
+                      <Badge>CRM</Badge>
                     ) : (
                       <Select className={`${SEL} h-8`} value={r.wins} onChange={(v) => setWinEdits({ ...winEdits, [r.col]: v })} options={WINS} disabled={!owner} ariaLabel={`Who wins ${r.col}`} />
                     )}

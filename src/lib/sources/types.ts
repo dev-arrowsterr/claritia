@@ -81,7 +81,7 @@ export type Ctx = {
 export type HookRequest = { headers: Headers; body: string; url: string; method: string };
 
 export type CompanyTarget = "skip" | "name" | "domain" | "industry" | "size" | "country" | `f.${string}`;
-export type ContactMap = Record<string, Target | "score" | "score_band">;
+export type ContactMap = Record<string, Target | "score" | "score_band" | "owner_crm">;
 
 export type Connector = {
   kind: string;
@@ -108,6 +108,8 @@ export type Connector = {
   push?(ctx: Ctx, changes: PushChange[]): Promise<PushResult[]>;
   /** Write email and form activity to the CRM, one result per item. */
   activity?(ctx: Ctx, items: ActivityItem[]): Promise<ActivityResult[]>;
+  /** The CRM's users who can own a contact, for routing rules. */
+  owners?(ctx: Ctx): Promise<{ id: string; label: string }[]>;
   /** The tool's columns a push can set, when it takes fewer than it sends us. */
   writable?: string[];
   /** Done once after connect: custom properties, webhook subscriptions. */

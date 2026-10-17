@@ -11,7 +11,7 @@ import { prepareImport, type Ctx as CleanCtx, type ContactInput } from "../conta
 import { cleanEmail, isRejected } from "../identity/clean.ts";
 import { writeContacts } from "../contacts/contacts.ts";
 import type { Rpc } from "../jobs.ts";
-import { agreed, changedKeys, compared, decide, effectiveMapping, outOnly, propOf, pushable, recordsToCompanies, recordsToRows, toRemote, type Col, type SavedMapping } from "./map.ts";
+import { agreed, cellOf, changedKeys, compared, decide, effectiveMapping, outOnly, OWNER, propOf, pushable, recordsToCompanies, recordsToRows, toRemote, type Col, type SavedMapping } from "./map.ts";
 import type { ActivityItem, ActivityResult, Connector, Ctx, HookEvent, ObjectKind, PushChange, RawRecord } from "./types.ts";
 
 export type Deps = { rpc: Rpc; connector: Connector; ctx: Ctx; clean: CleanCtx; saved: SavedMapping[]; now?: () => number };
@@ -68,7 +68,8 @@ export async function applyContacts(d: Deps, records: RawRecord[]): Promise<Coun
   const cols = effectiveMapping(d.connector, "contact", d.saved, await seen(d, "contact", live), d.clean.custom);
   if (!cols.some((m) => m.target === "email")) throw new Error("Map a column to Email for this source.");
   // The score only goes out.
-  const inCols = cols.filter((m) => !outOnly(m.target));
+  const inCols = cols.filter((m) => !outOnly(m.target) && m.target !== OWNER);
+  const ownerCol = cols.find((m) => m.target === OWNER);
   const { targets, rows } = recordsToRows(live, inCols, d.connector.consent);
   const p = prepareImport(rows, { columns: targets, source: "crm_export", basis: src.settings.basis ?? null, list: "contacts" }, d.clean);
   c.skipped += rows.length - p.contacts.length;
@@ -89,6 +90,11 @@ export async function applyContacts(d: Deps, records: RawRecord[]): Promise<Coun
     const values = withMissing(inCols, agreed(inCols, x), raw.get(x.source_id ?? ""), held?.values);
     // Out-only values stay as last agreed, so a pull never looks like a change to them.
     for (const t of compared(cols)) if (outOnly(t) && held?.values?.[t] !== undefined) values[t] = held.values[t];
+    if (ownerCol) {
+      const o = cellOf(raw.get(x.source_id ?? "")?.data[ownerCol.col]);
+      if (o) values[OWNER] = o;
+      else delete values[OWNER];
+    }
     if (held && held.email_clean === x.email_clean && changedKeys(held.values, values).length === 0) {
       c.skipped++;
       continue;
@@ -138,6 +144,14 @@ export async function applyContacts(d: Deps, records: RawRecord[]): Promise<Coun
   if (forceErrors.length) await log(d, forceErrors);
   const ids = await call<Record<string, string>>(d.rpc, "contact_ids_by_email", { p_ws: src.workspace_id, p_emails: write.map((x) => x.email_clean) });
   const put = meta.filter((m) => ids[m.x.email_clean]).map((m) => ({ external_id: m.x.source_id, local_id: ids[m.x.email_clean], values: m.values }));
+  // The CRM owns the owner: a change there lands here. A first link takes the CRM's owner only when it has one.
+  if (ownerCol) {
+    const owners = meta
+      .filter((m) => ids[m.x.email_clean])
+      .filter((m) => (m.before ? (m.values[OWNER] ?? null) !== (m.before.values?.[OWNER] ?? null) : !!m.values[OWNER]))
+      .map((m) => ({ id: ids[m.x.email_clean], owner: (m.values[OWNER] as string | undefined) ?? null }));
+    if (owners.length) await call(d.rpc, "contacts_owner_crm_set", { p_ws: src.workspace_id, p_rows: owners });
+  }
   await call(d.rpc, "source_links_put", { p_source: src.id, p_object: "contact", p_rows: put });
   await log(
     d,
@@ -364,6 +378,7 @@ type Candidate = {
   company_domain: string | null;
   score: number | null;
   score_band: string | null;
+  owner_crm: string | null;
   sources: Record<string, { s?: string; at?: string }> | null;
   external_id: string | null;
   last: Record<string, unknown> | null;

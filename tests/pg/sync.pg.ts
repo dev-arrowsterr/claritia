@@ -52,6 +52,7 @@ const setWins = async (wins: Record<string, string>) => {
     ["lifecyclestage", "lifecycle"],
     ["claritia_score", "score"],
     ["claritia_band", "score_band"],
+    ["hubspot_owner_id", "owner_crm"],
   ].map(([col, target]) => ({ col, target, wins: wins[target] ?? "claritia" }));
   await asOwner(`select mapping_save($1, 'contact', $2)`, [id, JSON.stringify(rows)]);
 };
@@ -139,6 +140,20 @@ test("the score goes out once, and settled rounds write nothing", async () => {
   await pullAll();
   await pullAll();
   assert.equal(hs.writes, writes, "no push loop once settled");
+});
+
+test("the owner goes out from routing, and a rep's reassignment in HubSpot comes back without a push", async () => {
+  await setWins({});
+  const bob = await local("bob@acme.com");
+  await q(`update contacts set owner_crm_id = '77' where id = $1`, [bob.id]);
+  await pullAll();
+  assert.equal(remote("bob@acme.com").properties.hubspot_owner_id, "77");
+  hs.edit(remote("bob@acme.com").id, { hubspot_owner_id: "88" });
+  const writes = hs.writes;
+  await pullAll();
+  await pullAll();
+  assert.equal((await q(`select owner_crm_id from contacts where id = $1`, [bob.id]))[0].owner_crm_id, "88");
+  assert.equal(hs.writes, writes, "nothing pushed back over the rep's change");
 });
 
 test("activity goes out once per event; a claim left by a dead worker is never written", async () => {

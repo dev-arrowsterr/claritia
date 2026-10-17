@@ -16,8 +16,8 @@ const base = (ctx: Ctx) => {
   return `${u}/services/data/${V}`;
 };
 
-const LEAD = "Id, Email, FirstName, LastName, Title, Phone, Company, Website, Country, State, Status, HasOptedOutOfEmail, EmailBouncedReason, IsDeleted, SystemModstamp";
-const CONTACT = "Id, Email, FirstName, LastName, Title, Phone, Account.Name, Account.Website, MailingCountry, MailingState, HasOptedOutOfEmail, EmailBouncedReason, IsDeleted, SystemModstamp";
+const LEAD = "Id, Email, FirstName, LastName, Title, Phone, Company, Website, Country, State, Status, OwnerId, HasOptedOutOfEmail, EmailBouncedReason, IsDeleted, SystemModstamp";
+const CONTACT = "Id, Email, FirstName, LastName, Title, Phone, Account.Name, Account.Website, MailingCountry, MailingState, OwnerId, HasOptedOutOfEmail, EmailBouncedReason, IsDeleted, SystemModstamp";
 const ACCOUNT = "Id, Name, Website, Industry, NumberOfEmployees, BillingCountry, IsDeleted, SystemModstamp";
 
 type Row = Record<string, unknown> & { Id: string; SystemModstamp: string; IsDeleted?: boolean };
@@ -31,8 +31,8 @@ function person(type: "Lead" | "Contact", r: Row): RawRecord {
   const acc = (r.Account ?? {}) as Record<string, unknown>;
   const data =
     type === "Lead"
-      ? { Type: "Lead", Email: r.Email, FirstName: r.FirstName, LastName: r.LastName, Title: r.Title, Phone: r.Phone, Company: r.Company, Website: r.Website, Country: r.Country, State: r.State, LeadStatus: r.Status, HasOptedOutOfEmail: r.HasOptedOutOfEmail, EmailBouncedReason: r.EmailBouncedReason }
-      : { Type: "Contact", Email: r.Email, FirstName: r.FirstName, LastName: r.LastName, Title: r.Title, Phone: r.Phone, Company: acc.Name, Website: acc.Website, Country: r.MailingCountry, State: r.MailingState, HasOptedOutOfEmail: r.HasOptedOutOfEmail, EmailBouncedReason: r.EmailBouncedReason };
+      ? { Type: "Lead", Email: r.Email, FirstName: r.FirstName, LastName: r.LastName, Title: r.Title, Phone: r.Phone, Company: r.Company, Website: r.Website, Country: r.Country, State: r.State, LeadStatus: r.Status, OwnerId: r.OwnerId, HasOptedOutOfEmail: r.HasOptedOutOfEmail, EmailBouncedReason: r.EmailBouncedReason }
+      : { Type: "Contact", Email: r.Email, FirstName: r.FirstName, LastName: r.LastName, Title: r.Title, Phone: r.Phone, Company: acc.Name, Website: acc.Website, Country: r.MailingCountry, State: r.MailingState, OwnerId: r.OwnerId, HasOptedOutOfEmail: r.HasOptedOutOfEmail, EmailBouncedReason: r.EmailBouncedReason };
   return { id: r.Id, updatedAt: r.SystemModstamp, deleted: !!r.IsDeleted, data };
 }
 
@@ -69,8 +69,8 @@ async function pullAccounts(ctx: Ctx, cursor: string | null): Promise<Page> {
 
 // Our column names to each object's fields, for writes. Custom fields (ending in __c) go as they are.
 const OUT: Record<"Lead" | "Contact", Record<string, string>> = {
-  Lead: { Email: "Email", FirstName: "FirstName", LastName: "LastName", Title: "Title", Phone: "Phone", Country: "Country", State: "State", LeadStatus: "Status", ClaritiaScore: "Claritia_Score__c", ClaritiaBand: "Claritia_Band__c" },
-  Contact: { Email: "Email", FirstName: "FirstName", LastName: "LastName", Title: "Title", Phone: "Phone", Country: "MailingCountry", State: "MailingState", ClaritiaScore: "Claritia_Score__c", ClaritiaBand: "Claritia_Band__c" },
+  Lead: { Email: "Email", FirstName: "FirstName", LastName: "LastName", Title: "Title", Phone: "Phone", Country: "Country", State: "State", LeadStatus: "Status", OwnerId: "OwnerId", ClaritiaScore: "Claritia_Score__c", ClaritiaBand: "Claritia_Band__c" },
+  Contact: { Email: "Email", FirstName: "FirstName", LastName: "LastName", Title: "Title", Phone: "Phone", Country: "MailingCountry", State: "MailingState", OwnerId: "OwnerId", ClaritiaScore: "Claritia_Score__c", ClaritiaBand: "Claritia_Band__c" },
 };
 const typeOf = (id: string) => (id.startsWith("00Q") ? "Lead" : "Contact");
 const fieldsFor = (type: "Lead" | "Contact", values: Record<string, unknown>, has: Set<string> | null) => {
@@ -161,6 +161,10 @@ export const salesforce: Connector = {
   },
   pull: (ctx, object, cursor) => (object === "companies" ? pullAccounts(ctx, cursor) : pullPeople(ctx, cursor)),
   push: pushAll,
+  async owners(ctx) {
+    const d = await ctx.api<QueryOut>(`${base(ctx)}/query?q=${encodeURIComponent("SELECT Id, Name, Email FROM User WHERE IsActive = true AND UserType = 'Standard' ORDER BY Name LIMIT 2000")}`);
+    return d.records.map((r) => ({ id: r.Id, label: String(r.Name ?? r.Email ?? r.Id) }));
+  },
   activity: tasks,
   consent(r) {
     if (r.data.EmailBouncedReason) return "bounced";
@@ -168,7 +172,7 @@ export const salesforce: Connector = {
     return null;
   },
   defaults: {
-    contact: { Email: "email", FirstName: "first_name", LastName: "last_name", Title: "title", Phone: "phone", Company: "company", Website: "website", Country: "country", State: "region", LeadStatus: "lead_status", ClaritiaScore: "score", ClaritiaBand: "score_band" },
+    contact: { Email: "email", FirstName: "first_name", LastName: "last_name", Title: "title", Phone: "phone", Company: "company", Website: "website", Country: "country", State: "region", LeadStatus: "lead_status", OwnerId: "owner_crm", ClaritiaScore: "score", ClaritiaBand: "score_band" },
     company: { Name: "name", Website: "domain", Industry: "industry", NumberOfEmployees: "size", BillingCountry: "country" },
     valueMaps: { LeadStatus: { "Open - Not Contacted": "new", "Working - Contacted": "attempting", "Closed - Converted": "qualified", "Closed - Not Converted": "disqualified" } },
   },

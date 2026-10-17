@@ -13,6 +13,8 @@ export type SavedMapping = { object: "contact" | "company"; col: string; target:
 /** Targets that only go out: the CRM never overwrites them here. */
 export const OUT_ONLY = new Set(["score", "score_band"]);
 export const outOnly = (t: string) => OUT_ONLY.has(t);
+/** The CRM's owner: comes from the CRM and goes back to it, handled beside the cleaning a file import uses. */
+export const OWNER = "owner_crm";
 
 /** The columns that map, for one object. */
 export function effectiveMapping(c: Connector, object: "contact" | "company", saved: SavedMapping[], seen: string[], custom: CustomField[]): Col[] {
@@ -61,10 +63,11 @@ type Local = Partial<Pick<ContactInput, "email_clean" | "first_name" | "last_nam
   fields?: Record<string, unknown> | null;
   score?: number | null;
   score_band?: string | null;
+  owner_crm?: string | null;
 };
 
 // Company and website stay as the tool has them: a contact's company on our side is a shared record.
-const PUSHABLE = new Set(["email", "first_name", "last_name", "title", "phone", "country", "region", "timezone", "lifecycle", "lead_status", "score", "score_band"]);
+const PUSHABLE = new Set(["email", "first_name", "last_name", "title", "phone", "country", "region", "timezone", "lifecycle", "lead_status", "score", "score_band", "owner_crm"]);
 export const pushable = (t: string) => PUSHABLE.has(t) || t.startsWith("f.");
 
 function norm(v: unknown): unknown {
@@ -133,7 +136,7 @@ export function decide(
   const winsOf = new Map<string, Wins>();
   for (const m of cols) for (const t of m.target === "name" ? ["first_name", "last_name"] : [m.target]) winsOf.set(t, m.wins ?? "claritia");
   for (const t of compared(cols)) {
-    if (t === "email" || outOnly(t)) continue;
+    if (t === "email" || outOnly(t) || t === OWNER) continue;
     const rChanged = !same(remote[t], last?.[t]);
     const lChanged = !same(local[t], last?.[t]);
     if (!rChanged) {

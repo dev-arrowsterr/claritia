@@ -914,6 +914,22 @@ Setup steps and the full list of files: `docs/sending-setup.md`.
 - **Left for later:** branches and AI agent steps (weeks 11 to 14), the Brand Brain as the source in place of the brief (M5), personalization tokens (week 10), per-step reports.
 - **Running cost:** Claude Opus 5.5 at $4 per million input and $20 per million output tokens. A 3-email draft is about 2,000 tokens in and 3,000 out with thinking, about $0.07. At 20 drafts a team a month: about $70 at Beta and $700 at Growth (check). Sending is already counted in Part 21e. **Total: about $70 at Beta, about $700 at Growth.**
 
+## Part 21i. Lead scoring and routing built
+
+| Piece | Where |
+|---|---|
+| Fit (0 to 100): the company against the ideal customer (the account's fit when there is one; the same math as `fitV0`), plus work email and title keywords | `icp_fit`, `lead_score_rows` in `supabase/migrations/043_lead_scoring.sql` |
+| Engagement (0 to 100): forms, meetings, email clicks, visits and pricing visits from the last 90 days, each halving in value on a set number of days; unsubscribes take points away; probable visits never count | `lead_score_rows` |
+| Every 5 minutes, contacts with new activity (and daily for fading) are rescored; crossing the threshold makes an MQL and picks an owner: the first matching rule (countries, industries, sizes), owners taking turns, an existing owner kept | `lead_scores_refresh`, `lead_route` |
+| Score, band, stage and CRM owner go to HubSpot (`claritia_score`, `claritia_band`, `lifecyclestage`, `hubspot_owner_id`) and Salesforce (`Claritia_Score__c`, `Claritia_Band__c`, `OwnerId`); a rep's reassignment in the CRM comes back | `src/lib/sources/sync.ts`, `hubspot.ts`, `salesforce.ts` |
+| Settings › Lead scoring: on and off, MQL score, fit and engagement mix, fade, titles, points per activity, routing rules with teammates or CRM owners, rescore now, top scores | `src/components/app/views/LeadScoringPanel.tsx`, `src/app/api/sources/owners/route.ts` |
+| Tests | `tests/pg/scoring.pg.ts`, owner round trip in `tests/pg/sync.pg.ts`, scoring block in `tests/db/leaks.sql` |
+
+- **Flaky and hostile cases tested:** the SQL fit matches the TypeScript fit on five cases; probable visits add nothing; a lead is routed once however often scoring runs; an owner already set here or in the CRM is kept; turns alternate; a rep's HubSpot reassignment lands without a push back; only the owner changes scoring, owners must be teammates, weights stay in range.
+- **Setup:** HubSpot asks for `crm.objects.owners.read` as an optional scope (add it to the app's Auth tab) so routing can list HubSpot owners.
+- **Left for later:** alerts to the owner in Slack and email on a new MQL, score history charts, a contact page breakdown, AI branch choices (M4).
+- **Running cost:** no new paid service and no Claude calls; scoring is SQL on Supabase. Every 5 minutes for changed contacts fits the current plan at Beta; about $25 at Growth for one size up (check). **Total: $0 at Beta, about $25 at Growth.**
+
 ---
 
 ## Part 22. Rollout

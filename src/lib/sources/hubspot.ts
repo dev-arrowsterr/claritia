@@ -13,7 +13,7 @@ const CAP = 9_900;
 
 export const HUBSPOT_CONTACT_PROPS = [
   "email", "firstname", "lastname", "jobtitle", "phone", "mobilephone", "company", "website", "country", "state", "lifecyclestage", "hs_lead_status",
-  "hs_email_optout", "hs_email_hard_bounce_reason_enum", "hs_legal_basis", "lastmodifieddate", "createdate",
+  "hs_email_optout", "hs_email_hard_bounce_reason_enum", "hs_legal_basis", "lastmodifieddate", "createdate", "hubspot_owner_id",
 ];
 const COMPANY_PROPS = ["name", "domain", "industry", "numberofemployees", "country", "hs_lastmodifieddate"];
 
@@ -123,6 +123,18 @@ export const hubspot: Connector = {
     }
     return out;
   },
+  async owners(ctx) {
+    const out: { id: string; label: string }[] = [];
+    let after: string | undefined;
+    do {
+      const d = await ctx.api<{ results: { id: string; email?: string; firstName?: string; lastName?: string; archived?: boolean }[]; paging?: { next?: { after?: string } } }>(
+        `${BASE}/crm/v3/owners?limit=500${after ? `&after=${after}` : ""}`,
+      );
+      for (const o of d.results ?? []) if (!o.archived) out.push({ id: String(o.id), label: [o.firstName, o.lastName].filter(Boolean).join(" ") || o.email || String(o.id) });
+      after = d.paging?.next?.after;
+    } while (after && out.length < 5000);
+    return out;
+  },
   activity: (ctx, items) => (process.env.HUBSPOT_TIMELINE_TEMPLATE?.trim() ? timeline(ctx, items, process.env.HUBSPOT_TIMELINE_TEMPLATE.trim()) : notes(ctx, items)),
   async setup(ctx) {
     // Our own properties on HubSpot contacts, so reps see the score where they work.
@@ -150,7 +162,7 @@ export const hubspot: Connector = {
     return null;
   },
   defaults: {
-    contact: { email: "email", firstname: "first_name", lastname: "last_name", jobtitle: "title", phone: "phone", company: "company", website: "website", country: "country", state: "region", lifecyclestage: "lifecycle", hs_lead_status: "lead_status", claritia_score: "score", claritia_band: "score_band" },
+    contact: { email: "email", firstname: "first_name", lastname: "last_name", jobtitle: "title", phone: "phone", company: "company", website: "website", country: "country", state: "region", lifecyclestage: "lifecycle", hs_lead_status: "lead_status", claritia_score: "score", claritia_band: "score_band", hubspot_owner_id: "owner_crm" },
     company: { name: "name", domain: "domain", industry: "industry", numberofemployees: "size", country: "country" },
     valueMaps: {
       lifecyclestage: { subscriber: "subscriber", lead: "lead", marketingqualifiedlead: "mql", salesqualifiedlead: "sql", opportunity: "opportunity", customer: "customer", evangelist: "evangelist", other: "other" },

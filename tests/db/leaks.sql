@@ -1039,6 +1039,29 @@ reset role;
 select pg_temp.check((select approved_at is null from nurture_steps where id = '63200000-0000-0000-0000-0000000000c1'), 'Cat''s step was approved');
 select set_config('request.jwt.claim.sub', '', false);
 
+-- Lead scoring (043): only owners change it; scoring, routing and owner writes are server only.
+insert into lead_settings (workspace_id, enabled) values ('22222222-0000-0000-0000-000000000000', true);
+select pg_temp.as_user('b0000000-0000-0000-0000-000000000000');
+set role authenticated;
+select pg_temp.check((select count(*) from lead_settings) = 0, 'Ben sees Cat''s scoring');
+select pg_temp.fails($$select lead_settings_save('11111111-0000-0000-0000-000000000000', '{"enabled": true}')$$, 'Ben (a member) turns scoring on');
+select pg_temp.fails($$select lead_settings_save('22222222-0000-0000-0000-000000000000', '{"enabled": false}')$$, 'Ben turns Cat''s scoring off');
+select pg_temp.fails($$select lead_rescore_now('22222222-0000-0000-0000-000000000000')$$, 'Ben rescores Cat''s contacts');
+select pg_temp.fails($$select lead_scores_refresh('22222222-0000-0000-0000-000000000000', 10)$$, 'Ben runs scoring');
+select pg_temp.fails($$select lead_scores_due()$$, 'Ben runs all scoring');
+select pg_temp.fails($$select * from lead_score_rows('22222222-0000-0000-0000-000000000000', '{}')$$, 'Ben reads Cat''s scores');
+select pg_temp.fails($$select lead_route('b0000000-0000-0000-0000-000000000000')$$, 'Ben routes a lead');
+select pg_temp.fails($$select contacts_owner_crm_set('22222222-0000-0000-0000-000000000000', '[]')$$, 'Ben sets CRM owners');
+reset role;
+select pg_temp.as_user('a0000000-0000-0000-0000-000000000000');
+set role authenticated;
+select pg_temp.fails($$select lead_settings_save('22222222-0000-0000-0000-000000000000', '{"enabled": false}')$$, 'Ann turns Cat''s scoring off');
+select lead_settings_save('11111111-0000-0000-0000-000000000000', '{"threshold": 60}');
+reset role;
+select pg_temp.check((select threshold from lead_settings where workspace_id = '11111111-0000-0000-0000-000000000000') = 60, 'Ann (an owner) can''t change her scoring');
+select pg_temp.check((select enabled from lead_settings where workspace_id = '22222222-0000-0000-0000-000000000000'), 'Cat''s scoring changed');
+select set_config('request.jwt.claim.sub', '', false);
+
 -- Cloud minutes: once Acme has used its 2,000, nobody there can start a run.
 insert into runs (workspace_id, project_id, test_name, test_version, environment_name, base_url, lock, status, duration_ms)
 values ('11111111-0000-0000-0000-000000000000', 'a1000000-0000-0000-0000-000000000000', 'long', 1, 'staging', 'https://x.com', '', 'passed', 2000 * 60000);

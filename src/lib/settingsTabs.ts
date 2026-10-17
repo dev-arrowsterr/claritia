@@ -1,6 +1,6 @@
 // Settings pages, grouped the way the Settings sidebar shows them (same layout as Arrowsterr).
 
-export type SettingsTab = "fields" | "objects" | "sources" | "imports" | "sync_log" | "sending" | "sites" | "identity" | "icp" | "account_alerts" | "project" | "github" | "test_alerts" | "workspace" | "keys" | "plan" | "profile";
+export type SettingsTab = "fields" | "objects" | "sources" | "imports" | "sync_log" | "sending" | "sites" | "identity" | "icp" | "lead_scoring" | "account_alerts" | "project" | "github" | "test_alerts" | "workspace" | "keys" | "plan" | "profile";
 export type SettingsGroup = { label: string; tabs: { id: SettingsTab; label: string }[] };
 
 export function settingsGroups(features: readonly string[], hasProject: boolean): SettingsGroup[] {
@@ -12,7 +12,7 @@ export function settingsGroups(features: readonly string[], hasProject: boolean)
     groups.push({ label: "Sources", tabs: [{ id: "sources", label: "Tools" }, { id: "imports", label: "Imports" }, { id: "sync_log", label: "Sync log" }] });
     groups.push({ label: "Email", tabs: [{ id: "sending", label: "Sending" }] });
     groups.push({ label: "Website", tabs: [{ id: "sites", label: "Sites" }, { id: "identity", label: "Identity" }] });
-    groups.push({ label: "Scoring", tabs: [{ id: "icp", label: "Ideal customer" }, { id: "account_alerts", label: "Account alerts" }] });
+    groups.push({ label: "Scoring", tabs: [{ id: "icp", label: "Ideal customer" }, { id: "lead_scoring", label: "Lead scoring" }, { id: "account_alerts", label: "Account alerts" }] });
   }
   if (testing && hasProject) {
     groups.push({ label: "Testing", tabs: [{ id: "project", label: "Project" }, { id: "github", label: "GitHub" }, { id: "test_alerts", label: "Alerts" }] });
