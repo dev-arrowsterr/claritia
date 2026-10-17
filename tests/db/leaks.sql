@@ -912,6 +912,156 @@ select pg_temp.check((select name from segments where id = '5e000000-0000-0000-0
 select set_config('request.jwt.claim.sub', '', false);
 delete from jobs;
 
+-- Sending (039): Ben (a member) reads Acme's sending but can't change it; nobody reads Cat's; the send pipeline is
+-- server only.
+insert into sending_domains (id, workspace_id, domain, mail_from, tracking_host, status) values
+  ('5f000000-0000-0000-0000-0000000000a1', '11111111-0000-0000-0000-000000000000', 'mail.acme.com', 'bounce.mail.acme.com', 't.mail.acme.com', 'verified'),
+  ('5f000000-0000-0000-0000-0000000000c1', '22222222-0000-0000-0000-000000000000', 'mail.other.com', 'bounce.mail.other.com', 't.mail.other.com', 'verified');
+insert into send_settings (workspace_id, from_email, address) values
+  ('11111111-0000-0000-0000-000000000000', 'news@mail.acme.com', '1 Main St'),
+  ('22222222-0000-0000-0000-000000000000', 'news@mail.other.com', '2 Side St');
+insert into emails (id, workspace_id, name, kind, subject, html, text) values
+  ('5f100000-0000-0000-0000-0000000000c1', '22222222-0000-0000-0000-000000000000', 'Cat news', 'broadcast', 'Cat news', '<p>x</p>', 'x');
+insert into email_messages (id, workspace_id, email_id, to_email, dedupe, status, ses_message_id) values
+  ('5f200000-0000-0000-0000-0000000000c1', '22222222-0000-0000-0000-000000000000', '5f100000-0000-0000-0000-0000000000c1', 'cat-friend@x.com', 'c1', 'sent', 'ses-cat-1');
+insert into topics (id, workspace_id, name) values ('5f300000-0000-0000-0000-0000000000c1', '22222222-0000-0000-0000-000000000000', 'Cat topic');
+select pg_temp.as_user('b0000000-0000-0000-0000-000000000000');
+set role authenticated;
+select pg_temp.check((select count(*) from sending_domains) = 1, 'Ben sees a sending domain outside Acme');
+select pg_temp.check((select count(*) from send_settings) = 1, 'Ben sees Cat''s sending settings');
+select pg_temp.check((select count(*) from emails) = 0, 'Ben sees Cat''s emails');
+select pg_temp.check((select count(*) from email_messages) = 0, 'Ben sees Cat''s messages');
+select pg_temp.check((select count(*) from email_events) = 0, 'Ben sees Cat''s email events');
+select pg_temp.fails($$select sending_domain_add('11111111-0000-0000-0000-000000000000', 'news.acme.com')$$, 'Ben (a member) adds a sending domain');
+select pg_temp.fails($$select sending_domain_remove('5f000000-0000-0000-0000-0000000000a1')$$, 'Ben removes a sending domain');
+select pg_temp.fails($$select sending_domain_check_now('5f000000-0000-0000-0000-0000000000c1')$$, 'Ben checks Cat''s domain');
+select pg_temp.fails($$select send_settings_save('11111111-0000-0000-0000-000000000000', '{"address":"x"}')$$, 'Ben changes sending settings');
+select pg_temp.fails($$select send_resume('11111111-0000-0000-0000-000000000000')$$, 'Ben resumes sending');
+select pg_temp.fails($$select topic_save('11111111-0000-0000-0000-000000000000', null, 'x', true)$$, 'Ben adds a topic');
+select pg_temp.fails($$select topic_delete('5f300000-0000-0000-0000-0000000000c1')$$, 'Ben deletes Cat''s topic');
+select pg_temp.fails($$select email_guard('5f200000-0000-0000-0000-0000000000c1')$$, 'Ben runs the guard');
+select pg_temp.fails($$select send_claim('22222222-0000-0000-0000-000000000000', 10)$$, 'Ben claims Cat''s messages');
+select pg_temp.fails($$select send_done('5f200000-0000-0000-0000-0000000000c1', 'ok', 'x', null)$$, 'Ben records a send');
+select pg_temp.fails($$select email_create('11111111-0000-0000-0000-000000000000', 'b0000000-0000-0000-0000-000000000000', '{}')$$, 'Ben creates an email directly');
+select pg_temp.fails($$select email_queue('5f100000-0000-0000-0000-0000000000c1', '{}')$$, 'Ben queues Cat''s email');
+select pg_temp.fails($$select email_queue_test('5f100000-0000-0000-0000-0000000000c1', 'b0000000-0000-0000-0000-000000000000')$$, 'Ben queues a test');
+select pg_temp.fails($$select ses_event_apply('{"kind":"complained","ses_message_id":"ses-cat-1","sns_id":"x"}')$$, 'Ben fakes a complaint');
+select pg_temp.fails($$select email_click('5f200000-0000-0000-0000-0000000000c1', 0, true, '{}')$$, 'Ben fakes a click');
+select pg_temp.fails($$select email_unsubscribe('5f200000-0000-0000-0000-0000000000c1', 'all')$$, 'Ben unsubscribes Cat''s contact');
+select pg_temp.fails($$select email_unsubscribe_info('5f200000-0000-0000-0000-0000000000c1')$$, 'Ben reads unsubscribe info');
+select pg_temp.fails($$select sending_domain_update('5f000000-0000-0000-0000-0000000000c1', null, '[]', 'failed')$$, 'Ben updates Cat''s domain');
+select pg_temp.fails($$select sending_domain_load('5f000000-0000-0000-0000-0000000000c1')$$, 'Ben loads Cat''s domain');
+select pg_temp.fails($$select sends_due()$$, 'Ben starts sends');
+select pg_temp.fails($$select domain_checks_due()$$, 'Ben starts domain checks');
+select pg_temp.fails($$select complaints_check('22222222-0000-0000-0000-000000000000')$$, 'Ben pauses Cat''s sending');
+select pg_temp.fails($$insert into emails (workspace_id, name, kind, subject, html, text) values ('11111111-0000-0000-0000-000000000000', 'x', 'broadcast', 'x', 'x', 'x')$$, 'Ben inserts an email');
+select pg_temp.fails($$update send_settings set paused = false$$, 'Ben writes sending settings');
+reset role;
+select pg_temp.as_user('a0000000-0000-0000-0000-000000000000');
+set role authenticated;
+select pg_temp.fails($$select sending_domain_add('22222222-0000-0000-0000-000000000000', 'evil.other.com')$$, 'Ann adds a domain to Cat''s workspace');
+select pg_temp.fails($$select sending_domain_add('11111111-0000-0000-0000-000000000000', 'mail.other.com')$$, 'Ann takes Cat''s domain');
+select pg_temp.fails($$select sending_domain_remove('5f000000-0000-0000-0000-0000000000c1')$$, 'Ann removes Cat''s domain');
+select pg_temp.fails($$select send_settings_save('22222222-0000-0000-0000-000000000000', '{}')$$, 'Ann changes Cat''s sending');
+select pg_temp.fails($$select send_settings_save('11111111-0000-0000-0000-000000000000', '{"timezone":"Mars/Olympus"}')$$, 'Ann saves an unknown time zone');
+select sending_domain_add('11111111-0000-0000-0000-000000000000', 'news.acme.com');
+select send_settings_save('11111111-0000-0000-0000-000000000000', '{"from_email":"news@mail.acme.com","address":"1 Main St","quiet_start":22,"quiet_end":7,"timezone":"Asia/Tokyo"}');
+reset role;
+select pg_temp.check((select count(*) from sending_domains where workspace_id = '11111111-0000-0000-0000-000000000000') = 2, 'Ann (an owner) can''t add her own domain');
+select pg_temp.check((select count(*) from jobs where kind = 'domain_check') = 1, 'Adding a domain doesn''t queue its check');
+select pg_temp.check((select quiet_start = 22 and timezone = 'Asia/Tokyo' from send_settings where workspace_id = '11111111-0000-0000-0000-000000000000'), 'Ann can''t save sending settings');
+select pg_temp.check((select status from email_messages where id = '5f200000-0000-0000-0000-0000000000c1') = 'sent', 'Cat''s message changed');
+select pg_temp.check((select count(*) from topics where id = '5f300000-0000-0000-0000-0000000000c1') = 1, 'Cat''s topic was deleted');
+select set_config('request.jwt.claim.sub', '', false);
+delete from jobs;
+
+-- Sync, part 2 (040): activity claims are server only; nobody reads another workspace's activity rows.
+insert into activity_out (workspace_id, source_id, event_id, kind, status) values
+  ('22222222-0000-0000-0000-000000000000', '5c000000-0000-0000-0000-0000000000c1', '60000000-0000-0000-0000-0000000000c1', 'email.sent', 'sent');
+select pg_temp.as_user('b0000000-0000-0000-0000-000000000000');
+set role authenticated;
+select pg_temp.check((select count(*) from activity_out) = 0, 'Ben sees Cat''s activity');
+select pg_temp.fails($$select activity_candidates('5c000000-0000-0000-0000-0000000000c1', 10)$$, 'Ben reads Cat''s activity candidates');
+select pg_temp.fails($$select activity_claim('5c000000-0000-0000-0000-0000000000c1', '[]')$$, 'Ben claims activity');
+select pg_temp.fails($$select activity_done('5c000000-0000-0000-0000-0000000000c1', '[]')$$, 'Ben finishes activity');
+select pg_temp.fails($$select mapping_save('5c000000-0000-0000-0000-0000000000c1', 'contact', '[{"col":"email","target":"email","wins":"crm"}]')$$, 'Ben sets who wins on Cat''s source');
+reset role;
+select pg_temp.as_user('a0000000-0000-0000-0000-000000000000');
+set role authenticated;
+select pg_temp.fails($$select mapping_save('5a000000-0000-0000-0000-0000000000a1', 'contact', '[{"col":"email","target":"email","wins":"everyone"}]')$$, 'Ann saves a made-up winner');
+reset role;
+select set_config('request.jwt.claim.sub', '', false);
+
+-- Forms (041): members build forms in their own workspace only; answers and the submit path are server only.
+insert into forms (id, workspace_id, name, fields, status) values
+  ('61000000-0000-0000-0000-0000000000c1', '22222222-0000-0000-0000-000000000000', 'Cat form', '[{"key":"email","label":"Email","type":"email","maps_to":"email"}]', 'live');
+insert into form_submissions (id, workspace_id, form_id, answers) values
+  ('62000000-0000-0000-0000-0000000000c1', '22222222-0000-0000-0000-000000000000', '61000000-0000-0000-0000-0000000000c1', '{"email":"friend@cat.com"}');
+select pg_temp.as_user('b0000000-0000-0000-0000-000000000000');
+set role authenticated;
+select pg_temp.check((select count(*) from forms) = 0, 'Ben sees Cat''s forms');
+select pg_temp.check((select count(*) from form_submissions) = 0, 'Ben sees Cat''s form answers');
+select pg_temp.fails($$select form_save('22222222-0000-0000-0000-000000000000', null, 'x', '[{"key":"email","label":"E","type":"email","maps_to":"email"}]', '{}')$$, 'Ben makes a form in Cat''s workspace');
+select pg_temp.fails($$select form_save('11111111-0000-0000-0000-000000000000', '61000000-0000-0000-0000-0000000000c1', 'mine', '[{"key":"email","label":"E","type":"email","maps_to":"email"}]', '{}')$$, 'Ben takes over Cat''s form');
+select pg_temp.fails($$select form_publish('61000000-0000-0000-0000-0000000000c1', false)$$, 'Ben takes down Cat''s form');
+select pg_temp.fails($$select form_delete('61000000-0000-0000-0000-0000000000c1')$$, 'Ben deletes Cat''s form');
+select pg_temp.fails($$select form_public('61000000-0000-0000-0000-0000000000c1', true)$$, 'Ben reads a form through the server path');
+select pg_temp.fails($$select form_submit('61000000-0000-0000-0000-0000000000c1', '{}')$$, 'Ben writes an answer directly');
+select pg_temp.fails($$select form_submission_link('62000000-0000-0000-0000-0000000000c1', 'b0000000-0000-0000-0000-000000000000')$$, 'Ben links an answer');
+select pg_temp.fails($$insert into forms (workspace_id, name) values ('11111111-0000-0000-0000-000000000000', 'x')$$, 'Ben inserts a form');
+select form_save('11111111-0000-0000-0000-000000000000', null, 'Acme demo', '[{"key":"email","label":"E","type":"email","maps_to":"email"}]', '{}');
+reset role;
+select pg_temp.check((select count(*) from forms where workspace_id = '11111111-0000-0000-0000-000000000000') = 1, 'Ben (a member) can''t build a form in Acme');
+select pg_temp.check((select status from forms where id = '61000000-0000-0000-0000-0000000000c1') = 'live', 'Cat''s form changed');
+select set_config('request.jwt.claim.sub', '', false);
+
+-- Nurture (042): members build in their own workspace only; enrolling, advancing and the AI cache are server only.
+insert into nurtures (id, workspace_id, name, trigger) values ('63000000-0000-0000-0000-0000000000c1', '22222222-0000-0000-0000-000000000000', 'Cat nurture', '{}');
+insert into emails (id, workspace_id, name, kind, subject, html, text) values ('63100000-0000-0000-0000-0000000000c1', '22222222-0000-0000-0000-000000000000', 'Cat step', 'journey', 'Hi', 'x', 'x');
+insert into nurture_steps (id, workspace_id, nurture_id, position, email_id) values ('63200000-0000-0000-0000-0000000000c1', '22222222-0000-0000-0000-000000000000', '63000000-0000-0000-0000-0000000000c1', 0, '63100000-0000-0000-0000-0000000000c1');
+insert into ai_cache (workspace_id, kind, key, output, model) values ('22222222-0000-0000-0000-000000000000', 'nurture_draft', repeat('a', 64), '{"secret":"cat"}', 'm');
+select pg_temp.as_user('b0000000-0000-0000-0000-000000000000');
+set role authenticated;
+select pg_temp.check((select count(*) from nurtures) = 0, 'Ben sees Cat''s nurtures');
+select pg_temp.check((select count(*) from nurture_steps) = 0, 'Ben sees Cat''s steps');
+select pg_temp.fails($$select * from ai_cache$$, 'Ben reads the AI cache');
+select pg_temp.fails($$select nurture_step_approve('63200000-0000-0000-0000-0000000000c1')$$, 'Ben approves Cat''s step');
+select pg_temp.fails($$select nurture_step_save('63000000-0000-0000-0000-0000000000c1', '63200000-0000-0000-0000-0000000000c1', 1, 'mine', '', 'x', 'x', '{}')$$, 'Ben rewrites Cat''s step');
+select pg_temp.fails($$select nurture_step_change('63200000-0000-0000-0000-0000000000c1', 'delete')$$, 'Ben deletes Cat''s step');
+select pg_temp.fails($$select nurture_set_status('63000000-0000-0000-0000-0000000000c1', 'paused')$$, 'Ben pauses Cat''s nurture');
+select pg_temp.fails($$select nurture_delete('63000000-0000-0000-0000-0000000000c1')$$, 'Ben deletes Cat''s nurture');
+select pg_temp.fails($$select nurture_save('22222222-0000-0000-0000-000000000000', null, 'x', '{"kind":"segment"}', null, '', '{}')$$, 'Ben makes a nurture in Cat''s workspace');
+select pg_temp.fails($$select nurture_enroll(null)$$, 'Ben enrolls people');
+select pg_temp.fails($$select nurture_advance(10)$$, 'Ben sends nurture steps');
+select pg_temp.fails($$select ai_cache_get('22222222-0000-0000-0000-000000000000', 'nurture_draft', repeat('a', 64))$$, 'Ben reads Cat''s AI cache');
+select pg_temp.fails($$select ai_cache_put('22222222-0000-0000-0000-000000000000', 'nurture_draft', repeat('b', 64), '{}', 'm', 0, 0)$$, 'Ben writes the AI cache');
+reset role;
+select pg_temp.check((select approved_at is null from nurture_steps where id = '63200000-0000-0000-0000-0000000000c1'), 'Cat''s step was approved');
+select set_config('request.jwt.claim.sub', '', false);
+
+-- Lead scoring (043): only owners change it; scoring, routing and owner writes are server only.
+insert into lead_settings (workspace_id, enabled) values ('22222222-0000-0000-0000-000000000000', true);
+select pg_temp.as_user('b0000000-0000-0000-0000-000000000000');
+set role authenticated;
+select pg_temp.check((select count(*) from lead_settings) = 0, 'Ben sees Cat''s scoring');
+select pg_temp.fails($$select lead_settings_save('11111111-0000-0000-0000-000000000000', '{"enabled": true}')$$, 'Ben (a member) turns scoring on');
+select pg_temp.fails($$select lead_settings_save('22222222-0000-0000-0000-000000000000', '{"enabled": false}')$$, 'Ben turns Cat''s scoring off');
+select pg_temp.fails($$select lead_rescore_now('22222222-0000-0000-0000-000000000000')$$, 'Ben rescores Cat''s contacts');
+select pg_temp.fails($$select lead_scores_refresh('22222222-0000-0000-0000-000000000000', 10)$$, 'Ben runs scoring');
+select pg_temp.fails($$select lead_scores_due()$$, 'Ben runs all scoring');
+select pg_temp.fails($$select * from lead_score_rows('22222222-0000-0000-0000-000000000000', '{}')$$, 'Ben reads Cat''s scores');
+select pg_temp.fails($$select lead_route('b0000000-0000-0000-0000-000000000000')$$, 'Ben routes a lead');
+select pg_temp.fails($$select contacts_owner_crm_set('22222222-0000-0000-0000-000000000000', '[]')$$, 'Ben sets CRM owners');
+reset role;
+select pg_temp.as_user('a0000000-0000-0000-0000-000000000000');
+set role authenticated;
+select pg_temp.fails($$select lead_settings_save('22222222-0000-0000-0000-000000000000', '{"enabled": false}')$$, 'Ann turns Cat''s scoring off');
+select lead_settings_save('11111111-0000-0000-0000-000000000000', '{"threshold": 60}');
+reset role;
+select pg_temp.check((select threshold from lead_settings where workspace_id = '11111111-0000-0000-0000-000000000000') = 60, 'Ann (an owner) can''t change her scoring');
+select pg_temp.check((select enabled from lead_settings where workspace_id = '22222222-0000-0000-0000-000000000000'), 'Cat''s scoring changed');
+select set_config('request.jwt.claim.sub', '', false);
+
 -- Cloud minutes: once Acme has used its 2,000, nobody there can start a run.
 insert into runs (workspace_id, project_id, test_name, test_version, environment_name, base_url, lock, status, duration_ms)
 values ('11111111-0000-0000-0000-000000000000', 'a1000000-0000-0000-0000-000000000000', 'long', 1, 'staging', 'https://x.com', '', 'passed', 2000 * 60000);

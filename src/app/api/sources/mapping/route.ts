@@ -13,7 +13,7 @@ export async function GET(request: Request) {
   const c = src ? connectorFor(src.kind) : undefined;
   if (!src || !c) return Response.json({ error: "Source not found." }, { status: 404 });
   const [{ data: saved }, { data: custom }] = await Promise.all([
-    auth.sb.from("mappings").select("object, col, target, value_map").eq("source_id", id).order("position"),
+    auth.sb.from("mappings").select("object, col, target, value_map, wins").eq("source_id", id).order("position"),
     auth.sb.from("fields").select("key, label, type, options").eq("workspace_id", src.workspace_id).eq("object", "contact"),
   ]);
   const cols = (src.columns ?? {}) as Record<string, Record<string, string>>;
@@ -21,7 +21,10 @@ export async function GET(request: Request) {
     const seen = Object.keys(cols[object] ?? {});
     const mapped = effectiveMapping(c, object, (saved ?? []) as SavedMapping[], seen, (custom ?? []) as CustomField[]);
     const names = [...new Set([...mapped.map((m) => m.col), ...seen])];
-    return names.map((col) => ({ col, sample: cols[object]?.[col] ?? "", target: mapped.find((m) => m.col === col)?.target ?? "skip" }));
+    return names.map((col) => {
+      const m = mapped.find((x) => x.col === col);
+      return { col, sample: cols[object]?.[col] ?? "", target: m?.target ?? "skip", wins: m?.wins ?? "claritia" };
+    });
   };
   return Response.json({ contact: out("contact"), company: out("company"), saved: (saved ?? []).length > 0 });
 }

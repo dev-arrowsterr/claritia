@@ -852,6 +852,84 @@ Records (custom objects and rich fields from week 8, pulled forward so imports a
 - **Left for later weeks:** per-contact segment refresh on change (hourly and on save for now); Segment, PostHog, Mixpanel, Amplitude, Shopify and the other product connectors; the Data model screen; a Snowflake and BigQuery account test (both are tested against recorded answers until then, check).
 - **Running cost:** no new paid service and no Claude calls; warehouse queries run on the customer's warehouse. Hourly segment refresh and warehouse pulls: Supabase compute within the current plan at Beta, one size up at Growth, about $25 (check); `claritia-intel` within the machines from Part 21c. **Total: $0 at Beta, about $25 at Growth.**
 
+## Part 21e. Week 9 status: sending built
+
+Setup steps and the full list of files: `docs/sending-setup.md`.
+
+| Piece | Where |
+|---|---|
+| Sending domains with DKIM, MAIL FROM (SPF) and DMARC records, each Verified, Waiting or Wrong; sending blocked until all three pass | `supabase/migrations/039_email.sql`, `src/lib/email/domains.ts` |
+| The guard at the moment each message leaves: suppressions, erasures, lawful basis by region, topics, frequency cap, quiet hours in the contact's time zone, physical address, verified domain, pause | `email_guard` in `039_email.sql` |
+| SES v2 sending with AWS signing; one-click unsubscribe headers; footer; tracked links with signed tokens; scanner clicks filtered | `src/lib/email/` |
+| SES events through SNS with signature check; hard bounces, 3 soft bounces and complaints suppress; complaints over 0.2% pause the workspace | `src/app/api/ses/route.ts`, `ses_event_apply` |
+| Unsubscribe page (topic or all) and RFC 8058 one-click endpoint | `src/app/u/[token]/route.ts` |
+| Settings › Sending: domains, sender, cap, quiet hours, topics, recent sends, test email | `src/components/app/views/SendingSettings.tsx` |
+
+- **Flaky and hostile cases tested:** listed in `docs/sending-setup.md`. A message that may have reached SES is never sent again.
+- **Left for later weeks:** branded link host, per-workspace configuration sets and dedicated IPs, Omniscient activity on send, the identity link token.
+- **Running cost:** about $253 at Beta and $2,780 at Growth, nearly all SES (check). No Claude calls.
+
+## Part 21f. Two-way sync, part 2: who wins, score and activity written back
+
+| Piece | Where |
+|---|---|
+| A **Wins** choice per field (Claritia, CRM, Newest). Three-way against the values both sides last matched: a change on one side goes across; a change on both sides follows the choice | `supabase/migrations/040_sync.sql`, `decide` in `src/lib/sources/map.ts`, `applyContacts` in `src/lib/sources/sync.ts` |
+| Score and band out only: HubSpot `claritia_score` and `claritia_band`; Salesforce `Claritia_Score__c` and `Claritia_Band__c` when the org has them | `src/lib/sources/hubspot.ts`, `src/lib/sources/salesforce.ts` |
+| Email sent, clicked, unsubscribed and form answers written to HubSpot (timeline events, or notes) and Salesforce (completed Tasks), each claimed before the call and never written twice | `pushActivity` in `sync.ts`, `crm_activity` job, `src/lib/sources/activity.ts` |
+| CRM pulls every 5 minutes by default; HubSpot webhooks within seconds | `src/lib/sources/server.ts` |
+| Fields table with the Wins column, score targets and the activity switch | `src/components/app/views/SourcesSettings.tsx` |
+| Tests | `tests/sync.test.ts`, `tests/pg/sync.pg.ts`, sync block in `tests/db/leaks.sql`; the 1,000-change HubSpot test still passes |
+
+- **Flaky cases tested:** a rep's HubSpot change lands over an older edit here and isn't pushed back over; a dead worker's claim turns unknown and is never written; HubSpot refusing a copy it already has counts as written; a rate limit mid-batch leaves the rest unknown; a Salesforce org without the score fields still syncs everything else; a settled round writes nothing.
+- **Left for later:** Salesforce sandboxes and Change Data Capture; deals and companies written back; per-field direction (in only, out only) beyond the score.
+- **Running cost:** no new paid service and no Claude calls. CRM APIs are free on the customer's plan. Pulls every 5 minutes instead of 15 add Supabase and `claritia-intel` load inside what's already paid at Beta; about $10 at Growth (check). **Total: $0 at Beta, about $10 at Growth.**
+
+## Part 21g. Forms built
+
+| Piece | Where |
+|---|---|
+| Forms and answers, with spam marked and kept; a real answer becomes a contact (source form), a consent row, a topic subscription on opt-in, and a `form.submitted` event that two-way CRMs also get | `supabase/migrations/041_forms.sql`, `src/lib/forms/submit.ts` |
+| Builder: fields (text, email, phone, long text, number, dropdown, checkboxes, one checkbox, hidden), what each fills, required, order; button, thank-you or redirect, color; consent (unticked checkbox or notice), topic, Turnstile; preview; embed code and link; answers with page, UTMs and consent | `src/components/app/views/FormsView.tsx`, `src/lib/forms/schema.ts` |
+| Hosted page `/f/<id>` and embed `/f/embed.js` (one script tag; keeps first and latest UTMs and ad click ids; resizes; hands the email to the site script so the visit links to the person) | `src/app/f/`, `src/lib/forms/render.ts` |
+| Spam: hidden field, a 2-second speed check with a signed page token, 10 per address per 10 minutes, Cloudflare Turnstile when on | `src/lib/forms/token.ts`, `form_submit` |
+
+- **Flaky and hostile cases tested:** bots get a success answer and no contact; stale, forged and other forms' page tokens are refused; a flood from one address stops at 10; a disposable address is refused before anything is kept; the same person twice is one contact; a notice form counts as legitimate interest only for US contacts, as the send guard expects; a label with a script tag is shown as text; preview keeps nothing.
+- **Setup:** optional Turnstile: Cloudflare → Turnstile → add a widget for `app.tryclaritia.com`, then set `TURNSTILE_SITE_KEY` and `TURNSTILE_SECRET_KEY` on Render.
+- **Left for later:** country from the visitor's IP (so notice forms work without a country field), file uploads, multi-step forms, progressive fields for known visitors, native (no frame) rendering.
+- **Running cost:** Turnstile is free (check). No Claude calls. Answers and pages run on the web app. **Total: $0 at Beta, about $5 at Growth** for storage of answers (check).
+
+## Part 21h. Nurture emails built
+
+| Piece | Where |
+|---|---|
+| Nurtures with steps and waits; each step points at its own email, and editing makes a new email and clears approval so mail in line keeps the approved words | `supabase/migrations/042_nurture.sql` |
+| Live only with every step approved, a verified sender and a physical address; people join from a segment or a form (after it goes live); leave at a stage, on topic unsubscribe or suppression; paused holds everyone | `nurture_set_status`, `nurture_enroll`, `nurture_advance` |
+| Steps go out through the send pipeline (039), so consent, the cap and quiet hours apply; a repeated step adds no second email | `nurture_advance` (dedupe per enrollment and step) |
+| AI drafts with Claude Opus 5.5 from the brief only, links limited to the workspace's domains, review notes for claims to check; answers cached by their inputs | `src/lib/nurture/draft.ts`, `src/app/api/nurture/draft/route.ts`, `ai_cache` |
+| Nurture screen: setup and brief, Write with AI, edit, rewrite, approve, order, people and why they left | `src/components/app/views/NurtureView.tsx` |
+| Tests | `tests/nurture.test.ts`, `tests/pg/nurture.pg.ts`, nurture block in `tests/db/leaks.sql` |
+
+- **Flaky and hostile cases tested:** nothing goes live unapproved or without sending set up; a repeat advance after a crash adds no second email; a live edit holds the step and leaves queued mail on the approved words; a repeat draft request never calls the model; a link off the workspace's domains is dropped and flagged; typed text is escaped in the email.
+- **Setup:** `ANTHROPIC_API_KEY` on Render (already used by the GitHub flow).
+- **Left for later:** branches and AI agent steps (weeks 11 to 14), the Brand Brain as the source in place of the brief (M5), personalization tokens (week 10), per-step reports.
+- **Running cost:** Claude Opus 5.5 at $4 per million input and $20 per million output tokens. A 3-email draft is about 2,000 tokens in and 3,000 out with thinking, about $0.07. At 20 drafts a team a month: about $70 at Beta and $700 at Growth (check). Sending is already counted in Part 21e. **Total: about $70 at Beta, about $700 at Growth.**
+
+## Part 21i. Lead scoring and routing built
+
+| Piece | Where |
+|---|---|
+| Fit (0 to 100): the company against the ideal customer (the account's fit when there is one; the same math as `fitV0`), plus work email and title keywords | `icp_fit`, `lead_score_rows` in `supabase/migrations/043_lead_scoring.sql` |
+| Engagement (0 to 100): forms, meetings, email clicks, visits and pricing visits from the last 90 days, each halving in value on a set number of days; unsubscribes take points away; probable visits never count | `lead_score_rows` |
+| Every 5 minutes, contacts with new activity (and daily for fading) are rescored; crossing the threshold makes an MQL and picks an owner: the first matching rule (countries, industries, sizes), owners taking turns, an existing owner kept | `lead_scores_refresh`, `lead_route` |
+| Score, band, stage and CRM owner go to HubSpot (`claritia_score`, `claritia_band`, `lifecyclestage`, `hubspot_owner_id`) and Salesforce (`Claritia_Score__c`, `Claritia_Band__c`, `OwnerId`); a rep's reassignment in the CRM comes back | `src/lib/sources/sync.ts`, `hubspot.ts`, `salesforce.ts` |
+| Settings › Lead scoring: on and off, MQL score, fit and engagement mix, fade, titles, points per activity, routing rules with teammates or CRM owners, rescore now, top scores | `src/components/app/views/LeadScoringPanel.tsx`, `src/app/api/sources/owners/route.ts` |
+| Tests | `tests/pg/scoring.pg.ts`, owner round trip in `tests/pg/sync.pg.ts`, scoring block in `tests/db/leaks.sql` |
+
+- **Flaky and hostile cases tested:** the SQL fit matches the TypeScript fit on five cases; probable visits add nothing; a lead is routed once however often scoring runs; an owner already set here or in the CRM is kept; turns alternate; a rep's HubSpot reassignment lands without a push back; only the owner changes scoring, owners must be teammates, weights stay in range.
+- **Setup:** HubSpot asks for `crm.objects.owners.read` as an optional scope (add it to the app's Auth tab) so routing can list HubSpot owners.
+- **Left for later:** alerts to the owner in Slack and email on a new MQL, score history charts, a contact page breakdown, AI branch choices (M4).
+- **Running cost:** no new paid service and no Claude calls; scoring is SQL on Supabase. Every 5 minutes for changed contacts fits the current plan at Beta; about $25 at Growth for one size up (check). **Total: $0 at Beta, about $25 at Growth.**
+
 ---
 
 ## Part 22. Rollout

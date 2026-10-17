@@ -12,7 +12,9 @@ export type Route =
   | "accounts"
   | "people"
   | "journeys"
+  | "nurture"
   | "pages"
+  | "forms"
   | "reports"
   | "tests"
   | "blocks"
@@ -34,7 +36,9 @@ const MARKETING: NavItem[] = [
   { route: "accounts", label: "Accounts" },
   { route: "visitors", label: "Visitors" },
   { route: "journeys", label: "Journeys", group: "Engage" },
+  { route: "nurture", label: "Nurture" },
   { route: "pages", label: "Pages" },
+  { route: "forms", label: "Forms" },
   { route: "reports", label: "Reports", group: "Prove" },
 ];
 

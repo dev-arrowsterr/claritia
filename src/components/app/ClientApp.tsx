@@ -22,6 +22,8 @@ import { AccountsView } from "./views/AccountsView";
 import { ContactsView, LeadsView } from "./views/ContactsView";
 import { CompaniesView, ObjectsView } from "./views/RecordsViews";
 import { SegmentsView } from "./views/SegmentsView";
+import { FormsView } from "./views/FormsView";
+import { NurtureView } from "./views/NurtureView";
 import { JourneysView, PagesView, ReportsView } from "./views/MarketingIntros";
 import { VisitorsView } from "./views/VisitorsView";
 import { SettingsView } from "./views/SettingsView";
@@ -40,7 +42,9 @@ const ICONS: Record<NavRoute, React.ReactNode> = {
   accounts: <Users size={15} />,
   people: <Users size={15} />,
   journeys: <Branch size={15} />,
+  nurture: <Branch size={15} />,
   pages: <FileText size={15} />,
+  forms: <ListIcon size={15} />,
   reports: <BarChart size={15} />,
   tests: <ListIcon size={15} />,
   blocks: <Box size={15} />,
@@ -57,7 +61,7 @@ const PROJECT_KEY = "claritia:project";
 const NEW_PROJECT = "__new";
 
 type Loc = { route: Route; id: string };
-const WITH_ID = new Set<Route>(["tests", "blocks", "runs", "approvals", "accounts", "contacts", "leads", "companies", "segments"]);
+const WITH_ID = new Set<Route>(["tests", "blocks", "runs", "approvals", "accounts", "contacts", "leads", "companies", "segments", "forms", "nurture"]);
 
 const readLoc = (): Loc => {
   const [, first = "", id = "", rest = ""] = window.location.pathname.split("/");
@@ -319,7 +323,7 @@ export function ClientApp({ config }: { config: SupaConfig }) {
             <ErrorNote message={error} />
           </div>
         ) : null}
-        {route === "contacts" ? <ContactsView {...props} /> : route === "leads" ? <LeadsView {...props} /> : route === "companies" ? <CompaniesView {...props} /> : route === "segments" ? <SegmentsView {...props} /> : route === "objects" ? <ObjectsView key={loc.id.split("/")[0]} {...props} /> : route === "visitors" ? <VisitorsView {...props} /> : route === "accounts" ? <AccountsView {...props} /> : route === "journeys" ? <JourneysView /> : route === "pages" ? <PagesView /> : route === "reports" ? <ReportsView /> : route === "tests" ? <TestsView {...props} /> : route === "blocks" ? <BlocksView {...props} /> : route === "map" ? <MapView {...props} /> : route === "runs" ? <RunsView {...props} /> : route === "approvals" ? <ApprovalsView {...props} /> : route === "environments" ? <EnvironmentsView {...props} /> : route === "schedules" ? <SchedulesView {...props} /> : route === "insights" ? <InsightsView {...props} /> : <SettingsView {...props} />}
+        {route === "contacts" ? <ContactsView {...props} /> : route === "leads" ? <LeadsView {...props} /> : route === "companies" ? <CompaniesView {...props} /> : route === "segments" ? <SegmentsView {...props} /> : route === "objects" ? <ObjectsView key={loc.id.split("/")[0]} {...props} /> : route === "visitors" ? <VisitorsView {...props} /> : route === "accounts" ? <AccountsView {...props} /> : route === "journeys" ? <JourneysView /> : route === "pages" ? <PagesView /> : route === "forms" ? <FormsView {...props} /> : route === "nurture" ? <NurtureView {...props} /> : route === "reports" ? <ReportsView /> : route === "tests" ? <TestsView {...props} /> : route === "blocks" ? <BlocksView {...props} /> : route === "map" ? <MapView {...props} /> : route === "runs" ? <RunsView {...props} /> : route === "approvals" ? <ApprovalsView {...props} /> : route === "environments" ? <EnvironmentsView {...props} /> : route === "schedules" ? <SchedulesView {...props} /> : route === "insights" ? <InsightsView {...props} /> : <SettingsView {...props} />}
       </main>
     </div>
   );

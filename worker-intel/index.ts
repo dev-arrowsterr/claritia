@@ -3,16 +3,21 @@
 //   DATABASE_URL=… SECRETS_KEY=… node worker-intel/index.ts
 // Imports also need SUPABASE_URL and SUPABASE_SECRET_KEY, to read uploaded files from storage. Sources need
 // SECRETS_KEY (credentials are sealed with it) and each tool's <PREFIX>_CLIENT_ID and _CLIENT_SECRET to refresh sign-ins.
+// Sending needs AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, SES_REGION, SES_CONFIGURATION_SET, SECRETS_KEY (link tokens)
+// and APP_URL when the app isn't at https://app.tryclaritia.com.
 
 import { createServer } from "node:http";
 import { hostname } from "node:os";
 import pg from "pg";
 import { jobLoop } from "../src/lib/jobs.ts";
+import { linkBase } from "../src/lib/email/render.ts";
+import { sesFromEnv } from "../src/lib/email/ses.ts";
+import { domainCheck, domainRemove, send } from "./jobs/email.ts";
 import { enrichCompany, identityChanged, ipLookup } from "./jobs/company.ts";
 import { accountAlert, scoreAccount, sweepSignals } from "./jobs/signals.ts";
 import { importFile, importUndo, pruneImportFiles } from "./jobs/imports.ts";
 import { segmentRefresh } from "./jobs/segments.ts";
-import { crmPush, sourceHook, sourcePull } from "./jobs/sources.ts";
+import { crmActivity, crmPush, sourceHook, sourcePull } from "./jobs/sources.ts";
 import { deviceReset, privacy, rebuild, stitch, stitchEvidence } from "./jobs/stitch.ts";
 import { pgRpc } from "./rpc.ts";
 
@@ -29,6 +34,7 @@ if (!process.env.DATABASE_URL) {
 const loops = Math.max(1, Number(process.env.CONCURRENCY || 4));
 const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL, max: loops + 2, statement_timeout: 30_000 });
 const rpc = pgRpc(pool);
+const ses = sesFromEnv();
 const company = { ipinfoToken: process.env.IPINFO_TOKEN, ipinfoCompany: process.env.IPINFO_COMPANY === "1", coresignalKey: process.env.CORESIGNAL_API_KEY };
 const handlers = {
   stitch: stitch(pool),
@@ -45,14 +51,18 @@ const handlers = {
   import_undo: importUndo(rpc),
   source_pull: sourcePull(pool, rpc),
   crm_push: crmPush(pool, rpc),
+  crm_activity: crmActivity(pool, rpc),
   source_hook: sourceHook(pool, rpc),
   segment_refresh: segmentRefresh(rpc),
+  send: send(rpc, { ses, base: linkBase() }),
+  domain_check: domainCheck(rpc, ses),
+  domain_remove: domainRemove(pool, ses),
 };
 const stop = new AbortController();
 const worker = `intel-${hostname()}-${process.pid}`;
 
 health({ ok: true, worker, kinds: Object.keys(handlers), loops });
-log("intel started", { worker, loops, secrets: !!process.env.SECRETS_KEY, ipinfo: !!company.ipinfoToken, coresignal: !!company.coresignalKey });
+log("intel started", { worker, loops, secrets: !!process.env.SECRETS_KEY, ses: !!ses, ipinfo: !!company.ipinfoToken, coresignal: !!company.coresignalKey });
 const running = Array.from({ length: loops }, (_, i) => jobLoop({ rpc, worker: `${worker}-${i}`, handlers, leaseS: 120, idleMs: 1000, signal: stop.signal, log: (m) => log(m) }));
 
 // The signals sweep: one instance at a time (session advisory lock), every 30 seconds.

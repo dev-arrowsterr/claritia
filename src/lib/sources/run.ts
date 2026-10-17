@@ -7,7 +7,7 @@ import { seal, unseal } from "../seal.ts";
 import { makeCtx } from "./ctx.ts";
 import type { SavedMapping } from "./map.ts";
 import { connectorFor } from "./registry.ts";
-import { applyHooks, call, pull, push, type Counts, type Deps } from "./sync.ts";
+import { applyHooks, call, pull, push, pushActivity, type Counts, type Deps } from "./sync.ts";
 import { AuthError, type Creds, type HookEvent, type SourceRow } from "./types.ts";
 
 export type RunOpts = {
@@ -86,6 +86,16 @@ export async function runPush(o: RunOpts, sourceId: string): Promise<{ more: boo
   const p = await push(d, { budgetMs: o.budgetMs });
   if (p.written || p.errors) await finish(o, d, "contacts", "out", started, p, null);
   return { more: p.more };
+}
+
+/** Email and form activity out to a two-way CRM. */
+export async function runActivity(o: RunOpts, sourceId: string): Promise<{ more: boolean } | null> {
+  const d = await deps(o, sourceId);
+  if (!d || d.ctx.source.status !== "active") return null;
+  const started = new Date();
+  const a = await pushActivity(d, { budgetMs: o.budgetMs });
+  if (a.written || a.errors) await finish(o, d, "activity", "out", started, a, null);
+  return { more: a.more };
 }
 
 /** Staged webhook events, applied in order. */
