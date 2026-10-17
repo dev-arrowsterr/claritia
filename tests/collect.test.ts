@@ -65,7 +65,11 @@ test("device ids are signed per site", () => {
   const id = signDevice(a, u);
   assert.equal(verifyDevice(a, id), u);
   assert.equal(verifyDevice(b, id), null, "another site's id");
-  assert.equal(verifyDevice(a, id.slice(0, -1) + (id.endsWith("A") ? "B" : "A")), null, "tampered");
+  // Change a middle character of the signature: the last base64url character can carry only padding bits.
+  const sig = id.split(".")[2];
+  const at = Math.floor(sig.length / 2);
+  const tampered = `${id.slice(0, id.length - sig.length)}${sig.slice(0, at)}${sig[at] === "A" ? "B" : "A"}${sig.slice(at + 1)}`;
+  assert.equal(verifyDevice(a, tampered), null, "tampered");
   assert.equal(verifyDevice(a, `v1.${uuid7()}.${id.split(".")[2]}`), null, "other uuid with this signature");
   assert.equal(verifyDevice(a, "v2." + id.slice(3)), null);
   assert.equal(verifyDevice(a, 42), null);
