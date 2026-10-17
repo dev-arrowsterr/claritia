@@ -13,6 +13,7 @@ export type Route =
   | "people"
   | "journeys"
   | "pages"
+  | "forms"
   | "reports"
   | "tests"
   | "blocks"
@@ -35,6 +36,7 @@ const MARKETING: NavItem[] = [
   { route: "visitors", label: "Visitors" },
   { route: "journeys", label: "Journeys", group: "Engage" },
   { route: "pages", label: "Pages" },
+  { route: "forms", label: "Forms" },
   { route: "reports", label: "Reports", group: "Prove" },
 ];
 

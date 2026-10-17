@@ -884,6 +884,20 @@ Setup steps and the full list of files: `docs/sending-setup.md`.
 - **Left for later:** Salesforce sandboxes and Change Data Capture; deals and companies written back; per-field direction (in only, out only) beyond the score.
 - **Running cost:** no new paid service and no Claude calls. CRM APIs are free on the customer's plan. Pulls every 5 minutes instead of 15 add Supabase and `claritia-intel` load inside what's already paid at Beta; about $10 at Growth (check). **Total: $0 at Beta, about $10 at Growth.**
 
+## Part 21g. Forms built
+
+| Piece | Where |
+|---|---|
+| Forms and answers, with spam marked and kept; a real answer becomes a contact (source form), a consent row, a topic subscription on opt-in, and a `form.submitted` event that two-way CRMs also get | `supabase/migrations/041_forms.sql`, `src/lib/forms/submit.ts` |
+| Builder: fields (text, email, phone, long text, number, dropdown, checkboxes, one checkbox, hidden), what each fills, required, order; button, thank-you or redirect, color; consent (unticked checkbox or notice), topic, Turnstile; preview; embed code and link; answers with page, UTMs and consent | `src/components/app/views/FormsView.tsx`, `src/lib/forms/schema.ts` |
+| Hosted page `/f/<id>` and embed `/f/embed.js` (one script tag; keeps first and latest UTMs and ad click ids; resizes; hands the email to the site script so the visit links to the person) | `src/app/f/`, `src/lib/forms/render.ts` |
+| Spam: hidden field, a 2-second speed check with a signed page token, 10 per address per 10 minutes, Cloudflare Turnstile when on | `src/lib/forms/token.ts`, `form_submit` |
+
+- **Flaky and hostile cases tested:** bots get a success answer and no contact; stale, forged and other forms' page tokens are refused; a flood from one address stops at 10; a disposable address is refused before anything is kept; the same person twice is one contact; a notice form counts as legitimate interest only for US contacts, as the send guard expects; a label with a script tag is shown as text; preview keeps nothing.
+- **Setup:** optional Turnstile: Cloudflare → Turnstile → add a widget for `app.tryclaritia.com`, then set `TURNSTILE_SITE_KEY` and `TURNSTILE_SECRET_KEY` on Render.
+- **Left for later:** country from the visitor's IP (so notice forms work without a country field), file uploads, multi-step forms, progressive fields for known visitors, native (no frame) rendering.
+- **Running cost:** Turnstile is free (check). No Claude calls. Answers and pages run on the web app. **Total: $0 at Beta, about $5 at Growth** for storage of answers (check).
+
 ---
 
 ## Part 22. Rollout

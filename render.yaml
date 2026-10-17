@@ -49,3 +49,8 @@ services:
       # Sending (docs/sending-setup.md): the SNS topic SES events come from.
       - key: SES_SNS_TOPIC_ARN
         sync: false
+      # Forms (docs/conversion-parity.md Part 21g): Cloudflare Turnstile, optional per form.
+      - key: TURNSTILE_SITE_KEY
+        sync: false
+      - key: TURNSTILE_SECRET_KEY
+        sync: false

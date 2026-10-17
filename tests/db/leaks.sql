@@ -992,6 +992,29 @@ select pg_temp.fails($$select mapping_save('5a000000-0000-0000-0000-0000000000a1
 reset role;
 select set_config('request.jwt.claim.sub', '', false);
 
+-- Forms (041): members build forms in their own workspace only; answers and the submit path are server only.
+insert into forms (id, workspace_id, name, fields, status) values
+  ('61000000-0000-0000-0000-0000000000c1', '22222222-0000-0000-0000-000000000000', 'Cat form', '[{"key":"email","label":"Email","type":"email","maps_to":"email"}]', 'live');
+insert into form_submissions (id, workspace_id, form_id, answers) values
+  ('62000000-0000-0000-0000-0000000000c1', '22222222-0000-0000-0000-000000000000', '61000000-0000-0000-0000-0000000000c1', '{"email":"friend@cat.com"}');
+select pg_temp.as_user('b0000000-0000-0000-0000-000000000000');
+set role authenticated;
+select pg_temp.check((select count(*) from forms) = 0, 'Ben sees Cat''s forms');
+select pg_temp.check((select count(*) from form_submissions) = 0, 'Ben sees Cat''s form answers');
+select pg_temp.fails($$select form_save('22222222-0000-0000-0000-000000000000', null, 'x', '[{"key":"email","label":"E","type":"email","maps_to":"email"}]', '{}')$$, 'Ben makes a form in Cat''s workspace');
+select pg_temp.fails($$select form_save('11111111-0000-0000-0000-000000000000', '61000000-0000-0000-0000-0000000000c1', 'mine', '[{"key":"email","label":"E","type":"email","maps_to":"email"}]', '{}')$$, 'Ben takes over Cat''s form');
+select pg_temp.fails($$select form_publish('61000000-0000-0000-0000-0000000000c1', false)$$, 'Ben takes down Cat''s form');
+select pg_temp.fails($$select form_delete('61000000-0000-0000-0000-0000000000c1')$$, 'Ben deletes Cat''s form');
+select pg_temp.fails($$select form_public('61000000-0000-0000-0000-0000000000c1', true)$$, 'Ben reads a form through the server path');
+select pg_temp.fails($$select form_submit('61000000-0000-0000-0000-0000000000c1', '{}')$$, 'Ben writes an answer directly');
+select pg_temp.fails($$select form_submission_link('62000000-0000-0000-0000-0000000000c1', 'b0000000-0000-0000-0000-000000000000')$$, 'Ben links an answer');
+select pg_temp.fails($$insert into forms (workspace_id, name) values ('11111111-0000-0000-0000-000000000000', 'x')$$, 'Ben inserts a form');
+select form_save('11111111-0000-0000-0000-000000000000', null, 'Acme demo', '[{"key":"email","label":"E","type":"email","maps_to":"email"}]', '{}');
+reset role;
+select pg_temp.check((select count(*) from forms where workspace_id = '11111111-0000-0000-0000-000000000000') = 1, 'Ben (a member) can''t build a form in Acme');
+select pg_temp.check((select status from forms where id = '61000000-0000-0000-0000-0000000000c1') = 'live', 'Cat''s form changed');
+select set_config('request.jwt.claim.sub', '', false);
+
 -- Cloud minutes: once Acme has used its 2,000, nobody there can start a run.
 insert into runs (workspace_id, project_id, test_name, test_version, environment_name, base_url, lock, status, duration_ms)
 values ('11111111-0000-0000-0000-000000000000', 'a1000000-0000-0000-0000-000000000000', 'long', 1, 'staging', 'https://x.com', '', 'passed', 2000 * 60000);
