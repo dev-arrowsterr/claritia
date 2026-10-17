@@ -298,6 +298,8 @@ export async function pull(d: Deps, budgetMs = 240_000): Promise<{ more: boolean
   const chosen = d.connector.objectsFor?.(d.ctx.source);
   for (const object of order) {
     if (chosen ? !chosen.includes(object) : !d.connector.objects.includes(object) || !enabled(d, object)) continue;
+    // Webhook-only tools (forms, Calendly, Cal.com) have nothing to pull; their records arrive by hook.
+    if (object === "lists" ? !d.connector.lists : !d.connector.pull) continue;
     const total = (counts[object] = zero());
     for (;;) {
       if (d.ctx.signal?.aborted) throw new Error("Stopped");

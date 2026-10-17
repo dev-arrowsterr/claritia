@@ -103,7 +103,7 @@ The testing product's screens (Tests, Runs, Map, Approvals for heals) move under
 | `claritia-runner` (exists, sleeps when idle) | 2 GB | Browser jobs: crawls and Funnel QA runs |
 | `claritia-relay` | 256 MB | Kept for localhost tunnels (Funnel QA on staging) |
 | Supabase `claritia` (Tokyo) | Pro + Medium, then Large | Postgres, Auth, Storage, pg_cron, pgvector |
-| Amazon SES | — | Email sending, with bounce and complaint events through SNS |
+| Resend | — | Email sending from customer domains, with bounce, complaint and delivery events through signed webhooks |
 | ClickHouse Cloud | Growth only | Raw events at scale |
 
 ### 3.2 Data flow
@@ -116,7 +116,7 @@ The testing product's screens (Tests, Runs, Map, Approvals for heals) move under
                                    │
                          jobs queue (claim_job, skip locked)
                                    │
-   segment_refresh · journey_step · agent_decide · agent_write · send · ses_event · score · handoff · qa_run
+   segment_refresh · journey_step · agent_decide · agent_write · send · email_event · score · handoff · qa_run
                                    │
           Approvals · Slack · Omniscient (contacts, opportunities, activities) · Reports · MCP · API
 ```
@@ -127,7 +127,7 @@ The testing product's screens (Tests, Runs, Map, Approvals for heals) move under
 collect/               Hono intake: /s.js, /e, /f (forms), /c (clicks), /u (unsubscribe)
 src/lib/identity/      docs/identity.md
 src/lib/contacts/      contacts, companies, consent, segments (filter → SQL)
-src/lib/email/         ses client, domains, templates (MJML), suppression, tracking links
+src/lib/email/         resend client, domains, templates (MJML), suppression, tracking links
 src/lib/journeys/      graph schema, engine, steps, simulation
 src/lib/brain/         ingest, atoms, embeddings, verifier
 src/lib/pages/         blocks, renderer, forms, booking, personalization, domains
@@ -253,18 +253,18 @@ imports        (id, workspace_id, file_path, mapping jsonb, status, counts jsonb
 
 **Problem:** marketing email has to reach the inbox, respect the law, and look right everywhere.
 
-**Sending:** Amazon SES. One configuration set per workspace, for event routing and reputation tracking.
+**Sending:** Resend (already used for alerts and test inboxes). Each customer domain is a Resend domain made through its API, and every send is tagged with the workspace id, for event routing and reputation tracking.
 
 | Stage | Setup |
 |---|---|
-| Beta | Shared SES IP pool, split by sending reputation tier |
-| Growth | Dedicated IPs for workspaces sending 100K+ a month (check price), with an automatic warm-up schedule |
+| Beta | Resend's shared IPs |
+| Growth | Resend dedicated IPs for workspaces sending 100K+ a month (check price), with Resend's managed warm-up |
 
 **Domains wizard (Settings › Sending):**
 1. The customer adds a sending domain (for example `mail.acme.com`).
 2. Claritia shows the DNS records to add:
-   - DKIM: three SES CNAMEs (Easy DKIM).
-   - SPF: through a custom MAIL FROM subdomain.
+   - DKIM: the TXT record Resend gives for the domain.
+   - SPF: the MX and TXT records on Resend's `send` subdomain.
    - DMARC: at least `p=none` with a `rua` address.
    - A tracking subdomain CNAME for links.
 3. A DNS check job polls each record and shows a green or red tag per record.
@@ -279,13 +279,13 @@ imports        (id, workspace_id, file_path, mapping jsonb, status, counts jsonb
 | Spam complaint rate under 0.3% (aim for under 0.1%) | Per-workspace complaint tracking. Sending pauses at 0.2% over 7 days. |
 | Visible unsubscribe link and physical address (CAN-SPAM) | A footer block that can't be removed from marketing templates |
 
-**Events:** SES sends to SNS, then to `/api/ses/events`, verified by SNS signature.
+**Events:** Resend webhooks post to `/api/email/events`, verified by the Svix signature.
 
 | Event | Action |
 |---|---|
 | Delivery | Logged |
 | Bounce (hard) | Suppress the address for all topics |
-| Bounce (soft) | Retry by SES. Suppress after 3 in 30 days. |
+| Bounce (soft) | Retry by Resend. Suppress after 3 in 30 days. |
 | Complaint | Suppress, unsubscribe from all, alert if the rate rises |
 | Reject | Logged, alert |
 
@@ -305,7 +305,7 @@ imports        (id, workspace_id, file_path, mapping jsonb, status, counts jsonb
    - suppression;
    - the frequency cap (default 3 marketing emails per 7 days per contact);
    - quiet hours in the contact's time zone.
-2. It renders the email, rewrites links, adds headers, and sends through SES with up to 14 messages a second per workspace at Beta (check the SES account rate).
+2. It renders the email, rewrites links, adds headers, and sends through Resend's batch endpoint (100 emails per call) within the account's rate limit (check the Resend rate for the plan).
 3. It writes `email_messages` and a contact event, and posts an activity to Omniscient.
 
 **Data (migration `024_email.sql`):**
@@ -315,7 +315,7 @@ sending_domains (id, workspace_id, domain, dkim_status, spf_status, dmarc_status
 templates       (id, workspace_id, name, blocks jsonb, mjml text, version int)
 emails          (id, workspace_id, name, kind text, -- journey, broadcast, one_to_one
                  subject, preheader, template_id, from_name, from_email, topic_id, status)
-email_messages  (id, workspace_id, email_id, contact_id, journey_step_id, ses_message_id, subject_final,
+email_messages  (id, workspace_id, email_id, contact_id, journey_step_id, resend_id, subject_final,
                  body_hash, sent_at, delivered_at, bounced text, complained_at, first_click_at, replied_at)
 suppressions    (workspace_id, email_hash, reason, source, at)
 send_limits     (workspace_id, per_second, per_day, paused bool, paused_reason)
@@ -327,7 +327,7 @@ send_limits     (workspace_id, per_second, per_day, paused bool, paused_reason)
 - **Settings › Sending:** domains with record tags, reputation numbers, and the pause banner if paused.
 
 **Tests:**
-- SNS signature check. Each event type is handled.
+- Webhook signature check. Each event type is handled.
 - A suppressed address is never sent to, even from a journey step that was already queued.
 - `List-Unsubscribe-Post` unsubscribes in one POST.
 - Frequency cap and quiet hours hold.
@@ -696,7 +696,7 @@ Work on the Arrowsterr side: an API key and 3 endpoints if they don't exist yet 
 | 7 | Contacts, companies, consents, fields, import |
 | 8 | Segment builder and engine |
 | 9 | Syncs: Omniscient both ways, HubSpot, Segment, PostHog, Stripe |
-| 10 | SES setup, domains wizard, DNS checks, SNS events, suppression |
+| 10 | Resend domains API, domains wizard, DNS checks, webhook events, suppression |
 | 11 | Templates, brand kit, MJML, tracking links, unsubscribe, footer rules |
 | 12 | Broadcasts, send pipeline, caps and quiet hours, email render QA |
 | 13 | Brand Brain: absorb and distill |
@@ -748,7 +748,7 @@ Work on the Arrowsterr side: an API key and 3 endpoints if they don't exist yet 
 | Real-browser checks (script, identity, forms, pages, email renders, consent matrix) | `scripts/*-check.ts` on Chromium, plus WebKit and Firefox in CI |
 | Suite integration (Omniscient and HubSpot test workspaces) | `scripts/suite-check.ts` |
 | AI evals (Write, Decide, page build, verifier, weekly summary) | `scripts/ai-eval.ts` in CI on any prompt or model change |
-| Deliverability (SES mailbox simulator addresses for bounce and complaint) | `scripts/ses-check.ts` |
+| Deliverability (Resend test addresses for delivered, bounced and complained) | `scripts/email-check.ts` |
 | Leak tests on every table | `tests/db/leaks.sql` |
 | Load (collect 10K events a second, 10K journey steps a minute, 50 sends a second) | `scripts/load-*.ts` |
 
@@ -789,7 +789,7 @@ Website rules are in `docs/account-intelligence.md` Part 3 and `docs/identity.md
 ### 9.4 Data
 
 - Same retention, erasure, export and sub-processor rules as `docs/account-intelligence.md` Part 3.
-- Amazon SES and Cloudflare Turnstile are added to the sub-processor list.
+- Resend and Cloudflare Turnstile are added to the sub-processor list.
 
 ---
 
@@ -803,7 +803,7 @@ Website rules are in `docs/account-intelligence.md` Part 3 and `docs/identity.md
 | Suite bundle | 20% off when a team runs Arrowsterr, Claritia and Omniscient together | — |
 
 - Overages: $10 per 1,000 contacts, $1 per 1,000 emails.
-- At the cost per team in Part 11 (about $80–$104), Starter keeps about 65% gross margin and Growth about 87%.
+- At the cost per team in Part 11 (about $85–$121), Starter keeps about 60% gross margin and Growth about 89%.
 
 ---
 
@@ -841,18 +841,17 @@ Claude prices: Haiku 5.5 $0.10/$0.50, Sonnet 5.5 $2/$10, Opus 5.5 $4/$20 per mil
 | Line | Beta (50 teams) | Growth (500 teams) |
 |---|---|---|
 | AI ($60 per team) | $3,000 | $30,000 |
-| Amazon SES (about $0.10 per 1,000 emails, check) | $250 | $2,500 |
+| Resend, marketing sends and app notifications (2.5M emails a month at Beta, 25M at Growth, check) | $1,150 (check) | $5,000 (custom quote, check) |
 | Dedicated sending IPs (about $25 each, check) | $50 (2) | $250 (10) |
 | Coresignal (check) | $1,500 | $5,000 |
 | IPinfo Business (check) | $249 | $1,000 |
 | Fly: web, collect, agent, relay (check) | $25 | $120 |
 | Supabase Pro + compute (check) | $85 | $135 |
 | ClickHouse Cloud (check) | — | $300 |
-| Resend for app notifications | $20 | $90 (check) |
 | Cloudflare Turnstile | $0 (check) | $0 (check) |
 | SOC 2 compliance tool (check) | — | $850 |
-| **Total** | **$5,179** | **$40,245** |
-| **Per team** | **About $104** | **About $80** |
+| **Total** | **$6,059** | **$42,655** |
+| **Per team** | **About $121** | **About $85** |
 
 **Ways to cut the bill:**
 - Haiku for Write by default.
@@ -871,7 +870,7 @@ Claude prices: Haiku 5.5 $0.10/$0.50, Sonnet 5.5 $2/$10, Opus 5.5 $4/$20 per mil
 | AI writes something false or off-brand | Trust lost | Atoms only, verifier, voice guide, review modes unlocked by approval history |
 | Wrong identity link drives a wrong email | Creepy or wrong message | Probable never sends, no tracking mentions, `can_act()` gate |
 | Omniscient API slips | Handoff and booking blocked | HubSpot sync as the fallback path, built in week 9 |
-| SES production access or rate limits | Launch delay | Request production access in week 1, Resend as a backup sender at Beta volume (check) |
+| Resend rate limits or plan caps | Launch delay | Ask Resend for the volume plan and rate raise in week 1 |
 | Too much scope for one team | Late launch | Phase releases each stand alone. Beta at week 19 needs only phases A to C. |
 | HubSpot and Conversion.ai move faster | Harder sales | Suite bundle, price, Website Intelligence and Funnel QA that they don't have |
 
@@ -881,7 +880,7 @@ Claude prices: Haiku 5.5 $0.10/$0.50, Sonnet 5.5 $2/$10, Opus 5.5 $4/$20 per mil
 
 | Item | Needed by | Lead time |
 |---|---|---|
-| AWS account, SES production access request, SNS topic | Week 10 (request in week 1) | Days to weeks |
+| Resend volume plan, rate raise and webhook for email events | Week 10 (ask in week 1) | Days |
 | IPinfo Business plan | Week 3 | 1 day |
 | Coresignal plan upgrade (Premium at Beta) | Week 5 | 1 day |
 | Omniscient API work (Part 5.1) | Weeks 5–6 | In the build |
