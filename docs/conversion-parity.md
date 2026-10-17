@@ -337,10 +337,10 @@ The answer to Conversion's migration playbooks: an agent that reads the old tool
  Segment, PostHog, Stripe ─► /api/v1/events (web) ─► contact_events
  M1 sessions and signals ────────────────────────────► contact_events
                                    │
-     segment_refresh · workflow_step · ai_decide · ai_write · send · ses_event · page_publish
+     segment_refresh · workflow_step · ai_decide · ai_write · send · email_event · page_publish
      score_contact · route · sla_check · audience_sync · attribution · play_run · agent_run · migrate
                                    │
-  Amazon SES ◄─ send     Slack, Linear ◄─ agents     CRM ◄─ handoff, scores     Ads ◄─ audiences
+  Resend ◄─ send         Slack, Linear ◄─ agents     CRM ◄─ handoff, scores     Ads ◄─ audiences
 ```
 
 - No new Fly apps. `claritia-intel` runs every job; it grows from 512 MB to 2 GB at Beta and 3 × 2 GB at Growth.
@@ -367,8 +367,8 @@ The answer to Conversion's migration playbooks: an agent that reads the old tool
 | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | web, intel | Sheets, Google Ads |
 | `<SOURCE>_CLIENT_ID`, `<SOURCE>_CLIENT_SECRET` | web, intel | One pair per OAuth source (Mailchimp, Pipedrive, Zoho, Dynamics, Attio, Airtable, Notion, Zoom, LinkedIn, Meta, Klaviyo, Constant Contact, Kit, Intercom, Outreach, Salesloft, monday) |
 | `HOOK_SECRET` | web | Signs per-workspace webhook URLs |
-| `AWS_SES_REGION`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` | intel | Sending |
-| `SES_SNS_TOPIC_ARN` | web | Checks SES events |
+| `RESEND_API_KEY` | web, intel | Sending, domains |
+| `RESEND_WEBHOOK_SECRET` | web | Checks email events |
 | `TRACK_SECRET` | collect | Click and unsubscribe tokens |
 | `SECRETS_KEY` (exists) | web, intel | Seals every source credential |
 | `ANTHROPIC_API_KEY` (exists) | intel | Mapping, titles, Decide, Write, reasons, plays, agents, migration |
@@ -406,7 +406,7 @@ As in `docs/marketing-platform.md` M3:
 | Brand kit | Logo, colors and fonts read from the site, then edited |
 | Personal blocks | Shown only when a rule passes ("Show if industry is Fintech") |
 | Test send | To any teammate, with a chosen contact's data |
-| Sending | Amazon SES from the customer's domain, SPF, DKIM and DMARC checks, one-click unsubscribe, footer address, frequency cap, quiet hours by time zone, send-time by time zone |
+| Sending | Resend from the customer's domain, SPF, DKIM and DMARC checks, one-click unsubscribe, footer address, frequency cap, quiet hours by time zone, send-time by time zone |
 | Reports | Sent, delivered, human clicks, replies, unsubscribes, bounces, complaints, pipeline. Opens shown and marked unreliable. |
 | Campaign link | Recipients join a CRM campaign as Sent, then Responded on click |
 | A/B | Subject or body, split by percent, winner by clicks after a set time |
@@ -644,7 +644,7 @@ The 14-week plan's `crm_connections` and `crm_links` become `sources` and `sourc
 | `segment_refresh` | Contact change, hourly full | 3 |
 | `workflow_step` | `next_run_at` | 5 |
 | `ai_map`, `ai_title`, `ai_decide`, `ai_classify`, `ai_write` | As needed | 2, then a safe default |
-| `send`, `ses_event` | Broadcast, workflow, SNS | 5 |
+| `send`, `email_event` | Broadcast, workflow, Resend webhook | 5 |
 | `page_publish`, `funnel_check` | Publish, daily | 3 |
 | `score_contact`, `score_train` | Event (debounced 60 s), weekly | 3, 2 |
 | `route`, `sla_check` | Ready, timer | 5 |
@@ -698,7 +698,7 @@ Reliability rule: the import pipeline, the sync, the send pipeline, the workflow
 | CRM sync | 1,000 random changes on both sides with dropped webhooks, duplicate deliveries and 429s: both sides match, no echo loops, one log row per change |
 | CRM sync | A Salesforce lead converts to a contact: one Claritia contact, both links kept |
 | Segments | 30 rule types match a hand-counted fixture; fuzz with SQL-like values; custom object joins |
-| Email | SNS signature check, suppression at send time, one-click unsubscribe, cap and quiet hours, complaint storm pause, renders at 3 widths |
+| Email | Webhook signature check, suppression at send time, one-click unsubscribe, cap and quiet hours, complaint storm pause, renders at 3 widths |
 | Workflows | 10,000 enrollments with killed workers and retried jobs: none stuck or doubled |
 | Forms, pages | A submit with the network cut mid-request lands once; Funnel QA catches a broken form |
 | AI | Decide never returns a missing path; Write drops a made-up fact; mapping suggestions are cached; a passing step replays from cache |
@@ -722,7 +722,7 @@ Reliability rule: the import pipeline, the sync, the send pipeline, the workflow
 | 6 | Marketo, Pardot, Eloqua, HubSpot Marketing, Customer.io, Iterable, Braze, Intercom; other CRMs (Pipedrive, Zoho, Dynamics, Attio, Close, Copper, Freshsales, monday, Affinity); Airtable, Notion | Each passes its recorded test |
 | 7 | Live sources: forms, scheduling, events (Zoom, Cvent, Luma, Eventbrite, Goldcast, Livestorm, ON24), ad lead forms, Zapier, Make, n8n, `POST /api/v1/contacts/import` | A Typeform fill and a Zoom registration reach a contact in under 10 s |
 | 8 | `036_objects.sql`, custom objects, 7 warehouses, Segment, RudderStack, PostHog, Mixpanel, Amplitude, Stripe, Shopify, billing and support tools, data vendors, Outreach, Salesloft; segments with live count | 30 rule types pass; a warehouse row becomes an event on schedule |
-| 9 | `037_email.sql`, domains, SES, send guard, SNS, suppression at send | A test domain verifies and an email sends with one-click unsubscribe |
+| 9 | `037_email.sql`, domains, Resend, send guard, webhook events, suppression at send | A test domain verifies and an email sends with one-click unsubscribe |
 | 10 | Block editor, brand kit, tokens, preview, test send, broadcasts, A/B, reports, campaign link | A broadcast to 500 contacts sends and clicks show in the CRM campaign |
 | 11 | `038_workflows.sql`, engine, waits, branches, splits, exits, re-entry | 10,000-enrollment test passes |
 | 12 | Canvas, side panel, validation, versions, live counts | A 12-node workflow is built and published |
@@ -756,7 +756,7 @@ Assumptions: 10,000 contacts, 50,000 emails (20,000 from AI Write), 20,000 Decid
 | AI page builds | Sonnet, a few drafts | $1 |
 | **Claude subtotal** | | **About $46** |
 | Migration agent | Sonnet, one time, $20 to $40 per migration | One time |
-| Amazon SES | 50,000 emails at about $0.10 per 1,000 (check) | $5 |
+| Resend | 50,000 emails, share of the platform's volume plan (check) | $23 |
 | Source APIs | Customer's own plans; most are free to read | $0 |
 | Ads APIs | Free to call (check LinkedIn Marketing API terms) | $0 |
 | Warehouse queries | Run on the customer's warehouse | $0 |
@@ -769,16 +769,16 @@ Claude prices from `docs/marketing-platform.md` Part 11 (Haiku 5.5 $0.10/$0.50, 
 |---|---|---|
 | Claude ($46 per team) | $2,300 | $23,000 |
 | Migration agent (new teams: 10 a month at Beta, 50 at Growth, $30 each) | $300 | $1,500 |
-| Amazon SES | $250 (check) | $2,500 (check) |
-| Dedicated sending IPs | $50, 2 IPs (check) | $250, 10 IPs (check) |
+| Resend | $1,150 (check) | $5,000 (custom quote, check) |
+| Resend dedicated IPs | $50, 2 IPs (check) | $250, 10 IPs (check) |
 | Fly: `claritia-intel` to 2 GB, then 3 × 2 GB; `collect` serving pages | $25 (check) | $150 (check) |
 | Supabase: compute, disk for contacts, events and staging, storage for uploads (files deleted after 30 days) | $75 (check) | $350 (check) |
 | Cloudflare Turnstile for forms | $0 (free tier, check) | $0 (check) |
 | Salesforce Developer org, HubSpot test account and vendor sandboxes for CI | $0 | $0 |
-| **Added by this plan** | **About $3,000** | **About $27,750** |
-| **Per team** | **About $60** | **About $56** |
+| **Added by this plan** | **About $3,900** | **About $30,250** |
+| **Per team** | **About $78** | **About $61** |
 
-At the proposed $299 Starter price, gross margin is about 80% at Beta and 81% at Growth, and higher on the $799 Growth plan (check against final pricing). The migration line falls once early customers are moved.
+At the proposed $299 Starter price, gross margin is about 74% at Beta and 80% at Growth, and higher on the $799 Growth plan (check against final pricing). The migration line falls once early customers are moved.
 
 ---
 
@@ -874,7 +874,7 @@ Records (custom objects and rich fields from week 8, pulled forward so imports a
 | HubSpot public app (client id, secret, scopes) | Founder |
 | Salesforce connected app and a Developer org | Founder |
 | Google Cloud OAuth app for Sheets, with verification for the sheets scope | Founder |
-| Amazon SES production access in ap-northeast-1 (request now; takes days) | Founder |
+| Resend volume plan and rate raise; verify `mail.tryclaritia.com` for sending | Founder |
 | OAuth apps for the week 5 and 6 sources (Mailchimp, Klaviyo, Pipedrive, Zoho, Dynamics, Attio, Constant Contact, Kit, Intercom) | Founder, one per week ahead of its build |
 | LinkedIn Marketing API access and Meta app review for lead forms and audiences | Founder, start by week 10 |
 | Lawyer: data vendor contacts with "No basis", ads audiences from strict regions, consent proof from imported tools | Founder |
