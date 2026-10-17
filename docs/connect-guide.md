@@ -6,8 +6,13 @@ Menu names inside other tools change often. Where a path couldn't be confirmed o
 
 ## Before any tool
 
-1. **Same `SECRETS_KEY` on Render and Fly.** Never change it after the first tool is connected.
-2. **Sign-in keys on both Render and Fly.** For every tool with one-click sign-in, `<TOOL>_CLIENT_ID` and `<TOOL>_CLIENT_SECRET` go on Render (`claritia`) and on Fly (`claritia-intel`). Render makes the sign-in link. Fly refreshes it when it runs out.
+1. **Same `SECRETS_KEY` on `claritia-web` and `claritia-intel`.** Never change it after the first tool is connected.
+2. **Sign-in keys on both Fly apps.** For every tool with one-click sign-in, `<TOOL>_CLIENT_ID` and `<TOOL>_CLIENT_SECRET` go on `claritia-web` (serves `app.tryclaritia.com` and makes the sign-in link) and on `claritia-intel` (refreshes it when it runs out):
+   ```
+   fly secrets set --app claritia-web  SALESFORCE_CLIENT_ID='…' SALESFORCE_CLIENT_SECRET='…'
+   fly secrets set --app claritia-intel SALESFORCE_CLIENT_ID='…' SALESFORCE_CLIENT_SECRET='…'
+   ```
+   The Render service `claritia` doesn't serve `app.tryclaritia.com`, so keys set only there never reach the app.
 3. **One return address for every sign-in app:** `https://app.tryclaritia.com/api/sources/callback`
 4. **Test with a test account first.** Connect one tool, check it, then move on.
 
@@ -35,7 +40,7 @@ If it shows **Error**:
    - Redirect URL: `https://app.tryclaritia.com/api/sources/callback`
    - Required scopes, exactly: `oauth`, `crm.objects.contacts.read`, `crm.objects.contacts.write`, `crm.objects.companies.read`, `crm.lists.read`, `crm.schemas.contacts.read`, `crm.schemas.contacts.write`
    - Optional scopes: `timeline.read`, `timeline.write`, `crm.objects.owners.read`
-3. Copy **Client ID** and **Client secret** into `HUBSPOT_CLIENT_ID` and `HUBSPOT_CLIENT_SECRET` on Render and Fly.
+3. Copy **Client ID** and **Client secret** into `HUBSPOT_CLIENT_ID` and `HUBSPOT_CLIENT_SECRET` on `claritia-web` and `claritia-intel`.
 4. **Webhooks** tab (optional, for changes within seconds):
    - Target URL: `https://app.tryclaritia.com/api/hooks/hubspot`
    - Contact: creation, deletion, merge, privacy deletion.
@@ -62,7 +67,7 @@ If it shows **Error**:
    - Scopes: "Manage user data via APIs (api)" and "Perform requests at any time (refresh_token, offline_access)".
    - Require PKCE: on. Require secret for web server flow: on.
 3. Policies: "All users may self-authorize". Refresh token: "valid until revoked".
-4. Consumer Key and Secret go into `SALESFORCE_CLIENT_ID` and `SALESFORCE_CLIENT_SECRET`. These are set on Render; they still need to go on Fly.
+4. Consumer Key and Secret go into `SALESFORCE_CLIENT_ID` and `SALESFORCE_CLIENT_SECRET`. Both go on `claritia-web` and `claritia-intel`.
 
 **Per customer org (one time):** Setup → Object Manager → **Lead** → Fields & Relationships → New:
 - `Claritia Score`: Number, 3 digits, 0 decimals → `Claritia_Score__c`
@@ -81,7 +86,7 @@ Do the same on **Contact**. Give the connecting user edit access to all four fie
 
 ### Omniscient (two-way)
 
-1. Omniscient must have migration `032_connect.sql` live, with `SUPABASE_SECRET_KEY` set on its Render.
+1. Omniscient must have migration `032_connect.sql` live, with `SUPABASE_SECRET_KEY` set on its server.
 2. Settings › Tools › Omniscient → **Connect Omniscient**.
 3. An Omniscient owner or admin clicks **Allow**.
 
@@ -93,7 +98,7 @@ Do the same on **Contact**. Give the connecting user edit access to all four fie
 1. developers.pipedrive.com → Developer Hub → **Create an app** (private is fine).
 2. Callback URL: `https://app.tryclaritia.com/api/sources/callback`
 3. Scopes: Contacts read, Organizations read, Users read (check the names on the form).
-4. Client ID and secret go into `PIPEDRIVE_CLIENT_ID` and `PIPEDRIVE_CLIENT_SECRET` on Render and Fly.
+4. Client ID and secret go into `PIPEDRIVE_CLIENT_ID` and `PIPEDRIVE_CLIENT_SECRET` on `claritia-web` and `claritia-intel`.
 
 **Connect:** **Connect Pipedrive** → Allow.
 
@@ -107,7 +112,7 @@ Do the same on **Contact**. Give the connecting user edit access to all four fie
 1. build.attio.com → create an app → **OAuth**.
 2. Redirect URI: `https://app.tryclaritia.com/api/sources/callback`
 3. Scopes: read records, read objects, read the user's workspace (check the names on the form).
-4. `ATTIO_CLIENT_ID` and `ATTIO_CLIENT_SECRET` on Render and Fly.
+4. `ATTIO_CLIENT_ID` and `ATTIO_CLIENT_SECRET` on `claritia-web` and `claritia-intel`.
 
 **Connect:** **Connect Attio** → Allow.
 
@@ -132,7 +137,7 @@ Do the same on **Contact**. Give the connecting user edit access to all four fie
 **One-time app setup (us):**
 1. Mailchimp → Profile → Extras → **Registered apps** → Register an app.
 2. Redirect URI: `https://app.tryclaritia.com/api/sources/callback`
-3. `MAILCHIMP_CLIENT_ID` and `MAILCHIMP_CLIENT_SECRET` on Render and Fly. No scopes.
+3. `MAILCHIMP_CLIENT_ID` and `MAILCHIMP_CLIENT_SECRET` on `claritia-web` and `claritia-intel`. No scopes.
 
 **Connect:** **Connect Mailchimp** → Allow.
 
@@ -277,7 +282,7 @@ All of these work the same way:
 
 1. Make a **read-only** user. The connect screen shows the exact grant to run.
 2. The database needs a **public address**, because private network addresses are refused.
-3. If the database has an IP allowlist, add Claritia's outbound addresses: Render → `claritia` → **Connect** → Outbound, and the addresses of Fly `claritia-intel`.
+3. If the database has an IP allowlist, add the outbound addresses of Fly `claritia-web` (runs Test query) and `claritia-intel` (runs the pulls). Fly machines need static egress IPs for this (check: `fly ips allocate-egress`).
 4. Write the query Claritia runs on a schedule:
    - Return one row per person, with an `email` column, a unique id column, and an update time column.
    - Use `:cursor` for the last update time read, for example:
