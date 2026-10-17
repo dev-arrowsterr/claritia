@@ -1,5 +1,5 @@
 // Opportunities from CRMs (docs/marketing-platform.md, CRM). Each connector reads its deals into one shape; this
-// turns them into rows for opportunities_ingest (supabase/migrations/039_crm.sql). Stages keep the CRM's names, with
+// turns them into rows for opportunities_ingest (supabase/migrations/044_crm.sql). Stages keep the CRM's names, with
 // won and lost always landing on the same two values so boards and reports can tell them apart.
 
 import type { RawRecord } from "./types.ts";

@@ -1,4 +1,4 @@
-// Opportunities on a real database (supabase/migrations/039_crm.sql): HubSpot deals through 429s and an expired
+// Opportunities on a real database (supabase/migrations/044_crm.sql): HubSpot deals through 429s and an expired
 // token land once each, follow stage changes and deletes, link to the contacts the same source synced, and a portal
 // without the deals scope still syncs its contacts.
 import assert from "node:assert/strict";
